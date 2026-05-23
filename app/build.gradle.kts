@@ -44,7 +44,13 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      if (file("${rootDir}/debug.keystore").exists()) {
+        signingConfig = signingConfigs.getByName("debugConfig")
+      } else {
+        // Fall back to default Android Gradle Plugin's own debug signing config
+        // so that it compiles out-of-the-box when cloned/built on local computers.
+        signingConfig = signingConfigs.getByName("debug")
+      }
     }
   }
   compileOptions {
