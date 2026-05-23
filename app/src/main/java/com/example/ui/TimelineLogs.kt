@@ -103,73 +103,65 @@ fun TimelineLogs(
                     )
                 }
             } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 200.dp) // limit log box height so it scrolls cleanly
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        itemsIndexed(logs, key = { _, log -> log.id }) { index, log ->
-                            Row(
+                    logs.take(6).forEach { log ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Dynamic bullet indicator
+                            val (icon, iconColor) = when (log.iconName) {
+                                "home" -> Pair(Icons.Default.Home, GlowingEmerald)
+                                "away" -> Pair(Icons.Default.LocationOn, PrimaryCosmic)
+                                "battery" -> Pair(Icons.Default.Refresh, ActiveAmber)
+                                "critical" -> Pair(Icons.Default.Warning, ErrorRed)
+                                else -> Pair(Icons.Default.Check, RadarCyan)
+                            }
+
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .animateItemPlacement(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    .size(22.dp)
+                                    .background(iconColor.copy(alpha = 0.15f), CircleShape),
+                                contentAlignment = Alignment.Center
                             ) {
-                                // Dynamic bullet indicator
-                                val (icon, iconColor) = when (log.iconName) {
-                                    "home" -> Pair(Icons.Default.Home, GlowingEmerald)
-                                    "away" -> Pair(Icons.Default.LocationOn, PrimaryCosmic)
-                                    "battery" -> Pair(Icons.Default.Refresh, ActiveAmber)
-                                    "critical" -> Pair(Icons.Default.Warning, ErrorRed)
-                                    else -> Pair(Icons.Default.Check, RadarCyan)
-                                }
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = log.iconName,
+                                    tint = iconColor,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
 
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .background(iconColor.copy(alpha = 0.15f), CircleShape),
-                                    contentAlignment = Alignment.Center
+                            // Text Detail
+                            Column(
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = log.iconName,
-                                        tint = iconColor,
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                }
-
-                                // Text Detail
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = log.memberName,
-                                            color = TextPrimary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = timeFormat.format(Date(log.timestamp)),
-                                            color = SecondarySlate,
-                                            fontSize = 9.sp
-                                        )
-                                    }
                                     Text(
-                                        text = log.actionText,
+                                        text = log.memberName,
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = timeFormat.format(Date(log.timestamp)),
                                         color = SecondarySlate,
-                                        fontSize = 10.sp
+                                        fontSize = 9.sp
                                     )
                                 }
+                                Text(
+                                    text = log.actionText,
+                                    color = SecondarySlate,
+                                    fontSize = 10.sp
+                                )
                             }
                         }
                     }

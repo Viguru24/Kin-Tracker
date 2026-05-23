@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FamilyDao {
-    @Query("SELECT * FROM family_members")
+    @Query("SELECT * FROM family_members ORDER BY CASE WHEN id = 'me' THEN 0 ELSE 1 END, name ASC")
     fun getFamilyMembers(): Flow<List<FamilyMember>>
 
     @Query("SELECT * FROM family_members")

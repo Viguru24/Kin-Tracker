@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
                             bestLastLocation = loc
                         }
                     }
-                } catch (e: SecurityException) { /* Handled */ }
+                } catch (e: Exception) { /* Handled safely */ }
             }
             if (isNetworkEnabled) {
                 try {
@@ -159,30 +159,53 @@ class MainActivity : ComponentActivity() {
                             bestLastLocation = loc
                         }
                     }
-                } catch (e: SecurityException) { /* Handled */ }
+                } catch (e: Exception) { /* Handled safely */ }
             }
             bestLastLocation?.let { updateUserPosition(it) }
 
             // 2. Register for ultra-low latency updates (1 second update cycles, 0 meters delta threshold)
             if (hasFine && isGpsEnabled) {
-                locationManager?.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    1000L,
-                    0.0f,
-                    locationListener
-                )
+                try {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000L,
+                        0.0f,
+                        locationListener,
+                        android.os.Looper.getMainLooper()
+                    )
+                } catch (e: Exception) {
+                    // Safe fallback
+                }
             }
             if (isNetworkEnabled) {
-                // If hasFine, we can register Network provider too. If hasCoarse, we can register it as well.
-                locationManager?.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    1000L,
-                    0.0f,
-                    locationListener
-                )
+                try {
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        1000L,
+                        0.0f,
+                        locationListener,
+                        android.os.Looper.getMainLooper()
+                    )
+                } catch (e: Exception) {
+                    // Safe fallback
+                }
             }
         } catch (e: Exception) {
             // Catch any security or unsupported provider/illegal argument errors safely
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        checkAndRequestLocationPermissions()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            locationManager?.removeUpdates(locationListener)
+        } catch (e: Exception) {
+            // Safe fallback
         }
     }
 
@@ -229,8 +252,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
-        checkAndRequestLocationPermissions()
     }
 }
 

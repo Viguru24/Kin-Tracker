@@ -41,8 +41,20 @@ class FamilyRepository(private val familyDao: FamilyDao) {
             }
         }
 
+        // Clean up duplicate automated simulate "louis" member.
+        // The real owner is "me" presenting as Louis (Dad).
+        val currentRefreshed = familyDao.getFamilyMembersOnce()
+        val hasMe = currentRefreshed.any { it.id == "me" }
+        val hasLouis = currentRefreshed.any { it.id == "louis" }
+        if (hasLouis) {
+            val louisMember = currentRefreshed.firstOrNull { it.id == "louis" }
+            if (louisMember != null) {
+                familyDao.deleteFamilyMember(louisMember)
+            }
+        }
+
         val updatedMembers = familyDao.getFamilyMembersOnce()
-        if (updatedMembers.isEmpty()) {
+        if (updatedMembers.isEmpty() || (updatedMembers.size == 1 && updatedMembers.first().id == "me")) {
             val defaultMembers = listOf(
                 FamilyMember(
                     id = "isabel",
@@ -71,19 +83,6 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     etaMinutes = 12
                 ),
                 FamilyMember(
-                    id = "louis",
-                    name = "Louis (Dad)",
-                    avatarColorHex = "#42A5F5",
-                    x = -1.1,
-                    y = -0.6,
-                    batteryPercentage = 95,
-                    isCharging = false,
-                    speedMph = 72.0,
-                    statusText = "Commuting via Train",
-                    isComingHome = true,
-                    etaMinutes = 10
-                ),
-                FamilyMember(
                     id = "eloise",
                     name = "Eloise (Younger Daughter)",
                     avatarColorHex = "#FF9800",
@@ -103,7 +102,6 @@ class FamilyRepository(private val familyDao: FamilyDao) {
             insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active: tracking Louis, Annette, Isabel & Eloise", iconName = "check_in"))
             insertLog(ActivityLog(memberId = "isabel", memberName = "Isabel (Older Daughter)", actionText = "entered High School Zone", iconName = "away"))
             insertLog(ActivityLog(memberId = "annette", memberName = "Annette (Mama)", actionText = "arrived at Supermarket", iconName = "away"))
-            insertLog(ActivityLog(memberId = "louis", memberName = "Louis (Dad)", actionText = "commencing route: Commute Home", iconName = "home"))
             insertLog(ActivityLog(memberId = "eloise", memberName = "Eloise (Younger Daughter)", actionText = "checked in of Dance Studio", iconName = "away"))
         }
     }
