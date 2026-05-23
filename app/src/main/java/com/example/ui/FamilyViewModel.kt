@@ -50,8 +50,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val groupSyncToken = MutableStateFlow("")
     val myDeviceName = MutableStateFlow("Louis (Dad)")
     val myDeviceColor = MutableStateFlow("#AA22FF")
-    val cloudStatusText = MutableStateFlow("Local / offline simulator mode")
-    val isSimulationModeEnabled = MutableStateFlow(true)
+    val cloudStatusText = MutableStateFlow("Local / offline tracking mode")
+    val isSimulationModeEnabled = MutableStateFlow(false)
 
     // Account Authentication State (Auto-signed in by default)
     val isUserSignedIn = MutableStateFlow(true)
@@ -69,6 +69,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             putString("groupSyncToken", groupSyncToken.value)
             putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
             putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
+            putFloat("homeLat", homeLat.toFloat())
+            putFloat("homeLng", homeLng.toFloat())
+            putBoolean("isHomeCalibrated", isHomeCalibrated)
             apply()
         }
     }
@@ -82,7 +85,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
         groupSyncToken.value = prefs.getString("groupSyncToken", "") ?: ""
         isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true)
-        isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", true)
+        isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false)
+        homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
+        homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
+        isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", false)
     }
 
     fun toggleSimulationMode(enabled: Boolean) {
@@ -91,7 +97,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             savePreferences()
 
             if (enabled) {
-                repository.ensureDefaultDataInserted()
+                repository.ensureDefaultDataInserted(homeLat, homeLng)
                 _uiEvents.emit("Demo mock members activated.")
             } else {
                 // Production mode: Purge all default simulated mock members from the SQLite database
@@ -139,6 +145,20 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     private var cloudSyncJob: Job? = null
 
+    // GPS CALIBRATION ENGINE & COORDINATES TRANSLATOR
+    val homeLatFlow = kotlinx.coroutines.flow.MutableStateFlow(51.332308)
+    val homeLngFlow = kotlinx.coroutines.flow.MutableStateFlow(-0.117188)
+
+    var homeLat: Double
+        get() = homeLatFlow.value
+        set(value) { homeLatFlow.value = value }
+
+    var homeLng: Double
+        get() = homeLngFlow.value
+        set(value) { homeLngFlow.value = value }
+
+    var isHomeCalibrated = false
+
     init {
         val database = AppDatabase.getDatabase(application)
         repository = FamilyRepository(database.familyDao())
@@ -164,7 +184,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         // Seed default parameters and start the engine
         viewModelScope.launch {
             if (isSimulationModeEnabled.value) {
-                repository.ensureDefaultDataInserted()
+                repository.ensureDefaultDataInserted(homeLat, homeLng)
             } else {
                 // Production mode: Purge all default simulated mock members from the SQLite database
                 val current = repository.getFamilyMembersOnce()
@@ -184,8 +204,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     id = "me",
                     name = myDeviceName.value,
                     avatarColorHex = myDeviceColor.value,
-                    x = -0.15,
-                    y = 0.25,
+                    x = homeLng,
+                    y = homeLat,
                     batteryPercentage = 100,
                     isCharging = false,
                     speedMph = 0.0,
@@ -219,13 +239,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         simulationJob = viewModelScope.launch {
             while (isActive) {
                 delay(1000) // update tick every 1 second for ultra-responsive map movement
-                if (isSimulationPaused.value) continue
+                if (isSimulationPaused.value || !isSimulationModeEnabled.value) continue
 
                 val members = familyMembers.value
                 if (members.isEmpty()) continue
 
                 for (member in members) {
                     if (member.id == "me") continue // Let physical/simulated device GPS handle our location
+                    if (member.id.startsWith("device_")) continue // Never simulate real cloud devices
                     var updated = false
                     var newX = member.x
                     var newY = member.y
@@ -238,15 +259,18 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
                     // 1. Simulate coming home physics (linear interpolation with snapping)
                     if (newIsComingHome) {
-                        val distance = hypot(newX, newY)
-                        if (distance < 0.08) {
+                        val latDiff = newY - homeLat
+                        val lngDiff = newX - homeLng
+                        val distanceInDegrees = hypot(lngDiff, latDiff)
+                        
+                        if (distanceInDegrees < 0.0005) { // within ~50 meters
                             // Arrived Home successfully!
-                            newX = 0.0
-                            newY = 0.0
+                            newX = homeLng
+                            newY = homeLat
                             newSpeed = 0.0
                             newIsComingHome = false
                             newEta = 0
-                            newStatus = "At Home"
+                            newStatus = "At Home (Live GPS)"
                             updated = true
 
                             // log arrival
@@ -261,10 +285,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                             _uiEvents.emit("${member.name} has arrived Home!")
                             triggeredApproachingHomeAlerts.remove(member.id) // Clear triggered flag on arrival
                         } else {
-                            // Step closer to home (adjusted stepRatio to 0.03 for 1-second high-fidelity ticks)
-                            val stepRatio = 0.03 
-                            val dx = -newX / distance
-                            val dy = -newY / distance
+                            // Step closer to home (moving about 10-15 meters per tick)
+                            val stepRatio = 0.0001
+                            val dx = -lngDiff / distanceInDegrees
+                            val dy = -latDiff / distanceInDegrees
                             newX += dx * stepRatio
                             newY += dy * stepRatio
                             
@@ -275,7 +299,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                                 "louis" -> Random.nextDouble(62.0, 78.0)     // Train Transit
                                 else -> Random.nextDouble(24.0, 42.0)        // Driving
                             }
-                            newEta = (distance * 20).toInt().coerceAtLeast(1)
+                            // Roughly calculate distance in km
+                            val distanceKm = distanceInDegrees * 111.0
+                            newEta = (distanceKm * 1.5).toInt().coerceAtLeast(1)
                             newStatus = when (member.id) {
                                 "eloise" -> "Walking from School"
                                 "isabel" -> "Biking from High School"
@@ -285,14 +311,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                             }
                             updated = true
 
-                            // Proximity Warning Alert: trigger within 0.3 units (~750m) approaching Home
-                            if (distance <= 0.30 && !triggeredApproachingHomeAlerts.contains(member.id)) {
+                            // Proximity Warning Alert: trigger within 400m
+                            if (distanceKm <= 0.40 && !triggeredApproachingHomeAlerts.contains(member.id)) {
                                 triggeredApproachingHomeAlerts.add(member.id)
                                 repository.insertLog(
                                     ActivityLog(
                                         memberId = member.id,
                                         memberName = member.name,
-                                        actionText = "is close to Home (~750m away)",
+                                        actionText = "is close to Home (~400m away)",
                                         iconName = "home"
                                     )
                                 )
@@ -302,13 +328,17 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         triggeredApproachingHomeAlerts.remove(member.id) // Reset triggered flag when far away/wandering
                         // 2. Local wandering logic if not home and not currently heading home
-                        val distFromHome = hypot(newX, newY)
-                        if (distFromHome > 0.01) {
-                            // Slightly drift to look alive (adjusted delta to 0.01 for 1-second high-fidelity ticks)
-                            val deltaX = Random.nextDouble(-0.01, 0.01)
-                            val deltaY = Random.nextDouble(-0.01, 0.01)
-                            newX = (newX + deltaX).coerceIn(-1.5, 1.5)
-                            newY = (newY + deltaY).coerceIn(-1.5, 1.5)
+                        val latDiff = newY - homeLat
+                        val lngDiff = newX - homeLng
+                        val distanceInDegrees = hypot(lngDiff, latDiff)
+                        val distanceKm = distanceInDegrees * 111.0
+                        
+                        if (distanceKm > 0.05) { // more than 50m away from home
+                            // Slightly drift to look alive in degrees
+                            val deltaX = Random.nextDouble(-0.0001, 0.0001)
+                            val deltaY = Random.nextDouble(-0.0001, 0.0001)
+                            newX = (newX + deltaX).coerceIn(homeLng - 0.08, homeLng + 0.08)
+                            newY = (newY + deltaY).coerceIn(homeLat - 0.08, homeLat + 0.08)
                             newSpeed = (member.speedMph + Random.nextDouble(-0.8, 0.8)).coerceIn(1.0, 8.0)
                             updated = true
                         } else {
@@ -388,8 +418,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val m = members.firstOrNull { it.id == memberId } ?: return@launch
             if (m.isComingHome) return@launch
 
-            val dist = hypot(m.x, m.y)
-            if (dist < 0.05) {
+            val distanceInDegrees = hypot(m.x - homeLng, m.y - homeLat)
+            val distKm = distanceInDegrees * 111.0
+            if (distKm < 0.05) {
                 _uiEvents.emit("${m.name} is already at Home!")
                 return@launch
             }
@@ -410,7 +441,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 isComingHome = true,
                 speedMph = startSpeed,
                 statusText = startStatusText,
-                etaMinutes = (dist * 20).toInt().coerceAtLeast(2)
+                etaMinutes = (distKm * 1.5).toInt().coerceAtLeast(2)
             )
             repository.updateMember(updated)
             repository.insertLog(
@@ -435,8 +466,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             // Distribute at random quadrants
             val angle = Random.nextDouble(0.0, 2 * Math.PI)
             val dist = Random.nextDouble(0.7, 1.4)
-            val newX = dist * Math.cos(angle)
-            val newY = dist * Math.sin(angle)
+            val newX = homeLng + (dist * Math.cos(angle) * 0.01)
+            val newY = homeLat + (dist * Math.sin(angle) * 0.01)
 
             val transitSpeed = when (m.id) {
                 "eloise" -> 3.2      // Walking
@@ -472,8 +503,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val m = members.firstOrNull { it.id == memberId } ?: return@launch
 
             val updated = m.copy(
-                x = 0.0,
-                y = 0.0,
+                x = homeLng,
+                y = homeLat,
                 isComingHome = false,
                 speedMph = 0.0,
                 statusText = "At Home",
@@ -522,8 +553,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 id = mId,
                 name = name,
                 avatarColorHex = hexColor,
-                x = dist * Math.cos(angle),
-                y = dist * Math.sin(angle),
+                x = homeLng + (dist * Math.cos(angle) * 0.01),
+                y = homeLat + (dist * Math.sin(angle) * 0.01),
                 batteryPercentage = Random.nextInt(40, 95),
                 isCharging = false,
                 speedMph = 4.5,
@@ -594,20 +625,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // GPS CALIBRATION ENGINE & COORDINATES TRANSLATOR
-    val homeLatFlow = kotlinx.coroutines.flow.MutableStateFlow(51.332308)
-    val homeLngFlow = kotlinx.coroutines.flow.MutableStateFlow(-0.117188)
-
-    var homeLat: Double
-        get() = homeLatFlow.value
-        set(value) { homeLatFlow.value = value }
-
-    var homeLng: Double
-        get() = homeLngFlow.value
-        set(value) { homeLngFlow.value = value }
-
-    var isHomeCalibrated = true
-
     fun updateUserLocation(lat: Double, lng: Double, speed: Float, batteryLevel: Int, isCharging: Boolean) {
         viewModelScope.launch {
             val members = familyMembers.value
@@ -626,6 +643,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         iconName = "check_in"
                     )
                 )
+                savePreferences()
             }
 
             // Calculate offset distance in degrees relative to calibrated Home
@@ -635,11 +653,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             // 1 degree lat is ~111km, 1 degree lng is ~111 * cos(lat) ~ 88km
             val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(homeLat))
             val yDistanceKm = latDiff * 111.0
-
-            // Distance mapping: e.g. 1 kilometer maps to 0.4 units on the [-1.5, 1.5] radar mapping axis
-            val mappedX = (xDistanceKm * 0.4).coerceIn(-1.5, 1.5)
-            // Canvas standard: Positive coordinates draw downwards, geography standard: North is upwards. Map accordingly.
-            val mappedY = -(yDistanceKm * 0.4).coerceIn(-1.5, 1.5)
 
             // Speed in MPH
             val speedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
@@ -672,8 +685,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             val updated = me.copy(
-                x = mappedX,
-                y = mappedY,
+                x = lng,
+                y = lat,
                 batteryPercentage = batteryLevel,
                 isCharging = isCharging,
                 speedMph = speedMph,

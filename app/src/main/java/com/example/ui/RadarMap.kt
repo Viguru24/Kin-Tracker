@@ -54,10 +54,15 @@ fun RadarMap(
 
     // Synchronize OSMDroid Global configurations safely
     LaunchedEffect(Unit) {
-        Configuration.getInstance().userAgentValue = context.packageName
         try {
+            Configuration.getInstance().load(context.applicationContext, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+            Configuration.getInstance().userAgentValue = context.packageName
             val cacheDir = File(context.cacheDir, "osmdroid")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+            }
             Configuration.getInstance().osmdroidTileCache = cacheDir
+            Configuration.getInstance().osmdroidBasePath = cacheDir
         } catch (e: Exception) {
             // Safe fallback
         }
@@ -109,16 +114,8 @@ fun RadarMap(
 
                 // 2. Draw active family members and connect transit paths
                 members.forEach { member ->
-                    // Reverse canvas map coordinates (from FamilyViewModel scaling [-1.5, 1.5])
-                    // into actual geographic latitude and longitude diff offsets relative to home
-                    val xDistanceKm = member.x / 0.4
-                    val yDistanceKm = -member.y / 0.4
-
-                    val latDiff = yDistanceKm / 111.0
-                    val lngDiff = xDistanceKm / (111.0 * Math.cos(Math.toRadians(homeLat)))
-
-                    val memberLat = homeLat + latDiff
-                    val memberLng = homeLng + lngDiff
+                    val memberLat = member.y
+                    val memberLng = member.x
                     val memberGeo = GeoPoint(memberLat, memberLng)
 
                     val isSelected = member.id == selectedMemberId
@@ -195,19 +192,19 @@ fun RadarMap(
             }
         )
 
-        // FLOWING OVERLAY #1: STYLE SELECTION PANEL (Map, Midnight, Retro Green)
+        // FLOWING OVERLAY #1: STYLE SELECTION PANEL (Map, Midnight, Retro Green) - Highly Compact Design
         Surface(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(6.dp)
                 .align(Alignment.TopStart),
             color = Color.White.copy(alpha = 0.95f),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(8.dp),
             border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 4.dp
+            shadowElevation = 2.dp
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf(
@@ -218,67 +215,18 @@ fun RadarMap(
                     val isSelected = mapTypeMode == mode
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .background(if (isSelected) PrimaryCosmic else Color.Transparent)
                             .clickable { mapTypeMode = mode }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = label,
                             color = if (isSelected) Color.White else TextSecondary,
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                }
-            }
-        }
-
-        // FLOWING OVERLAY #2: ZOOM INDICATOR & ZOOM MODIFIERS
-        Column(
-            modifier = Modifier
-                .padding(12.dp)
-                .align(Alignment.TopEnd),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            horizontalAlignment = Alignment.End
-        ) {
-            Surface(
-                color = Color.Black.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = "ZOOM: ${mapViewRef?.zoomLevelDouble?.let { (it * 10).toInt() / 10.0 } ?: 15.5}x",
-                    color = Color.White,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Button(
-                    onClick = { mapViewRef?.controller?.zoomIn() },
-                    modifier = Modifier.size(34.dp),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = TextPrimary),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, SlateBorder)
-                ) {
-                    Text("+", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Button(
-                    onClick = { mapViewRef?.controller?.zoomOut() },
-                    modifier = Modifier.size(34.dp),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = TextPrimary),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, SlateBorder)
-                ) {
-                    Text("-", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

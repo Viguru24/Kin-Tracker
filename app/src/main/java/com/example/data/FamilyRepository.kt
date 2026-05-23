@@ -30,7 +30,7 @@ class FamilyRepository(private val familyDao: FamilyDao) {
         familyDao.clearActivityLogs()
     }
 
-    suspend fun ensureDefaultDataInserted() {
+    suspend fun ensureDefaultDataInserted(homeLat: Double, homeLng: Double) {
         // Query current list of members
         val currentMembers = familyDao.getFamilyMembersOnce()
         // If they contain any of the old IDs, clear database to initialize correctly
@@ -60,8 +60,8 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     id = "isabel",
                     name = "Isabel (Older Daughter)",
                     avatarColorHex = "#26A69A",
-                    x = 0.8,
-                    y = -0.5,
+                    x = homeLng + 0.004,
+                    y = homeLat + 0.003,
                     batteryPercentage = 78,
                     isCharging = false,
                     speedMph = 0.0,
@@ -73,8 +73,8 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     id = "annette",
                     name = "Annette (Mama)",
                     avatarColorHex = "#EC407A",
-                    x = 0.4,
-                    y = 0.7,
+                    x = homeLng - 0.003,
+                    y = homeLat + 0.005,
                     batteryPercentage = 84,
                     isCharging = true,
                     speedMph = 0.0,
@@ -86,8 +86,8 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     id = "eloise",
                     name = "Eloise (Younger Daughter)",
                     avatarColorHex = "#FF9800",
-                    x = -0.4,
-                    y = 0.9,
+                    x = homeLng - 0.005,
+                    y = homeLat - 0.004,
                     batteryPercentage = 64,
                     isCharging = false,
                     speedMph = 4.5,
@@ -99,7 +99,7 @@ class FamilyRepository(private val familyDao: FamilyDao) {
             familyDao.insertFamilyMembers(defaultMembers)
 
             // Insert initial logs
-            insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active: tracking Louis, Annette, Isabel & Eloise", iconName = "check_in"))
+            insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active", iconName = "check_in"))
             insertLog(ActivityLog(memberId = "isabel", memberName = "Isabel (Older Daughter)", actionText = "entered High School Zone", iconName = "away"))
             insertLog(ActivityLog(memberId = "annette", memberName = "Annette (Mama)", actionText = "arrived at Supermarket", iconName = "away"))
             insertLog(ActivityLog(memberId = "eloise", memberName = "Eloise (Younger Daughter)", actionText = "checked in of Dance Studio", iconName = "away"))

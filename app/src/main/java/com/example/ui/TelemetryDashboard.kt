@@ -43,7 +43,9 @@ fun TelemetryDashboard(
     onPing: (String) -> Unit,
     onUpdateMember: (FamilyMember) -> Unit,
     onDeleteMember: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    homeLat: Double = 51.332308,
+    homeLng: Double = -0.117188
 ) {
     var memberToEdit by remember { mutableStateOf<FamilyMember?>(null) }
     var memberToDelete by remember { mutableStateOf<FamilyMember?>(null) }
@@ -478,7 +480,7 @@ fun TelemetryDashboard(
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Text(
-                                    text = "Lat: ${(37.7749 + member.y * 0.015).toString().take(7)}, Lng: ${(-122.4194 + member.x * 0.015).toString().take(8)}",
+                                    text = "Lat: ${member.y.toString().take(7)}, Lng: ${member.x.toString().take(8)}",
                                     color = SecondarySlate,
                                     fontSize = 10.sp
                                 )
@@ -508,6 +510,8 @@ fun TelemetryDashboard(
                             }
 
                             // Dynamic ETA home indicator
+                            val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                            val isAtHome = dist < 0.05 || member.statusText.contains("At Home")
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -521,12 +525,12 @@ fun TelemetryDashboard(
                                 Text(
                                     text = when {
                                         member.isComingHome -> "ETA: ${member.etaMinutes}m"
-                                        member.x == 0.0 && member.y == 0.0 -> "At Home"
+                                        isAtHome -> "At Home"
                                         else -> "Away"
                                     },
                                     color = when {
                                         member.isComingHome -> RadarCyan
-                                        member.x == 0.0 && member.y == 0.0 -> GlowingEmerald
+                                        isAtHome -> GlowingEmerald
                                         else -> SecondarySlate
                                     },
                                     fontSize = 10.sp,
@@ -554,11 +558,14 @@ fun TelemetryDashboard(
                                     modifier = Modifier.padding(bottom = 6.dp)
                                 )
 
-                                FlowRow(
+                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
+                                 ) {
+                                    val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                                    val isAtHome = dist < 0.05 || member.statusText.contains("At Home")
+
                                     // 1. Send Ping Alert Button
                                     Button(
                                         onClick = { onPing(member.id) },
@@ -578,7 +585,7 @@ fun TelemetryDashboard(
                                     }
 
                                     // 2. Call Home / Commute Home Button
-                                    if (!member.isComingHome && (member.x != 0.0 || member.y != 0.0)) {
+                                    if (!member.isComingHome && !isAtHome) {
                                         Button(
                                             onClick = { onCommuteHome(member.id) },
                                             colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
@@ -619,7 +626,7 @@ fun TelemetryDashboard(
                                     }
 
                                     // 4. Instant Check-In Button
-                                    if (member.x != 0.0 || member.y != 0.0) {
+                                    if (!isAtHome) {
                                         Button(
                                             onClick = { onInstantCheckIn(member.id) },
                                             colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),

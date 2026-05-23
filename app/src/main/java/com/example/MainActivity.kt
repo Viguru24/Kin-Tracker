@@ -223,6 +223,7 @@ class MainActivity : ComponentActivity() {
         
         // Safely configure OSMDroid prior to UI rendering to prevent storage write permission crashes
         try {
+            Configuration.getInstance().load(applicationContext, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
             Configuration.getInstance().userAgentValue = packageName
             val cacheDir = File(cacheDir, "osmdroid")
             if (!cacheDir.exists()) {
@@ -404,7 +405,9 @@ fun MainScreen(
                 onInstantCheckIn = { viewModel.instantCheckInAtHome(it) },
                 onPing = { viewModel.pingMember(it) },
                 onUpdateMember = { viewModel.updateFamilyMember(it) },
-                onDeleteMember = { viewModel.deleteFamilyMember(it) }
+                onDeleteMember = { viewModel.deleteFamilyMember(it) },
+                homeLat = homeLat,
+                homeLng = homeLng
             )
 
             // SECTION 4: GEOFENCED TIMELINE AUDIT HISTORY (ROOM DB LOGS)
