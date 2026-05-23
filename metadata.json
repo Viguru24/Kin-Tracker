@@ -1,0 +1,6 @@
+{
+  "name": "Family Tracker",
+  "description": "A live-simulated radar map, real-time battery and speed telemetry, geofenced alerts, and activity log to track family locations seamlessly.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
