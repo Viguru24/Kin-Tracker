@@ -276,6 +276,7 @@ fun MainScreen(
     val isUserSignedIn by viewModel.isUserSignedIn.collectAsStateWithLifecycle()
     val userDisplayName by viewModel.userDisplayName.collectAsStateWithLifecycle()
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
+    val isSimulationEnabled by viewModel.isSimulationModeEnabled.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
 
@@ -300,61 +301,54 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header Bar
+            // Compact Header Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Text(
                         text = "KinTracker",
                         color = TextPrimary,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.SansSerif,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.testTag("app_header_title")
                     )
                     Text(
-                        text = "Live Family Telemetry Radar",
+                        text = "• Live Radar",
                         color = RadarCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
                         fontFamily = FontFamily.Monospace
                     )
                 }
 
-                // Simulating/Active Indicator Pill
-                Box(
-                    modifier = Modifier
-                        .border(1.dp, if (isPaused) SlateBorder else GlowingEmerald.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                        .background(if (isPaused) Color.Transparent else GlowingEmerald.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    contentAlignment = Alignment.Center
+                // Tiny active feed indicator
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Flashing neon dot
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(if (isPaused) ActiveAmber else GlowingEmerald, CircleShape)
-                        )
-                        Text(
-                            text = if (isPaused) "FEED PAUSED" else "LIVE GPS FEED",
-                            color = if (isPaused) ActiveAmber else GlowingEmerald,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .background(if (isPaused) ActiveAmber else GlowingEmerald, CircleShape)
+                    )
+                    Text(
+                        text = if (isPaused) "FEED PAUSED" else "LIVE GPS",
+                        color = if (isPaused) ActiveAmber else GlowingEmerald,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
 
@@ -395,7 +389,9 @@ fun MainScreen(
                 onAddMember = { name, type, color ->
                     viewModel.addNewMember(name, type, color)
                 },
-                onCalibrateHome = { viewModel.forceResetHomeGPS() }
+                onCalibrateHome = { viewModel.forceResetHomeGPS() },
+                isSimulationEnabled = isSimulationEnabled,
+                onToggleSimulationMode = { viewModel.toggleSimulationMode(it) }
             )
 
             // SECTION 3: EXPANDABLE TELEMETRY DASHBOARD

@@ -66,10 +66,10 @@ fun RadarMap(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(1.1f) // Custom balanced proportion for standard mobile containers
-            .clip(RoundedCornerShape(32.dp))
+            .aspectRatio(0.85f) // Physically taller and dominant center stage presence
+            .clip(RoundedCornerShape(24.dp))
             .background(Color(0xFFE0E2EC))
-            .border(2.dp, SlateBorder, RoundedCornerShape(32.dp))
+            .border(2.dp, SlateBorder, RoundedCornerShape(24.dp))
             .testTag("radar_map_container")
     ) {
         AndroidView(
@@ -79,7 +79,6 @@ fun RadarMap(
                     clipToOutline = true
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
-                    setBuiltInZoomControls(false)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
                     // Target CR8 4DS by default and zoom closer

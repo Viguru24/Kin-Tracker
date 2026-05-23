@@ -32,6 +32,8 @@ fun SimControls(
     onTogglePause: () -> Unit,
     onAddMember: (String, String, String) -> Unit,
     onCalibrateHome: () -> Unit,
+    isSimulationEnabled: Boolean,
+    onToggleSimulationMode: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expandedRegister by remember { mutableStateOf(false) }
@@ -146,11 +148,29 @@ fun SimControls(
                             color = if (isPaused) Color.White else TextPrimary
                         )
                     }
+
+                    // Toggle Demo Mode vs Pure Production tracking
+                    Button(
+                        onClick = { onToggleSimulationMode(!isSimulationEnabled) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSimulationEnabled) GlowingMagenta.copy(alpha = 0.8f) else SlateBorder
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(28.dp).testTag("sim_toggle_mode_btn")
+                    ) {
+                        Text(
+                            text = if (isSimulationEnabled) "Demo Assets ON" else "Real Trackers ONLY",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            Divider(color = SlateBorder.copy(alpha = 0.5f))
+            HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
 
             // Expand Register Form button

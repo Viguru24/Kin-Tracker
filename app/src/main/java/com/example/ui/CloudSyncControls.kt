@@ -311,7 +311,7 @@ fun CloudSyncControls(
             }
 
             Spacer(modifier = Modifier.height(6.dp))
-            Divider(color = SlateBorder.copy(alpha = 0.5f))
+            HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
 
             // Short overview showing active sync details when collapsed

@@ -15,7 +15,7 @@ interface CloudSyncService {
     @GET("{token}")
     suspend fun getGroupData(@Path(value = "token", encoded = true) token: String): Response<ResponseBody>
 
-    @POST("{token}")
+    @PUT("{token}")
     @Headers("Content-Type: application/json")
     suspend fun updateGroupData(
         @Path(value = "token", encoded = true) token: String,

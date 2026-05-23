@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -542,7 +543,7 @@ fun TelemetryDashboard(
                         ) {
                             Column {
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Divider(color = DividerGray)
+                                HorizontalDivider(color = DividerGray)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 
                                 Text(
@@ -608,7 +609,7 @@ fun TelemetryDashboard(
                                         modifier = Modifier.height(30.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Send,
+                                            imageVector = Icons.AutoMirrored.Filled.Send,
                                             contentDescription = "Send Outside",
                                             tint = GlowingMagenta,
                                             modifier = Modifier.size(12.dp)
@@ -696,10 +697,10 @@ fun getTransportInfo(speedMph: Double, statusText: String): Triple<String, andro
             Triple("Train", Icons.Filled.DirectionsTransit, Color(0xFFAB47BC)) // Purple transit color
         }
         statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycle") || (speedMph > 4.5 && speedMph <= 15.0) -> {
-            Triple("Biking", Icons.Filled.DirectionsBike, RadarCyan) // Theme cyan-blue biking color
+            Triple("Biking", Icons.AutoMirrored.Filled.DirectionsBike, RadarCyan) // Theme cyan-blue biking color
         }
         statusLower.contains("walk") || statusLower.contains("foot") || statusLower.contains("hiking") || statusLower.contains("run") || (speedMph > 0.15 && speedMph <= 4.5) -> {
-            Triple("Walking", Icons.Filled.DirectionsWalk, GlowingEmerald) // Emerald green walking color
+            Triple("Walking", Icons.AutoMirrored.Filled.DirectionsWalk, GlowingEmerald) // Emerald green walking color
         }
         else -> {
             Triple("Driving", Icons.Filled.DirectionsCar, ActiveAmber) // Amber gold driving color

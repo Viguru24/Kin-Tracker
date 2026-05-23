@@ -54,7 +54,7 @@ class FamilyRepository(private val familyDao: FamilyDao) {
         }
 
         val updatedMembers = familyDao.getFamilyMembersOnce()
-        if (updatedMembers.isEmpty() || (updatedMembers.size == 1 && updatedMembers.first().id == "me")) {
+        if (updatedMembers.isEmpty()) {
             val defaultMembers = listOf(
                 FamilyMember(
                     id = "isabel",

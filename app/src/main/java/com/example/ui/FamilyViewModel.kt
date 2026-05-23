@@ -46,16 +46,66 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private val triggeredApproachingHomeAlerts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     // Cloud Sync Configuration State
-    val isCloudSyncEnabled = MutableStateFlow(false)
+    val isCloudSyncEnabled = MutableStateFlow(true)
     val groupSyncToken = MutableStateFlow("")
     val myDeviceName = MutableStateFlow("Louis (Dad)")
     val myDeviceColor = MutableStateFlow("#AA22FF")
     val cloudStatusText = MutableStateFlow("Local / offline simulator mode")
+    val isSimulationModeEnabled = MutableStateFlow(true)
 
     // Account Authentication State (Auto-signed in by default)
     val isUserSignedIn = MutableStateFlow(true)
     val userDisplayName = MutableStateFlow("Louis de Souza")
     val userEmail = MutableStateFlow("louisdesouza@gmail.com")
+
+    private fun savePreferences() {
+        val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putBoolean("isUserSignedIn", isUserSignedIn.value)
+            putString("userDisplayName", userDisplayName.value)
+            putString("userEmail", userEmail.value)
+            putString("myDeviceName", myDeviceName.value)
+            putString("myDeviceColor", myDeviceColor.value)
+            putString("groupSyncToken", groupSyncToken.value)
+            putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
+            putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
+            apply()
+        }
+    }
+
+    private fun loadPreferences() {
+        val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+        isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
+        userDisplayName.value = prefs.getString("userDisplayName", "Louis de Souza") ?: "Louis de Souza"
+        userEmail.value = prefs.getString("userEmail", "louisdesouza@gmail.com") ?: "louisdesouza@gmail.com"
+        myDeviceName.value = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
+        myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+        groupSyncToken.value = prefs.getString("groupSyncToken", "") ?: ""
+        isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true)
+        isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", true)
+    }
+
+    fun toggleSimulationMode(enabled: Boolean) {
+        viewModelScope.launch {
+            isSimulationModeEnabled.value = enabled
+            savePreferences()
+
+            if (enabled) {
+                repository.ensureDefaultDataInserted()
+                _uiEvents.emit("Demo mock members activated.")
+            } else {
+                // Production mode: Purge all default simulated mock members from the SQLite database
+                val current = repository.getFamilyMembersOnce()
+                val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
+                for (member in current) {
+                    if (defaultSimulatedIds.contains(member.id)) {
+                        repository.deleteMember(member)
+                    }
+                }
+                _uiEvents.emit("Demo assets deactivated. Live production mode active!")
+            }
+        }
+    }
 
     fun signInUser(name: String, email: String) {
         viewModelScope.launch {
@@ -68,6 +118,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             if (me != null) {
                 repository.updateMember(me.copy(name = name))
             }
+            savePreferences()
             _uiEvents.emit("Signed in successfully as $name")
         }
     }
@@ -75,6 +126,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun signOutUser() {
         viewModelScope.launch {
             isUserSignedIn.value = false
+            savePreferences()
             _uiEvents.emit("Signed out successfully from KinTracker")
         }
     }
@@ -90,6 +142,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     init {
         val database = AppDatabase.getDatabase(application)
         repository = FamilyRepository(database.familyDao())
+
+        // Load persisted preferences first
+        loadPreferences()
 
         // Cache flow states for high-frequency consumption
         familyMembers = repository.familyMembers
@@ -108,16 +163,27 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
         // Seed default parameters and start the engine
         viewModelScope.launch {
-            repository.ensureDefaultDataInserted()
+            if (isSimulationModeEnabled.value) {
+                repository.ensureDefaultDataInserted()
+            } else {
+                // Production mode: Purge all default simulated mock members from the SQLite database
+                val current = repository.getFamilyMembersOnce()
+                val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
+                for (member in current) {
+                    if (defaultSimulatedIds.contains(member.id)) {
+                        repository.deleteMember(member)
+                    }
+                }
+            }
             
-            // Validate and insert "Louis (Dad)" member if not already instantiated in SQLite
+            // Validate and insert the localized self member if not already instantiated in SQLite
             val current = repository.getFamilyMembersOnce()
             val existingMe = current.firstOrNull { it.id == "me" }
             if (existingMe == null) {
                 val me = FamilyMember(
                     id = "me",
-                    name = "Louis (Dad)",
-                    avatarColorHex = "#AA22FF",
+                    name = myDeviceName.value,
+                    avatarColorHex = myDeviceColor.value,
                     x = -0.15,
                     y = 0.25,
                     batteryPercentage = 100,
@@ -128,13 +194,23 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     etaMinutes = 0
                 )
                 repository.insertFamilyMembers(listOf(me))
-            } else if (existingMe.name == "You (GPS)" || existingMe.name == "You" || existingMe.name.contains("You", ignoreCase = true)) {
-                val meUpdated = existingMe.copy(name = "Louis (Dad)")
-                repository.updateMember(meUpdated)
+            } else {
+                // Sync SQLite name and color values with the persisted SharedPreferences options
+                repository.updateMember(existingMe.copy(
+                    name = myDeviceName.value,
+                    avatarColorHex = myDeviceColor.value
+                ))
             }
+            
             startSimulationLoop()
             // Automatically establish cloud group sync in the background
-            autoProvisionGroupSync()
+            if (isCloudSyncEnabled.value) {
+                if (groupSyncToken.value.isBlank()) {
+                    autoProvisionGroupSync()
+                } else {
+                    startCloudSyncLoop()
+                }
+            }
         }
     }
 
@@ -676,6 +752,13 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             myDeviceName.value = myName
             myDeviceColor.value = myColor
 
+            val current = repository.getFamilyMembersOnce()
+            val me = current.firstOrNull { it.id == "me" }
+            if (me != null) {
+                repository.updateMember(me.copy(name = myName, avatarColorHex = myColor))
+            }
+            savePreferences()
+
             if (enabled) {
                 // Keep simulation active so family members continue moving on the radar map!
                 isSimulationPaused.value = false
@@ -711,6 +794,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     
                     if (cleanUrl.isNotBlank()) {
                         groupSyncToken.value = cleanUrl
+                        savePreferences()
                         cloudStatusText.value = "Generated Code: $cleanUrl"
                         _uiEvents.emit("New Cloud Group generated: $cleanUrl")
                     } else {
@@ -723,6 +807,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 // Generates a robust local fallback/mock cloud token to recover pairing UI immediately if offline
                 val localToken = "${java.util.UUID.randomUUID().toString().substring(0, 6)}/louis_synced"
                 groupSyncToken.value = localToken
+                savePreferences()
                 cloudStatusText.value = "Synced Live (Active Offline Mode)"
                 _uiEvents.emit("KinTracker paired using local fallback channel!")
             }
@@ -733,52 +818,63 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 cloudStatusText.value = "Auto-Pairing Active..."
-                val initialPayload = com.example.data.CloudGroupPayload(
-                    homeLat = homeLat,
-                    homeLng = homeLng,
-                    isHomeCalibrated = isHomeCalibrated,
-                    lastUpdated = System.currentTimeMillis()
-                )
-                val bodyText = payloadAdapter.toJson(initialPayload)
-                val requestBody = bodyText.toRequestBody("text/plain".toMediaTypeOrNull())
-
-                val response = kotlinx.coroutines.withTimeoutOrNull(2500) {
-                    try {
-                        cloudService.createNewGroup(requestBody)
-                    } catch (e: Exception) {
-                        null
-                    }
-                }
-
-                val token = if (response?.isSuccessful == true) {
-                    val fullUrl = response.body()?.string() ?: ""
-                    val prefix = "https://api.keyvalue.xyz/"
-                    fullUrl.replace(prefix, "").trim()
-                } else null
-
-                val finalToken = if (!token.isNullOrBlank()) {
-                    token
+                
+                // Keep existing saved token if we have one
+                val existingToken = groupSyncToken.value
+                val tokenToUse = if (existingToken.isNotBlank()) {
+                    existingToken
                 } else {
-                    "8c91a7/louis_tracker_sync"
+                    val initialPayload = com.example.data.CloudGroupPayload(
+                        homeLat = homeLat,
+                        homeLng = homeLng,
+                        isHomeCalibrated = isHomeCalibrated,
+                        lastUpdated = System.currentTimeMillis()
+                    )
+                    val bodyText = payloadAdapter.toJson(initialPayload)
+                    val requestBody = bodyText.toRequestBody("text/plain".toMediaTypeOrNull())
+
+                    val response = kotlinx.coroutines.withTimeoutOrNull(2500) {
+                        try {
+                            cloudService.createNewGroup(requestBody)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+
+                    val token = if (response?.isSuccessful == true) {
+                        val fullUrl = response.body()?.string() ?: ""
+                        val prefix = "https://api.keyvalue.xyz/"
+                        fullUrl.replace(prefix, "").trim()
+                    } else null
+
+                    if (!token.isNullOrBlank()) token else "8c91a7/louis_tracker_sync"
                 }
 
-                groupSyncToken.value = finalToken
+                groupSyncToken.value = tokenToUse
                 isCloudSyncEnabled.value = true
-                myDeviceName.value = "Louis (Dad)"
+                
+                // Do NOT overwrite user settings of name if already customized
+                if (myDeviceName.value == "You" || myDeviceName.value == "You (GPS)") {
+                    myDeviceName.value = "Louis (Dad)"
+                }
+                
                 val current = repository.getFamilyMembersOnce()
                 val me = current.firstOrNull { it.id == "me" }
                 if (me != null) {
-                    repository.updateMember(me.copy(name = "Louis (Dad)"))
+                    repository.updateMember(me.copy(name = myDeviceName.value, avatarColorHex = myDeviceColor.value))
                 }
+                savePreferences()
                 cloudStatusText.value = "Synced Live (Automatic)"
                 
                 _uiEvents.emit("KinTracker automatically paired & sync active!")
                 startCloudSyncLoop()
             } catch (e: Exception) {
-                val finalToken = "8c91a7/louis_tracker_sync"
-                groupSyncToken.value = finalToken
+                if (groupSyncToken.value.isBlank()) {
+                    groupSyncToken.value = "8c91a7/louis_tracker_sync"
+                }
                 isCloudSyncEnabled.value = true
                 cloudStatusText.value = "Local Sync Mode Active"
+                savePreferences()
                 startCloudSyncLoop()
             }
         }
@@ -818,6 +914,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         // Suppress parse errors if uninitialized or fresh
                     }
                 }
+            } else {
+                cloudStatusText.value = "Sync Offline (GET Code ${response.code()})"
+                return
             }
 
             // 2. Map local device properties
@@ -868,10 +967,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
-            // 4. POST consolidated payload to cloud
+            // 4. PUT consolidated payload to cloud
             val payloadJson = payloadAdapter.toJson(newPayload)
             val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
-            cloudService.updateGroupData(token, requestBody)
+            val putResponse = cloudService.updateGroupData(token, requestBody)
+            if (!putResponse.isSuccessful) {
+                cloudStatusText.value = "Sync Offline (PUT Code ${putResponse.code()})"
+                return
+            }
 
             // 5. Apply cloud-sync feedback to local SQLite database so view updates seamlessly
             val db = AppDatabase.getDatabase(getApplication())
@@ -914,11 +1017,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // Purge any simulated default members from Local Map to avoid mixing simulated nodes during real tracking.
-            // But KEEP the default simulated family members (eloise, isabel, louis, annette) so the radar map remains populated and interactive!
             val activeCloudIds = incomingCloudMembers.map { it.id }.toSet()
             val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
+                if (!isSimulationModeEnabled.value && defaultSimulatedIds.contains(localM.id)) {
+                    repository.deleteMember(localM)
+                    continue
+                }
                 if (!defaultSimulatedIds.contains(localM.id)) {
                     if (!activeCloudIds.contains(localM.id)) {
                         // This is a dummy node, remove to prevent radar clutter!
