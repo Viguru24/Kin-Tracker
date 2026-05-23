@@ -186,37 +186,41 @@ fun CloudSyncControls(
                                 OutlinedTextField(
                                     value = authNameInput,
                                     onValueChange = { authNameInput = it },
-                                    label = { Text("Display Name", fontSize = 9.sp, color = SecondarySlate) },
-                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 11.sp),
+                                    label = { Text("Display Name", fontSize = 10.sp, color = SecondarySlate) },
+                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary,
                                         focusedBorderColor = RadarCyan,
                                         unfocusedBorderColor = SlateBorder,
-                                        cursorColor = RadarCyan
+                                        cursorColor = RadarCyan,
+                                        focusedLabelColor = RadarCyan,
+                                        unfocusedLabelColor = SecondarySlate
                                     ),
                                     singleLine = true,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(38.dp)
+                                        .height(62.dp)
                                 )
 
                                 OutlinedTextField(
                                     value = authEmailInput,
                                     onValueChange = { authEmailInput = it },
-                                    label = { Text("Account Email", fontSize = 9.sp, color = SecondarySlate) },
-                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 11.sp),
+                                    label = { Text("Account Email", fontSize = 10.sp, color = SecondarySlate) },
+                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedTextColor = TextPrimary,
                                         unfocusedTextColor = TextPrimary,
                                         focusedBorderColor = RadarCyan,
                                         unfocusedBorderColor = SlateBorder,
-                                        cursorColor = RadarCyan
+                                        cursorColor = RadarCyan,
+                                        focusedLabelColor = RadarCyan,
+                                        unfocusedLabelColor = SecondarySlate
                                     ),
                                     singleLine = true,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(38.dp)
+                                        .height(62.dp)
                                 )
                             }
 
@@ -229,10 +233,13 @@ fun CloudSyncControls(
                                     }
                                 },
                                 enabled = authNameInput.isNotBlank() && authEmailInput.isNotBlank(),
-                                colors = ButtonDefaults.buttonColors(containerColor = RadarCyan),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = RadarCyan,
+                                    disabledContainerColor = SlateBorder
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
-                                    .height(80.dp)
+                                    .height(128.dp)
                                     .width(76.dp)
                                     .testTag("sign_in_button")
                             ) {
@@ -240,7 +247,7 @@ fun CloudSyncControls(
                                     text = "Sign In",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Color.Black
+                                    color = if (authNameInput.isNotBlank() && authEmailInput.isNotBlank()) Color.White else SecondarySlate
                                 )
                             }
                         }
@@ -409,7 +416,7 @@ fun CloudSyncControls(
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .height(62.dp)
                     )
 
                     // Form Field 2: Group Code Room String
@@ -435,7 +442,7 @@ fun CloudSyncControls(
                             singleLine = true,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(50.dp)
+                                .height(62.dp)
                         )
 
                         // Button to Generate a brand new unique key

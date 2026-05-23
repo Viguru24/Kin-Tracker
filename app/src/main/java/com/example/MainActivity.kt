@@ -44,6 +44,8 @@ import android.location.LocationManager
 import android.os.BatteryManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import org.osmdroid.config.Configuration
+import java.io.File
 
 class MainActivity : ComponentActivity() {
 
@@ -121,6 +123,13 @@ class MainActivity : ComponentActivity() {
 
     private fun startLocationUpdates() {
         try {
+            val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            
+            if (!hasFine && !hasCoarse) {
+                return
+            }
+
             val isGpsEnabled = try {
                 locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
             } catch (e: Exception) {
@@ -132,26 +141,45 @@ class MainActivity : ComponentActivity() {
                 false
             }
             
-            if (isGpsEnabled) {
+            // 1. Fetch best historical last-known locations from both sources instantly during startup
+            var bestLastLocation: Location? = null
+            if (hasFine && isGpsEnabled) {
+                try {
+                    locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { loc ->
+                        if (bestLastLocation == null || loc.time > bestLastLocation!!.time) {
+                            bestLastLocation = loc
+                        }
+                    }
+                } catch (e: SecurityException) { /* Handled */ }
+            }
+            if (isNetworkEnabled) {
+                try {
+                    locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let { loc ->
+                        if (bestLastLocation == null || loc.time > bestLastLocation!!.time) {
+                            bestLastLocation = loc
+                        }
+                    }
+                } catch (e: SecurityException) { /* Handled */ }
+            }
+            bestLastLocation?.let { updateUserPosition(it) }
+
+            // 2. Register for ultra-low latency updates (1 second update cycles, 0 meters delta threshold)
+            if (hasFine && isGpsEnabled) {
                 locationManager?.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    4000L,
-                    1f,
+                    1000L,
+                    0.0f,
                     locationListener
                 )
-                locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
-                    updateUserPosition(it)
-                }
-            } else if (isNetworkEnabled) {
+            }
+            if (isNetworkEnabled) {
+                // If hasFine, we can register Network provider too. If hasCoarse, we can register it as well.
                 locationManager?.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    4000L,
-                    1f,
+                    1000L,
+                    0.0f,
                     locationListener
                 )
-                locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let {
-                    updateUserPosition(it)
-                }
             }
         } catch (e: Exception) {
             // Catch any security or unsupported provider/illegal argument errors safely
@@ -169,6 +197,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Safely configure OSMDroid prior to UI rendering to prevent storage write permission crashes
+        try {
+            Configuration.getInstance().userAgentValue = packageName
+            val cacheDir = File(cacheDir, "osmdroid")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+            }
+            Configuration.getInstance().osmdroidTileCache = cacheDir
+            Configuration.getInstance().osmdroidBasePath = cacheDir
+        } catch (e: Exception) {
+            // Safe fallback
+        }
+
         enableEdgeToEdge()
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 

@@ -100,7 +100,7 @@ fun TelemetryDashboard(
                             unfocusedLabelColor = SecondarySlate
                         ),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().height(54.dp).testTag("edit_name_input")
+                        modifier = Modifier.fillMaxWidth().height(62.dp).testTag("edit_name_input")
                     )
 
                     // Status
@@ -119,7 +119,7 @@ fun TelemetryDashboard(
                             unfocusedLabelColor = SecondarySlate
                         ),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth().height(54.dp).testTag("edit_status_input")
+                        modifier = Modifier.fillMaxWidth().height(62.dp).testTag("edit_status_input")
                     )
 
                     // Battery Slider / Checkbox Row
@@ -180,7 +180,7 @@ fun TelemetryDashboard(
                                 focusedLabelColor = RadarCyan
                             ),
                             singleLine = true,
-                            modifier = Modifier.weight(1f).height(54.dp).testTag("edit_speed_input")
+                            modifier = Modifier.weight(1f).height(62.dp).testTag("edit_speed_input")
                         )
 
                         // ETA
@@ -198,7 +198,7 @@ fun TelemetryDashboard(
                                 focusedLabelColor = RadarCyan
                             ),
                             singleLine = true,
-                            modifier = Modifier.weight(1f).height(54.dp).testTag("edit_eta_input")
+                            modifier = Modifier.weight(1f).height(62.dp).testTag("edit_eta_input")
                         )
                     }
 
@@ -484,21 +484,25 @@ fun TelemetryDashboard(
                             }
 
                             // Speed or Status
+                            val transportInfo = getTransportInfo(member.speedMph, member.statusText)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .background(transportInfo.third.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Speed",
-                                    tint = SecondarySlate,
-                                    modifier = Modifier.size(12.dp)
+                                    imageVector = transportInfo.second,
+                                    contentDescription = transportInfo.first,
+                                    tint = transportInfo.third,
+                                    modifier = Modifier.size(13.dp)
                                 )
                                 Text(
-                                    text = if (member.speedMph > 0.0) "${member.speedMph} mph" else "Stationary",
-                                    color = if (member.speedMph > 0) TextPrimary else SecondarySlate,
+                                    text = if (member.speedMph > 0.0) "${member.speedMph} mph (${transportInfo.first})" else "Stationary",
+                                    color = transportInfo.third,
                                     fontSize = 10.sp,
-                                    fontWeight = if (member.speedMph > 0) FontWeight.Medium else FontWeight.Normal
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
 
@@ -676,6 +680,29 @@ fun TelemetryDashboard(
                     }
                 }
             }
+        }
+    }
+}
+
+// Helper utility to deduce the active transport mode based on speed and status indicators
+@Composable
+fun getTransportInfo(speedMph: Double, statusText: String): Triple<String, androidx.compose.ui.graphics.vector.ImageVector, Color> {
+    val statusLower = statusText.lowercase()
+    return when {
+        speedMph <= 0.15 -> {
+            Triple("Stationary", Icons.Filled.Person, SecondarySlate)
+        }
+        statusLower.contains("train") || statusLower.contains("transit") || statusLower.contains("rail") || speedMph > 45.0 -> {
+            Triple("Train", Icons.Filled.DirectionsTransit, Color(0xFFAB47BC)) // Purple transit color
+        }
+        statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycle") || (speedMph > 4.5 && speedMph <= 15.0) -> {
+            Triple("Biking", Icons.Filled.DirectionsBike, RadarCyan) // Theme cyan-blue biking color
+        }
+        statusLower.contains("walk") || statusLower.contains("foot") || statusLower.contains("hiking") || statusLower.contains("run") || (speedMph > 0.15 && speedMph <= 4.5) -> {
+            Triple("Walking", Icons.Filled.DirectionsWalk, GlowingEmerald) // Emerald green walking color
+        }
+        else -> {
+            Triple("Driving", Icons.Filled.DirectionsCar, ActiveAmber) // Amber gold driving color
         }
     }
 }

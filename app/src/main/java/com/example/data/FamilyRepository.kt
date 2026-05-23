@@ -78,8 +78,8 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     y = -0.6,
                     batteryPercentage = 95,
                     isCharging = false,
-                    speedMph = 38.0,
-                    statusText = "Commuting from Office",
+                    speedMph = 72.0,
+                    statusText = "Commuting via Train",
                     isComingHome = true,
                     etaMinutes = 10
                 ),

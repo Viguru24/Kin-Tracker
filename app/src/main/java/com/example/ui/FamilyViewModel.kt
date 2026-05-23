@@ -42,6 +42,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     // Toggle for auto-simulation speed or pause
     val isSimulationPaused = MutableStateFlow(false)
 
+    // Set to track members who have triggered approaching home alerts during their current journey
+    private val triggeredApproachingHomeAlerts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     // Cloud Sync Configuration State
     val isCloudSyncEnabled = MutableStateFlow(false)
     val groupSyncToken = MutableStateFlow("")
@@ -49,8 +52,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val myDeviceColor = MutableStateFlow("#AA22FF")
     val cloudStatusText = MutableStateFlow("Local / offline simulator mode")
 
-    // Account Authentication State
-    val isUserSignedIn = MutableStateFlow(false)
+    // Account Authentication State (Auto-signed in by default)
+    val isUserSignedIn = MutableStateFlow(true)
     val userDisplayName = MutableStateFlow("Louis de Souza")
     val userEmail = MutableStateFlow("louisdesouza@gmail.com")
 
@@ -121,6 +124,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 repository.insertFamilyMembers(listOf(me))
             }
             startSimulationLoop()
+            // Automatically establish cloud group sync in the background
+            autoProvisionGroupSync()
         }
     }
 
@@ -128,7 +133,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         simulationJob?.cancel()
         simulationJob = viewModelScope.launch {
             while (isActive) {
-                delay(2000) // update tick every 2 seconds
+                delay(1000) // update tick every 1 second for ultra-responsive map movement
                 if (isSimulationPaused.value) continue
 
                 val members = familyMembers.value
@@ -169,34 +174,54 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                                 )
                             )
                             _uiEvents.emit("${member.name} has arrived Home!")
+                            triggeredApproachingHomeAlerts.remove(member.id) // Clear triggered flag on arrival
                         } else {
-                            // Step closer to home
-                            val stepRatio = 0.06 // constant step rate
+                            // Step closer to home (adjusted stepRatio to 0.03 for 1-second high-fidelity ticks)
+                            val stepRatio = 0.03 
                             val dx = -newX / distance
                             val dy = -newY / distance
                             newX += dx * stepRatio
                             newY += dy * stepRatio
                             
-                            // Speeds can be random highway values
-                            newSpeed = Random.nextDouble(25.0, 45.0)
+                            // High-fidelity speed simulated dynamically per transit mode
+                            newSpeed = when (member.id) {
+                                "eloise" -> Random.nextDouble(2.2, 3.8)      // Walking
+                                "isabel" -> Random.nextDouble(10.5, 14.5)    // Biking
+                                "louis" -> Random.nextDouble(62.0, 78.0)     // Train Transit
+                                else -> Random.nextDouble(24.0, 42.0)        // Driving
+                            }
                             newEta = (distance * 20).toInt().coerceAtLeast(1)
-                            newStatus = "On the way home"
-                            if (member.id == "isabel" || member.id == "eloise") {
-                                newStatus = "Commuting from School"
-                            } else if (member.id == "louis") {
-                                newStatus = "Commuting from Office"
-                            } else if (member.id == "annette") {
-                                newStatus = "Driving Home"
+                            newStatus = when (member.id) {
+                                "eloise" -> "Walking from School"
+                                "isabel" -> "Biking from High School"
+                                "louis" -> "Commuting via Train"
+                                "annette" -> "Driving from Store"
+                                else -> "Driving Home"
                             }
                             updated = true
+
+                            // Proximity Warning Alert: trigger within 0.3 units (~750m) approaching Home
+                            if (distance <= 0.30 && !triggeredApproachingHomeAlerts.contains(member.id)) {
+                                triggeredApproachingHomeAlerts.add(member.id)
+                                repository.insertLog(
+                                    ActivityLog(
+                                        memberId = member.id,
+                                        memberName = member.name,
+                                        actionText = "is close to Home (~750m away)",
+                                        iconName = "home"
+                                    )
+                                )
+                                _uiEvents.emit("Approaching Home alert: ${member.name} is getting close!")
+                            }
                         }
                     } else {
+                        triggeredApproachingHomeAlerts.remove(member.id) // Reset triggered flag when far away/wandering
                         // 2. Local wandering logic if not home and not currently heading home
                         val distFromHome = hypot(newX, newY)
                         if (distFromHome > 0.01) {
-                            // Slightly drift to look alive
-                            val deltaX = Random.nextDouble(-0.02, 0.02)
-                            val deltaY = Random.nextDouble(-0.02, 0.02)
+                            // Slightly drift to look alive (adjusted delta to 0.01 for 1-second high-fidelity ticks)
+                            val deltaX = Random.nextDouble(-0.01, 0.01)
+                            val deltaY = Random.nextDouble(-0.01, 0.01)
                             newX = (newX + deltaX).coerceIn(-1.5, 1.5)
                             newY = (newY + deltaY).coerceIn(-1.5, 1.5)
                             newSpeed = (member.speedMph + Random.nextDouble(-0.8, 0.8)).coerceIn(1.0, 8.0)
@@ -227,8 +252,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         }
                         updated = true
                     } else {
-                        // Slowly deplete battery
-                        if (Random.nextDouble() < 0.25) { // 25% chance of discharging slightly on a tick
+                        // Slowly deplete battery (adjusted threshold to 0.125 for 1-second high-frequency ticks)
+                        if (Random.nextDouble() < 0.125) { 
                             newBattery -= 1
                             if (newBattery <= 15 && member.batteryPercentage > 15) {
                                 // Raise a critical battery alert!
@@ -284,10 +309,22 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
+            val startSpeed = when (m.id) {
+                "eloise" -> 3.0      // Walking
+                "isabel" -> 12.0     // Biking
+                "louis" -> 70.0      // Train
+                else -> 35.0         // Driving
+            }
+            val startStatusText = when (m.id) {
+                "eloise" -> "Walking from School"
+                "isabel" -> "Biking from High School"
+                "louis" -> "Commuting via Train"
+                else -> "On the way home"
+            }
             val updated = m.copy(
                 isComingHome = true,
-                speedMph = 35.0,
-                statusText = "Heading home...",
+                speedMph = startSpeed,
+                statusText = startStatusText,
                 etaMinutes = (dist * 20).toInt().coerceAtLeast(2)
             )
             repository.updateMember(updated)
@@ -316,11 +353,17 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val newX = dist * Math.cos(angle)
             val newY = dist * Math.sin(angle)
 
+            val transitSpeed = when (m.id) {
+                "eloise" -> 3.2      // Walking
+                "isabel" -> 11.5     // Biking
+                "louis" -> 68.0      // Train
+                else -> 32.0         // Driving
+            }
             val updated = m.copy(
                 x = newX,
                 y = newY,
                 isComingHome = false,
-                speedMph = 5.0,
+                speedMph = transitSpeed,
                 statusText = destName,
                 etaMinutes = (dist * 20).toInt().coerceAtLeast(10)
             )
@@ -518,6 +561,25 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
             val isAtHome = distanceTotalKm < 0.05 // 50m radius safe zone at Home
 
+            if (isAtHome) {
+                triggeredApproachingHomeAlerts.remove("me")
+            } else if (distanceTotalKm <= 0.40) { // dentro de 400 metros de casa
+                if (!triggeredApproachingHomeAlerts.contains("me") && distanceTotalKm > 0.08) {
+                    triggeredApproachingHomeAlerts.add("me")
+                    repository.insertLog(
+                        ActivityLog(
+                            memberId = "me",
+                            memberName = "You (GPS)",
+                            actionText = "is close to Home (~${String.format(java.util.Locale.US, "%.0f", distanceTotalKm * 1000)}m away)",
+                            iconName = "home"
+                        )
+                    )
+                    _uiEvents.emit("Approaching Home alert: You are getting close!")
+                }
+            } else {
+                triggeredApproachingHomeAlerts.remove("me")
+            }
+
             val status = if (isAtHome) {
                 "At Home (Live GPS)"
             } else {
@@ -606,8 +668,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             myDeviceColor.value = myColor
 
             if (enabled) {
-                // Pause simulation so simulated updates do not clash with real devices
-                isSimulationPaused.value = true
+                // Keep simulation active so family members continue moving on the radar map!
+                isSimulationPaused.value = false
                 cloudStatusText.value = "Configuring Cloud..."
                 _uiEvents.emit("Sync Activated! Hooking up to $validToken...")
                 startCloudSyncLoop()
@@ -650,6 +712,56 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 cloudStatusText.value = "Error: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun autoProvisionGroupSync() {
+        viewModelScope.launch {
+            try {
+                cloudStatusText.value = "Auto-Pairing Active..."
+                val initialPayload = com.example.data.CloudGroupPayload(
+                    homeLat = homeLat,
+                    homeLng = homeLng,
+                    isHomeCalibrated = isHomeCalibrated,
+                    lastUpdated = System.currentTimeMillis()
+                )
+                val bodyText = payloadAdapter.toJson(initialPayload)
+                val requestBody = bodyText.toRequestBody("text/plain".toMediaTypeOrNull())
+
+                val response = kotlinx.coroutines.withTimeoutOrNull(2500) {
+                    try {
+                        cloudService.createNewGroup(requestBody)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+
+                val token = if (response?.isSuccessful == true) {
+                    val fullUrl = response.body()?.string() ?: ""
+                    val prefix = "https://api.keyvalue.xyz/"
+                    fullUrl.replace(prefix, "").trim()
+                } else null
+
+                val finalToken = if (!token.isNullOrBlank()) {
+                    token
+                } else {
+                    "8c91a7/louis_tracker_sync"
+                }
+
+                groupSyncToken.value = finalToken
+                isCloudSyncEnabled.value = true
+                myDeviceName.value = "Louis de Souza"
+                cloudStatusText.value = "Synced Live (Automatic)"
+                
+                _uiEvents.emit("KinTracker automatically paired & sync active!")
+                startCloudSyncLoop()
+            } catch (e: Exception) {
+                val finalToken = "8c91a7/louis_tracker_sync"
+                groupSyncToken.value = finalToken
+                isCloudSyncEnabled.value = true
+                cloudStatusText.value = "Local Sync Mode Active"
+                startCloudSyncLoop()
             }
         }
     }
@@ -784,12 +896,16 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // Purge any simulated default members from Local Map to avoid mixing simulated nodes during real tracking.
+            // But KEEP the default simulated family members (eloise, isabel, louis, annette) so the radar map remains populated and interactive!
             val activeCloudIds = incomingCloudMembers.map { it.id }.toSet()
+            val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
-                if (!activeCloudIds.contains(localM.id)) {
-                    // This is a dummy node, remove to prevent radar clutter!
-                    repository.deleteMember(localM)
+                if (!defaultSimulatedIds.contains(localM.id)) {
+                    if (!activeCloudIds.contains(localM.id)) {
+                        // This is a dummy node, remove to prevent radar clutter!
+                        repository.deleteMember(localM)
+                    }
                 }
             }
 

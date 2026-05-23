@@ -213,7 +213,7 @@ fun SimControls(
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .height(62.dp)
                             .testTag("sim_add_name_field")
                     )
 
