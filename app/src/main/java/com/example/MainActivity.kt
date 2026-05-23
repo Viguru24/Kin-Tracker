@@ -201,6 +201,8 @@ fun MainScreen(
     val logs by viewModel.activityLogs.collectAsStateWithLifecycle()
     val isPaused by viewModel.isSimulationPaused.collectAsStateWithLifecycle()
     val selectedMemberId by viewModel.selectedMemberId.collectAsStateWithLifecycle()
+    val homeLat by viewModel.homeLatFlow.collectAsStateWithLifecycle()
+    val homeLng by viewModel.homeLngFlow.collectAsStateWithLifecycle()
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsStateWithLifecycle()
     val groupSyncToken by viewModel.groupSyncToken.collectAsStateWithLifecycle()
@@ -298,6 +300,8 @@ fun MainScreen(
                 members = members,
                 selectedMemberId = selectedMemberId,
                 onSelectMember = { viewModel.selectedMemberId.value = it },
+                homeLat = homeLat,
+                homeLng = homeLng,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -339,7 +343,9 @@ fun MainScreen(
                 onCommuteHome = { viewModel.orderHeadingHome(it) },
                 onSendAway = { id, dest -> viewModel.sendAway(id, dest) },
                 onInstantCheckIn = { viewModel.instantCheckInAtHome(it) },
-                onPing = { viewModel.pingMember(it) }
+                onPing = { viewModel.pingMember(it) },
+                onUpdateMember = { viewModel.updateFamilyMember(it) },
+                onDeleteMember = { viewModel.deleteFamilyMember(it) }
             )
 
             // SECTION 4: GEOFENCED TIMELINE AUDIT HISTORY (ROOM DB LOGS)

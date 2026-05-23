@@ -180,12 +180,12 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                             // Speeds can be random highway values
                             newSpeed = Random.nextDouble(25.0, 45.0)
                             newEta = (distance * 20).toInt().coerceAtLeast(1)
-                            newStatus = "On his way home"
-                            if (member.id == "sarah") {
+                            newStatus = "On the way home"
+                            if (member.id == "isabel" || member.id == "eloise") {
                                 newStatus = "Commuting from School"
-                            } else if (member.id == "dad") {
+                            } else if (member.id == "louis") {
                                 newStatus = "Commuting from Office"
-                            } else if (member.id == "mom") {
+                            } else if (member.id == "annette") {
                                 newStatus = "Driving Home"
                             }
                             updated = true
@@ -422,6 +422,43 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // Interactive Action #5B: Dynamic Member Editing
+    fun updateFamilyMember(updated: FamilyMember) {
+        viewModelScope.launch {
+            repository.updateMember(updated)
+            repository.insertLog(
+                ActivityLog(
+                    memberId = updated.id,
+                    memberName = updated.name,
+                    actionText = "updated tracker details",
+                    iconName = "check_in"
+                )
+            )
+            _uiEvents.emit("${updated.name}'s tracker details updated!")
+        }
+    }
+
+    // Interactive Action #5C: Dynamic Member Deletion
+    fun deleteFamilyMember(memberId: String) {
+        viewModelScope.launch {
+            val members = familyMembers.value
+            val target = members.firstOrNull { it.id == memberId } ?: return@launch
+            repository.deleteMember(target)
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "system",
+                    memberName = "System",
+                    actionText = "removed tracker of ${target.name}",
+                    iconName = "away"
+                )
+            )
+            if (selectedMemberId.value == memberId) {
+                selectedMemberId.value = null
+            }
+            _uiEvents.emit("${target.name} removed from radar circle.")
+        }
+    }
+
     fun clearLogHistory() {
         viewModelScope.launch {
             repository.clearLogs()
@@ -430,9 +467,18 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // GPS CALIBRATION ENGINE & COORDINATES TRANSLATOR
-    var homeLat = 37.7749
-    var homeLng = -122.4194
-    var isHomeCalibrated = false
+    val homeLatFlow = kotlinx.coroutines.flow.MutableStateFlow(51.332308)
+    val homeLngFlow = kotlinx.coroutines.flow.MutableStateFlow(-0.117188)
+
+    var homeLat: Double
+        get() = homeLatFlow.value
+        set(value) { homeLatFlow.value = value }
+
+    var homeLng: Double
+        get() = homeLngFlow.value
+        set(value) { homeLngFlow.value = value }
+
+    var isHomeCalibrated = true
 
     fun updateUserLocation(lat: Double, lng: Double, speed: Float, batteryLevel: Int, isCharging: Boolean) {
         viewModelScope.launch {

@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -39,8 +40,286 @@ fun TelemetryDashboard(
     onSendAway: (String, String) -> Unit,
     onInstantCheckIn: (String) -> Unit,
     onPing: (String) -> Unit,
+    onUpdateMember: (FamilyMember) -> Unit,
+    onDeleteMember: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var memberToEdit by remember { mutableStateOf<FamilyMember?>(null) }
+    var memberToDelete by remember { mutableStateOf<FamilyMember?>(null) }
+
+    val colorsList = listOf(
+        "#EC407A", // Magenta Pink
+        "#26A69A", // Teal
+        "#42A5F5", // Cyan Blue
+        "#FF9800", // Gold/Orange
+        "#FFEA00", // Yellow-Glow
+        "#E040FB", // Hot violet
+        "#00FF87"  // Neon green
+    )
+
+    // Edit Dialog Composable
+    memberToEdit?.let { member ->
+        var editName by remember(member.id) { mutableStateOf(member.name) }
+        var editStatus by remember(member.id) { mutableStateOf(member.statusText) }
+        var editBattery by remember(member.id) { mutableStateOf(member.batteryPercentage.toFloat()) }
+        var editCharging by remember(member.id) { mutableStateOf(member.isCharging) }
+        var editSpeed by remember(member.id) { mutableStateOf(member.speedMph.toString()) }
+        var editEta by remember(member.id) { mutableStateOf(member.etaMinutes.toString()) }
+        var editColorHex by remember(member.id) { mutableStateOf(member.avatarColorHex) }
+
+        AlertDialog(
+            onDismissRequest = { memberToEdit = null },
+            title = {
+                Text(
+                    text = "Edit Tracker Settings",
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Name
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Name", fontSize = 11.sp, color = SecondarySlate) },
+                        textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = RadarCyan,
+                            unfocusedBorderColor = SlateBorder,
+                            cursorColor = RadarCyan,
+                            focusedLabelColor = RadarCyan,
+                            unfocusedLabelColor = SecondarySlate
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().height(54.dp).testTag("edit_name_input")
+                    )
+
+                    // Status
+                    OutlinedTextField(
+                        value = editStatus,
+                        onValueChange = { editStatus = it },
+                        label = { Text("Current Status Text", fontSize = 11.sp, color = SecondarySlate) },
+                        textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = RadarCyan,
+                            unfocusedBorderColor = SlateBorder,
+                            cursorColor = RadarCyan,
+                            focusedLabelColor = RadarCyan,
+                            unfocusedLabelColor = SecondarySlate
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().height(54.dp).testTag("edit_status_input")
+                    )
+
+                    // Battery Slider / Checkbox Row
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Battery Level: ${editBattery.toInt()}%",
+                                color = SecondarySlate,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Charging", color = SecondarySlate, fontSize = 11.sp)
+                                Checkbox(
+                                    checked = editCharging,
+                                    onCheckedChange = { editCharging = it },
+                                    colors = CheckboxDefaults.colors(checkedColor = RadarCyan),
+                                    modifier = Modifier.testTag("edit_charging_cb")
+                                )
+                            }
+                        }
+                        Slider(
+                            value = editBattery,
+                            onValueChange = { editBattery = it },
+                            valueRange = 0f..100f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = RadarCyan,
+                                activeTrackColor = RadarCyan,
+                                inactiveTrackColor = SlateBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth().testTag("edit_battery_slider")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Speed
+                        OutlinedTextField(
+                            value = editSpeed,
+                            onValueChange = { editSpeed = it },
+                            label = { Text("Speed (mph)", fontSize = 11.sp, color = SecondarySlate) },
+                            textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = RadarCyan,
+                                unfocusedBorderColor = SlateBorder,
+                                cursorColor = RadarCyan,
+                                focusedLabelColor = RadarCyan
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).height(54.dp).testTag("edit_speed_input")
+                        )
+
+                        // ETA
+                        OutlinedTextField(
+                            value = editEta,
+                            onValueChange = { editEta = it },
+                            label = { Text("ETA (mins)", fontSize = 11.sp, color = SecondarySlate) },
+                            textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = RadarCyan,
+                                unfocusedBorderColor = SlateBorder,
+                                cursorColor = RadarCyan,
+                                focusedLabelColor = RadarCyan
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).height(54.dp).testTag("edit_eta_input")
+                        )
+                    }
+
+                    // Color Picker Row
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Radar Color Tag:", color = SecondarySlate, fontSize = 11.sp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        ) {
+                            colorsList.forEach { rgbHex ->
+                                val rgbColor = try {
+                                    Color(android.graphics.Color.parseColor(rgbHex))
+                                } catch (e: Exception) {
+                                    Color(0xFF26A69A)
+                                }
+                                val isChosen = rgbHex == editColorHex
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .background(rgbColor, CircleShape)
+                                        .border(
+                                            width = if (isChosen) 2.dp else 0.dp,
+                                            color = if (isChosen) TextPrimary else Color.Transparent,
+                                            shape = CircleShape
+                                        )
+                                        .clickable { editColorHex = rgbHex }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editName.isNotBlank()) {
+                            val parsedSpeed = editSpeed.toDoubleOrNull() ?: member.speedMph
+                            val parsedEta = editEta.toIntOrNull() ?: member.etaMinutes
+                            val updated = member.copy(
+                                name = editName,
+                                statusText = editStatus,
+                                batteryPercentage = editBattery.toInt(),
+                                isCharging = editCharging,
+                                speedMph = parsedSpeed,
+                                etaMinutes = parsedEta,
+                                avatarColorHex = editColorHex
+                            )
+                            onUpdateMember(updated)
+                            memberToEdit = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RadarCyan),
+                    shape = RoundedCornerShape(8.dp),
+                    enabled = editName.isNotBlank(),
+                    modifier = Modifier.testTag("save_edit_btn")
+                ) {
+                    Text("Save Changes", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { memberToEdit = null },
+                    modifier = Modifier.testTag("cancel_edit_btn")
+                ) {
+                    Text("Cancel", color = SecondarySlate, fontSize = 12.sp)
+                }
+            },
+            containerColor = CosmicSlateCard,
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp
+        )
+    }
+
+    // Delete Confirmation Dialog
+    memberToDelete?.let { member ->
+        AlertDialog(
+            onDismissRequest = { memberToDelete = null },
+            title = {
+                Text(
+                    text = "Remove Tracker Signal?",
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to permanently detach tracking and remove `${member.name}` from the active family radar?\nThis will disconnect cellular diagnostic relays.",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteMember(member.id)
+                        memberToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("confirm_delete_btn")
+                ) {
+                    Text("Remove Tracker", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { memberToDelete = null },
+                    modifier = Modifier.testTag("cancel_delete_btn")
+                ) {
+                    Text("Cancel", color = SecondarySlate, fontSize = 12.sp)
+                }
+            },
+            containerColor = CosmicSlateCard,
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 6.dp
+        )
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -351,6 +630,44 @@ fun TelemetryDashboard(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text("Check-In Home", fontSize = 10.sp, color = TextPrimary)
+                                        }
+                                    }
+
+                                    // 5. Edit Button
+                                    Button(
+                                        onClick = { memberToEdit = member },
+                                        colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.height(30.dp).testTag("edit_member_btn_${member.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Tracker",
+                                            tint = RadarCyan,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Edit info", fontSize = 10.sp, color = TextPrimary)
+                                    }
+
+                                    // 6. Delete Button (Hide for self unit "me" for system stability)
+                                    if (member.id != "me") {
+                                        Button(
+                                            onClick = { memberToDelete = member },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.height(30.dp).testTag("delete_member_btn_${member.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Remove Tracker",
+                                                tint = ErrorRed,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                             Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Remove", fontSize = 10.sp, color = TextPrimary)
                                         }
                                     }
                                 }
