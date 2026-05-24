@@ -24,5 +24,6 @@ data class CloudMember(
     val statusText: String,
     val isComingHome: Boolean,
     val etaMinutes: Int,
-    val lastActive: Long
+    val lastActive: Long,
+    val avatarEmoji: String = "" // Profile picture emoji representation!
 )

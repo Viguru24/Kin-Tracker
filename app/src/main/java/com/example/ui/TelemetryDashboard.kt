@@ -69,6 +69,7 @@ fun TelemetryDashboard(
         var editSpeed by remember(member.id) { mutableStateOf(member.speedMph.toString()) }
         var editEta by remember(member.id) { mutableStateOf(member.etaMinutes.toString()) }
         var editColorHex by remember(member.id) { mutableStateOf(member.avatarColorHex) }
+        var editEmoji by remember(member.id) { mutableStateOf(member.avatarEmoji) }
 
         AlertDialog(
             onDismissRequest = { memberToEdit = null },
@@ -234,6 +235,49 @@ fun TelemetryDashboard(
                             }
                         }
                     }
+
+                    // Profile Picture Emoji Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Profile Picture Icon:", color = SecondarySlate, fontSize = 11.sp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        ) {
+                            val editEmojisList = listOf("👨", "👩", "👦", "👧", "👶", "👵", "👴", "🐱", "🐶", "🚗", "🚲", "🏡", "🦊", "🐼", "🦸", "🚀")
+                            val chunks = editEmojisList.chunked(8)
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                chunks.forEach { chunk ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        chunk.forEach { emo ->
+                                            val isSelected = editEmoji == emo
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(24.dp)
+                                                    .background(if (isSelected) PrimaryCosmic else Color.White.copy(alpha = 0.05f), CircleShape)
+                                                    .border(
+                                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                                        color = if (isSelected) RadarCyan else SlateBorder,
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable { editEmoji = emo },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(text = emo, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -249,7 +293,8 @@ fun TelemetryDashboard(
                                 isCharging = editCharging,
                                 speedMph = parsedSpeed,
                                 etaMinutes = parsedEta,
-                                avatarColorHex = editColorHex
+                                avatarColorHex = editColorHex,
+                                avatarEmoji = editEmoji
                             )
                             onUpdateMember(updated)
                             memberToEdit = null
@@ -400,9 +445,9 @@ fun TelemetryDashboard(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = member.name.first().uppercase(),
+                                    text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
                                     color = Color.White,
-                                    fontSize = 15.sp,
+                                    fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }

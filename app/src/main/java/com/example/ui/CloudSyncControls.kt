@@ -33,8 +33,9 @@ fun CloudSyncControls(
     groupSyncToken: String,
     myDeviceName: String,
     myDeviceColorHex: String,
+    myDeviceEmoji: String, // Customizable profile pic / emoji representation!
     cloudStatusText: String,
-    onToggleCloudSync: (enabled: Boolean, token: String, myName: String, myColor: String) -> Unit,
+    onToggleCloudSync: (enabled: Boolean, token: String, myName: String, myColor: String, myEmoji: String) -> Unit,
     onGenerateGroupKey: () -> Unit,
     isUserSignedIn: Boolean,
     userDisplayName: String,
@@ -46,6 +47,7 @@ fun CloudSyncControls(
     var tokenInput by remember { mutableStateOf(groupSyncToken) }
     var nameInput by remember { mutableStateOf(myDeviceName) }
     var selectedColorHex by remember { mutableStateOf(myDeviceColorHex) }
+    var selectedEmoji by remember(myDeviceEmoji) { mutableStateOf(myDeviceEmoji) }
     var expandedSetup by remember { mutableStateOf(false) }
 
     // Forms fields for authentication fields
@@ -109,9 +111,9 @@ fun CloudSyncControls(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "L",
+                                    text = if (myDeviceEmoji.isNotBlank()) myDeviceEmoji else (userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "L"),
                                     color = Color.White,
-                                    fontSize = 14.sp,
+                                    fontSize = if (myDeviceEmoji.isNotBlank()) 16.sp else 14.sp,
                                     fontWeight = FontWeight.Black
                                 )
                             }
@@ -190,13 +192,13 @@ fun CloudSyncControls(
                     )
                     Column {
                         Text(
-                            text = "AUTOMATIC INTERCOM BACKGROUND SYNC",
+                            text = "MAP SHARING WITH FAMILY DEVICES",
                             color = if (isCloudSyncEnabled) GlowingEmerald else TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isCloudSyncEnabled) "ONLINE • AUTO-SYNC ACTIVE" else "LOCAL ONLY MODE",
+                            text = if (isCloudSyncEnabled) "ONLINE • SHARING ACTIVE" else "SELF ONLY MODE",
                             color = if (isCloudSyncEnabled) RadarCyan else SecondarySlate,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -235,7 +237,7 @@ fun CloudSyncControls(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "Commuter Circle Sync Key active. Real-time background update active. Share key below if linking external devices.",
+                            text = "Your Family Sharing Key is active. Other family members can see your live location on their map.",
                             color = SecondarySlate,
                             fontSize = 10.sp
                         )
@@ -273,7 +275,7 @@ fun CloudSyncControls(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Your sync token is derived automatically from your main profile email. All devices signed into the same account will pair automatically without manual pairing room setup configuration.",
+                        text = "This is your family key. Enter this same key on your family members' phones to link them to your map instantly.",
                         color = SecondarySlate,
                         fontSize = 10.sp
                     )
@@ -282,7 +284,7 @@ fun CloudSyncControls(
                     OutlinedTextField(
                         value = tokenInput,
                         onValueChange = { tokenInput = it },
-                        label = { Text("Active Commuter Circle Sync Key") },
+                        label = { Text("Family Sharing Key") },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -354,10 +356,46 @@ fun CloudSyncControls(
                         }
                     }
 
+                    // Profile Picture Emoji selector grid
+                    Text(text = "My Personal Profile Picture Emoji", fontSize = 11.sp, color = SecondarySlate, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val userEmojisList = listOf("👨", "👨‍💻", "👩", "👩‍💻", "👦", "👧", "👶", "👵", "👴", "🐱", "🐶", "🚗", "🚲", "🏡", "🦊", "🦸")
+                        val chunks = userEmojisList.chunked(8)
+                        chunks.forEach { rowEmojis ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                rowEmojis.forEach { emo ->
+                                    val isSel = selectedEmoji == emo
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSel) PrimaryCosmic else Color.White.copy(alpha = 0.05f))
+                                            .border(
+                                                width = if (isSel) 1.5.dp else 1.dp,
+                                                color = if (isSel) RadarCyan else SlateBorder,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedEmoji = emo },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = emo, fontSize = 14.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Apply and Synchronize Background button
                     Button(
                         onClick = {
-                            onToggleCloudSync(true, tokenInput, nameInput, selectedColorHex)
+                            onToggleCloudSync(true, tokenInput, nameInput, selectedColorHex, selectedEmoji)
                             expandedSetup = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
@@ -392,7 +430,7 @@ fun CloudSyncControls(
                         Switch(
                             checked = isCloudSyncEnabled,
                             onCheckedChange = { checked ->
-                                onToggleCloudSync(checked, tokenInput, nameInput, selectedColorHex)
+                                onToggleCloudSync(checked, tokenInput, nameInput, selectedColorHex, selectedEmoji)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,

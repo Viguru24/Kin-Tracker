@@ -50,6 +50,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val groupSyncToken = MutableStateFlow("")
     val myDeviceName = MutableStateFlow("Louis (Dad)")
     val myDeviceColor = MutableStateFlow("#AA22FF")
+    val myDeviceEmoji = MutableStateFlow("👨") // Added profile picture emoji preference!
     val cloudStatusText = MutableStateFlow("Local / offline tracking mode")
     val isSimulationModeEnabled = MutableStateFlow(false)
 
@@ -66,6 +67,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             putString("userEmail", userEmail.value)
             putString("myDeviceName", myDeviceName.value)
             putString("myDeviceColor", myDeviceColor.value)
+            putString("myDeviceEmoji", myDeviceEmoji.value)
             putString("groupSyncToken", groupSyncToken.value)
             putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
             putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
@@ -83,6 +85,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         userEmail.value = prefs.getString("userEmail", "louisdesouza@gmail.com") ?: "louisdesouza@gmail.com"
         myDeviceName.value = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
         myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+        myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
         val savedToken = prefs.getString("groupSyncToken", "") ?: ""
         if (savedToken.isBlank()) {
             val derived = convertToValidToken(userEmail.value)
@@ -218,14 +221,16 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     speedMph = 0.0,
                     statusText = "Syncing GPS...",
                     isComingHome = false,
-                    etaMinutes = 0
+                    etaMinutes = 0,
+                    avatarEmoji = myDeviceEmoji.value
                 )
                 repository.insertFamilyMembers(listOf(me))
             } else {
                 // Sync SQLite name and color values with the persisted SharedPreferences options
                 repository.updateMember(existingMe.copy(
                     name = myDeviceName.value,
-                    avatarColorHex = myDeviceColor.value
+                    avatarColorHex = myDeviceColor.value,
+                    avatarEmoji = myDeviceEmoji.value
                 ))
             }
             
@@ -549,7 +554,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Interactive Action #5: Dynamic Member Addition
-    fun addNewMember(name: String, relationType: String, hexColor: String) {
+    fun addNewMember(name: String, relationType: String, hexColor: String, avatarEmoji: String) {
         viewModelScope.launch {
             // Generate standard random location
             val angle = Random.nextDouble(0.0, 2 * Math.PI)
@@ -567,7 +572,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 speedMph = 4.5,
                 statusText = "At $relationType",
                 isComingHome = false,
-                etaMinutes = (dist * 20).toInt().coerceAtLeast(10)
+                etaMinutes = (dist * 20).toInt().coerceAtLeast(10),
+                avatarEmoji = avatarEmoji
             )
 
             val current = familyMembers.value.toMutableList()
@@ -790,18 +796,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         return "$hash/$sanitizedKey"
     }
 
-    fun toggleCloudSync(enabled: Boolean, token: String, myName: String, myColor: String) {
+    fun toggleCloudSync(enabled: Boolean, token: String, myName: String, myColor: String, myEmoji: String) {
         viewModelScope.launch {
             val validToken = convertToValidToken(token)
             isCloudSyncEnabled.value = enabled
             groupSyncToken.value = validToken
             myDeviceName.value = myName
             myDeviceColor.value = myColor
+            myDeviceEmoji.value = myEmoji
 
             val current = repository.getFamilyMembersOnce()
             val me = current.firstOrNull { it.id == "me" }
             if (me != null) {
-                repository.updateMember(me.copy(name = myName, avatarColorHex = myColor))
+                repository.updateMember(me.copy(name = myName, avatarColorHex = myColor, avatarEmoji = myEmoji))
             }
             savePreferences()
 
@@ -910,9 +917,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     repository.updateMember(me.copy(name = myDeviceName.value, avatarColorHex = myDeviceColor.value))
                 }
                 savePreferences()
-                cloudStatusText.value = "Synced Live (Automatic)"
+                cloudStatusText.value = "Live Map Connected"
                 
-                _uiEvents.emit("KinTracker automatically paired & sync active!")
+                _uiEvents.emit("Map sharing connected successfully!")
                 startCloudSyncLoop()
             } catch (e: Exception) {
                 if (groupSyncToken.value.isBlank()) {
@@ -980,7 +987,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 statusText = meMember.statusText,
                 isComingHome = meMember.isComingHome,
                 etaMinutes = meMember.etaMinutes,
-                lastActive = lastActiveTimestamp
+                lastActive = lastActiveTimestamp,
+                avatarEmoji = meMember.avatarEmoji
             )
 
             // 3. Compile updated consolidated payload
@@ -1052,7 +1060,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     speedMph = cloudM.speedMph,
                     statusText = activeStatus,
                     isComingHome = cloudM.isComingHome,
-                    etaMinutes = cloudM.etaMinutes
+                    etaMinutes = cloudM.etaMinutes,
+                    avatarEmoji = cloudM.avatarEmoji
                 )
 
                 if (matchingLocal == null) {

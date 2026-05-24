@@ -101,6 +101,19 @@ fun RadarMap(
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
+                    // Allow panning and swiping on the Map without triggering outer container scrolling
+                    setOnTouchListener { v, event ->
+                        when (event.action) {
+                            android.view.MotionEvent.ACTION_DOWN -> {
+                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                            }
+                            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                        }
+                        false
+                    }
+
                     // Target CR8 4DS by default and zoom closer
                     controller.setZoom(15.5)
                     controller.setCenter(GeoPoint(homeLat, homeLng))
@@ -112,13 +125,21 @@ fun RadarMap(
 
                 val density = context.resources.displayMetrics.density
 
-                // 1. Draw central HOME baseline anchor marker pin
+                // 1. Calculate people currently At Home
+                val atHomeMembers = members.filter { member ->
+                    val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                    dist < 0.05 || member.statusText.contains("At Home")
+                }
+                val atHomeNames = atHomeMembers.joinToString(", ") { it.name }
+                val atHomeEmojis = atHomeMembers.map { if (it.avatarEmoji.isNotBlank()) it.avatarEmoji else it.name.first().toString() }.joinToString(" ")
+
+                // Draw central HOME baseline anchor marker pin
                 val homeMarker = Marker(mapView).apply {
                     position = GeoPoint(homeLat, homeLng)
                     icon = createHomeMarkerDrawable(context)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    title = "Home Address"
-                    snippet = "United Kingdom, CR8 4DS"
+                    title = if (atHomeEmojis.isNotEmpty()) "Home base [$atHomeEmojis]" else "Home base"
+                    snippet = if (atHomeMembers.isEmpty()) "Nobody is home at the moment" else "At Home right now: $atHomeNames"
                     setOnMarkerClickListener { m, _ ->
                         onSelectMember(null)
                         m.showInfoWindow()
@@ -135,8 +156,11 @@ fun RadarMap(
 
                     val isSelected = member.id == selectedMemberId
 
-                    // Connect connecting route line to home core if coming home or is selected
-                    if (member.isComingHome || isSelected) {
+                    val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                    val isMemberAtHome = dist < 0.05 || member.statusText.contains("At Home")
+
+                    // Connect connecting route line to home core if they are away from home
+                    if (!isMemberAtHome) {
                         val polyline = Polyline(mapView).apply {
                             val points = listOf(GeoPoint(homeLat, homeLng), memberGeo)
                             setPoints(points)
@@ -145,19 +169,24 @@ fun RadarMap(
                             } catch (e: Exception) {
                                 android.graphics.Color.BLUE
                             }
-                            outlinePaint.strokeWidth = if (isSelected) 3.5f * density else 2.0f * density
-                            if (!isSelected) {
-                                outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(15f, 15f), 0f)
+                            val isHighlighted = isSelected || member.isComingHome
+                            outlinePaint.strokeWidth = if (isHighlighted) 3.5f * density else 1.5f * density
+                            outlinePaint.pathEffect = android.graphics.DashPathEffect(
+                                if (isHighlighted) floatArrayOf(15f, 15f) else floatArrayOf(8f, 12f),
+                                0f
+                            )
+                            if (!isHighlighted) {
+                                outlinePaint.alpha = 100 // Subtle line for non-selected away members
                             }
                         }
                         mapView.overlays.add(polyline)
                     }
 
-                    // Dynamically build colored, initials-based density-scaled marker pin
-                    val firstInit = member.name.firstOrNull()?.toString() ?: "M"
+                    // Dynamically build colored, initials/emoji-based density-scaled marker pin
+                    val markerLabel = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
                     val memberMarker = Marker(mapView).apply {
                         position = memberGeo
-                        icon = createColoredMarkerDrawable(context, member.avatarColorHex, firstInit, isSelected)
+                        icon = createColoredMarkerDrawable(context, member.avatarColorHex, markerLabel, isSelected)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         title = member.name
                         snippet = "${member.statusText} (${member.batteryPercentage}% power)"
@@ -364,12 +393,18 @@ private fun createColoredMarkerDrawable(
 
     // Embedded initials display text
     paint.color = android.graphics.Color.WHITE
-    paint.textSize = (if (isSelected) 13f else 11f) * density
+    val isEmoji = initials.any { it.code > 127 }
+    if (isEmoji) {
+        paint.textSize = (if (isSelected) 19f else 16f) * density
+    } else {
+        paint.textSize = (if (isSelected) 13f else 11f) * density
+    }
     paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     paint.textAlign = Paint.Align.CENTER
 
     val textY = center - (paint.descent() + paint.ascent()) / 2f
-    canvas.drawText(initials.take(2).uppercase(), center, textY, paint)
+    val drawTextString = if (isEmoji) initials else initials.take(2).uppercase()
+    canvas.drawText(drawTextString, center, textY, paint)
 
     return BitmapDrawable(context.resources, bitmap)
 }

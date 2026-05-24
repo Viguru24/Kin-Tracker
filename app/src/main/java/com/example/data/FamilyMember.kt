@@ -15,5 +15,6 @@ data class FamilyMember(
     val speedMph: Double,
     val statusText: String,
     val isComingHome: Boolean,
-    val etaMinutes: Int
+    val etaMinutes: Int,
+    val avatarEmoji: String = "" // Added support for customizable profile pictures/avatars!
 )

@@ -288,6 +288,7 @@ fun MainScreen(
     val groupSyncToken by viewModel.groupSyncToken.collectAsStateWithLifecycle()
     val myDeviceName by viewModel.myDeviceName.collectAsStateWithLifecycle()
     val myDeviceColor by viewModel.myDeviceColor.collectAsStateWithLifecycle()
+    val myDeviceEmoji by viewModel.myDeviceEmoji.collectAsStateWithLifecycle()
     val cloudStatusText by viewModel.cloudStatusText.collectAsStateWithLifecycle()
 
     val isUserSignedIn by viewModel.isUserSignedIn.collectAsStateWithLifecycle()
@@ -360,7 +361,7 @@ fun MainScreen(
                             .background(if (isPaused) ActiveAmber else GlowingEmerald, CircleShape)
                     )
                     Text(
-                        text = if (isPaused) "FEED PAUSED" else "LIVE GPS",
+                        text = if (isPaused) "MAP PAUSED" else "LIVE MAP ACTIVE",
                         color = if (isPaused) ActiveAmber else GlowingEmerald,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
@@ -385,9 +386,10 @@ fun MainScreen(
                 groupSyncToken = groupSyncToken,
                 myDeviceName = myDeviceName,
                 myDeviceColorHex = myDeviceColor,
+                myDeviceEmoji = myDeviceEmoji,
                 cloudStatusText = cloudStatusText,
-                onToggleCloudSync = { enabled, token, name, color ->
-                    viewModel.toggleCloudSync(enabled, token, name, color)
+                onToggleCloudSync = { enabled, token, name, color, emoji ->
+                    viewModel.toggleCloudSync(enabled, token, name, color, emoji)
                 },
                 onGenerateGroupKey = {
                     viewModel.generateNewGroupKey()
@@ -403,8 +405,8 @@ fun MainScreen(
             SimControls(
                 isPaused = isPaused,
                 onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
-                onAddMember = { name, type, color ->
-                    viewModel.addNewMember(name, type, color)
+                onAddMember = { name, type, color, emoji ->
+                    viewModel.addNewMember(name, type, color, emoji)
                 },
                 onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
                 onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },

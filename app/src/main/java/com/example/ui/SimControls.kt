@@ -31,7 +31,7 @@ import com.example.ui.theme.*
 fun SimControls(
     isPaused: Boolean,
     onTogglePause: () -> Unit,
-    onAddMember: (String, String, String) -> Unit,
+    onAddMember: (String, String, String, String) -> Unit, // Added support for custom profile pic emoji!
     onCalibrateHome: () -> Unit,
     onSaveCustomHome: (Double, Double) -> Unit,
     homeLat: Double,
@@ -49,6 +49,8 @@ fun SimControls(
     val relations = listOf("Husband", "Wife", "Son", "Daughter", "Grandma", "Grandpa", "Pet Tracker", "Vehicle")
 
     var selectedColorHex by remember { mutableStateOf("#9C27B0") } // Purple default
+    var selectedEmoji by remember { mutableStateOf("👨") } // Selected profile pic emoji!
+    val emojisList = listOf("👨", "👩", "👦", "👧", "👶", "👵", "👴", "🐶", "🐱", "🚗", "🚲", "🏡", "🦊", "🐼", "🦸", "🚀")
     val colorsList = listOf(
         "#EC407A", // Magenta Pink
         "#26A69A", // Teal
@@ -100,13 +102,13 @@ fun SimControls(
                     )
                     Column {
                         Text(
-                            text = if (isPaused) "DASHBOARD FEED (PAUSED)" else "LIVE GPS FEEDING",
+                            text = if (isPaused) "MAP UPDATES (PAUSED)" else "LIVE MAP ACTIVE",
                             color = if (isPaused) ActiveAmber else GlowingEmerald,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isPaused) "Updates suspended temporarily" else "Real-time positional tracking enabled",
+                            text = if (isPaused) "Updates paused temporarily" else "Sharing live locations on the family map",
                             color = SecondarySlate,
                             fontSize = 9.sp
                         )
@@ -440,11 +442,46 @@ fun SimControls(
                         }
                     }
 
+                    // Profile Picture Emoji selector grid
+                    Text(text = "Profile Picture / Avatar Icon", fontSize = 11.sp, color = SecondarySlate, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val chunks = emojisList.chunked(8)
+                        chunks.forEach { rowEmojis ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                rowEmojis.forEach { emo ->
+                                    val isSel = selectedEmoji == emo
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSel) PrimaryCosmic else Color.White.copy(alpha = 0.05f))
+                                            .border(
+                                                width = if (isSel) 1.5.dp else 1.dp,
+                                                color = if (isSel) RadarCyan else SlateBorder,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedEmoji = emo },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = emo, fontSize = 14.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Action Button to register Live device
                     Button(
                         onClick = {
                             if (newName.isNotBlank()) {
-                                onAddMember(newName, newRelation, selectedColorHex)
+                                onAddMember(newName, newRelation, selectedColorHex, selectedEmoji)
                                 newName = ""
                                 expandedRegister = false
                             }
