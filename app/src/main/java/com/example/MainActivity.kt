@@ -3,6 +3,7 @@ package com.example
 import android.os.Bundle
 import android.os.Build
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -320,6 +321,17 @@ fun MainScreen(
         animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
     )
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Handle system back gesture / back button to naturally close open panels
+    BackHandler(enabled = isSettingsOpen || isFamilyListExpanded) {
+        if (isSettingsOpen) {
+            isSettingsOpen = false
+        } else if (isFamilyListExpanded) {
+            isFamilyListExpanded = false
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -336,6 +348,22 @@ fun MainScreen(
             onTriggerCheckIn = { viewModel.triggerCheckIn() },
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
             onSettingsClick = { isSettingsOpen = true },
+            onOpenWhatsApp = {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = android.net.Uri.parse("https://api.whatsapp.com/send")
+                        `package` = "com.whatsapp"
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        val webIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://api.whatsapp.com"))
+                        context.startActivity(webIntent)
+                    } catch (ex: Exception) {
+                        viewModel.triggerUIFeedback("Could not open WhatsApp link.")
+                    }
+                }
+            },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -524,13 +552,23 @@ fun MainScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        IconButton(
+                        Button(
                             onClick = { isSettingsOpen = false },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.White.copy(alpha = 0.12f)
-                            )
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF5D2EE6),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.testTag("close_settings_button")
                         ) {
-                            Text("✕", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("🗺️", fontSize = 12.sp)
+                                Text("Map", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
                         }
                     }
 

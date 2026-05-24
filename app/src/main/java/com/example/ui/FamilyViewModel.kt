@@ -36,6 +36,12 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private val _uiEvents = MutableSharedFlow<String>()
     val uiEvents: SharedFlow<String> = _uiEvents.asSharedFlow()
 
+    fun triggerUIFeedback(message: String) {
+        viewModelScope.launch {
+            _uiEvents.emit(message)
+        }
+    }
+
     // Tracking state for UI selection
     val selectedMemberId = MutableStateFlow<String?>(null)
     

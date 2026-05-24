@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -50,6 +51,8 @@ fun RadarMap(
     onTriggerCheckIn: () -> Unit = {},
     onSendReaction: (String, String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
+    onOpenWhatsApp: () -> Unit = {},
+    bottomPadding: Dp = 120.dp,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -303,59 +306,27 @@ fun RadarMap(
                 }
             }
 
-            // Inbox / Messages circular Button with Badge "3"
-            Box(
-                modifier = Modifier.wrapContentSize()
+            // 2. WHATSAPP CHAT BUTTON (Themed green border & clear chat bubble)
+            Surface(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clickable { onOpenWhatsApp() }
+                    .testTag("whatsapp_chat_button"),
+                color = Color.White,
+                shape = CircleShape,
+                border = BorderStroke(1.5.dp, Color(0xFF25D366)), // Real WhatsApp Green!
+                shadowElevation = 6.dp
             ) {
-                Surface(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clickable { onTriggerCheckIn() }, // Use safe check-in shortcut or message action
-                    color = Color.White,
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, SlateBorder),
-                    shadowElevation = 6.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("✉️", fontSize = 18.sp)
-                    }
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Text("💬", fontSize = 18.sp)
                 }
-                // Custom Red Badge count visual
-                Surface(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .align(Alignment.TopEnd),
-                    color = Color(0xFFE53935),
-                    shape = CircleShape
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("3", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // 2. CHAT BUBBLE OVERLAY (Right side below top bar)
-        Surface(
-            modifier = Modifier
-                .padding(top = 66.dp, end = 12.dp)
-                .size(42.dp)
-                .align(Alignment.TopEnd)
-                .clickable { onTriggerCheckIn() },
-            color = Color.White,
-            shape = CircleShape,
-            border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 6.dp
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Text("💬", fontSize = 18.sp)
             }
         }
 
         // 3. MAP STYLE SELECTION HUD (Pill style floating at Bottom Left)
         Surface(
             modifier = Modifier
-                .padding(horizontal = 14.dp, vertical = 72.dp)
+                .padding(start = 14.dp, end = 14.dp, bottom = bottomPadding + 56.dp)
                 .align(Alignment.BottomStart),
             color = Color.White.copy(alpha = 0.95f),
             shape = RoundedCornerShape(12.dp),
@@ -395,7 +366,7 @@ fun RadarMap(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 14.dp)
+                .padding(start = 14.dp, end = 14.dp, bottom = bottomPadding + 6.dp)
                 .align(Alignment.BottomStart),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
@@ -454,7 +425,7 @@ fun RadarMap(
         // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom & Compass Recenter)
         Column(
             modifier = Modifier
-                .padding(end = 14.dp, bottom = 72.dp)
+                .padding(end = 14.dp, bottom = bottomPadding + 56.dp)
                 .align(Alignment.BottomEnd),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.End
@@ -533,7 +504,7 @@ fun RadarMap(
             if (sMember != null) {
                 Surface(
                     modifier = Modifier
-                        .padding(horizontal = 14.dp, vertical = 126.dp)
+                        .padding(start = 14.dp, end = 14.dp, bottom = bottomPadding + 110.dp)
                         .align(Alignment.BottomStart),
                     color = Color.White.copy(alpha = 0.98f),
                     shape = RoundedCornerShape(18.dp),
