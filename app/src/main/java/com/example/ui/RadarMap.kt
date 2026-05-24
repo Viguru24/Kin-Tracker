@@ -89,11 +89,7 @@ fun RadarMap(
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(0.85f) // Physically taller and dominant center stage presence
-            .clip(RoundedCornerShape(24.dp))
             .background(Color(0xFFE0E2EC))
-            .border(2.dp, SlateBorder, RoundedCornerShape(24.dp))
             .testTag("radar_map_container")
     ) {
         AndroidView(

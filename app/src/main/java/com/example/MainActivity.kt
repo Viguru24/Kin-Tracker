@@ -7,9 +7,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -299,6 +301,8 @@ fun MainScreen(
 
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
+    var isSettingsOpen by remember { mutableStateOf(false) }
+    var isFamilyListExpanded by remember { mutableStateOf(false) }
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
@@ -311,164 +315,293 @@ fun MainScreen(
         }
     }
 
+    val sheetHeight by animateDpAsState(
+        targetValue = if (isFamilyListExpanded) 520.dp else 105.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(CosmicBlack)
     ) {
-        // Core Layout Scroll Container
-        Column(
+        // 1. Full Screen Radar Map occupying the background
+        RadarMap(
+            members = members,
+            selectedMemberId = selectedMemberId,
+            onSelectMember = { viewModel.selectedMemberId.value = it },
+            homeLat = homeLat,
+            homeLng = homeLng,
+            onTriggerSOS = { viewModel.triggerSOS() },
+            onTriggerCheckIn = { viewModel.triggerCheckIn() },
+            onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
+            onSettingsClick = { isSettingsOpen = true },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // 2. Expandable Family List Sits on top of the map floating elegantly at the bottom
+        Surface(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .fillMaxWidth()
+                .height(sheetHeight)
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 12.dp)
+                .padding(horizontal = 12.dp)
+                .zIndex(10f),
+            color = CosmicBlack.copy(alpha = 0.95f),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.5.dp, SlateBorder),
+            shadowElevation = 12.dp
         ) {
-            // Compact Header Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxSize()
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Drag handle bar which expands and collapses
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isFamilyListExpanded = !isFamilyListExpanded }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "KinTracker",
-                        color = TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("app_header_title")
-                    )
-                    Text(
-                        text = "• Live Radar",
-                        color = RadarCyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(5.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.3f))
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = if (isFamilyListExpanded) "COLLAPSE FAMILY LIST" else "SWIPE UP FOR FAMILY LIST (${members.size})",
+                                color = RadarCyan,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.testTag("expand_family_handle")
+                            )
+                            Text(
+                                text = if (isFamilyListExpanded) "▼" else "▲",
+                                color = RadarCyan,
+                                fontSize = 8.sp
+                            )
+                        }
+                    }
                 }
 
-                // Tiny active feed indicator
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (isFamilyListExpanded) {
                     Box(
                         modifier = Modifier
-                            .size(5.dp)
-                            .background(if (isPaused) ActiveAmber else GlowingEmerald, CircleShape)
-                    )
-                    Text(
-                        text = if (isPaused) "MAP PAUSED" else "LIVE MAP ACTIVE",
-                        color = if (isPaused) ActiveAmber else GlowingEmerald,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                            .fillMaxSize()
+                            .padding(start = 14.dp, end = 14.dp, bottom = 12.dp)
+                    ) {
+                        TelemetryDashboard(
+                            members = members,
+                            selectedMemberId = selectedMemberId,
+                            onSelectMember = { viewModel.selectedMemberId.value = it },
+                            onCommuteHome = { viewModel.orderHeadingHome(it) },
+                            onSendAway = { id, dest -> viewModel.sendAway(id, dest) },
+                            onInstantCheckIn = { viewModel.instantCheckInAtHome(it) },
+                            onPing = { viewModel.pingMember(it) },
+                            onUpdateMember = { viewModel.updateFamilyMember(it) },
+                            onDeleteMember = { viewModel.deleteFamilyMember(it) },
+                            homeLat = homeLat,
+                            homeLng = homeLng,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isFamilyListExpanded = true }
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            members.take(4).forEach { member ->
+                                val avatarCol = try {
+                                    Color(android.graphics.Color.parseColor(member.avatarColorHex))
+                                } catch (e: Exception) {
+                                    Color(0xFF26A69A)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(avatarCol.copy(alpha = 0.2f))
+                                        .border(1.dp, avatarCol, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(text = member.avatarEmoji, fontSize = 15.sp)
+                                }
+                            }
+                            if (members.size > 4) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("+${members.size - 4}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column {
+                                Text(
+                                    text = "De Souza Circle",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val homeCount = members.count { it.statusText.contains("Home", ignoreCase = true) }
+                                Text(
+                                    text = "$homeCount at Home • ${members.size - homeCount} Commuting",
+                                    color = SecondarySlate,
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+
+                        // Mini check-in trigger shortcut
+                        IconButton(
+                            onClick = { viewModel.triggerCheckIn() },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color(0xFF5D2EE6), CircleShape)
+                        ) {
+                            Text("📍", fontSize = 14.sp)
+                        }
+                    }
                 }
             }
+        }
 
-            // SECTION 1: INTERACTIVE CANVAS RADAR MAP
-            RadarMap(
-                members = members,
-                selectedMemberId = selectedMemberId,
-                onSelectMember = { viewModel.selectedMemberId.value = it },
-                homeLat = homeLat,
-                homeLng = homeLng,
-                onTriggerSOS = { viewModel.triggerSOS() },
-                onTriggerCheckIn = { viewModel.triggerCheckIn() },
-                onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
-                onSettingsClick = {
-                    coroutineScope.launch {
-                        scrollState.animateScrollTo(1000)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            // SECTION 1.5: CLOUD SYNC & MULTI-DEVICE PAIRING CONTROLS
-            CloudSyncControls(
-                isCloudSyncEnabled = isCloudSyncEnabled,
-                groupSyncToken = groupSyncToken,
-                myDeviceName = myDeviceName,
-                myDeviceColorHex = myDeviceColor,
-                myDeviceEmoji = myDeviceEmoji,
-                cloudStatusText = cloudStatusText,
-                onToggleCloudSync = { enabled, token, name, color, emoji ->
-                    viewModel.toggleCloudSync(enabled, token, name, color, emoji)
-                },
-                onGenerateGroupKey = {
-                    viewModel.generateNewGroupKey()
-                },
-                isUserSignedIn = isUserSignedIn,
-                userDisplayName = userDisplayName,
-                userEmail = userEmail,
-                onSignIn = { name, email -> viewModel.signInUser(name, email) },
-                onSignOut = { viewModel.signOutUser() }
-            )
-
-            // SECTION 2: HARDWARE SIMULATION CONTROLLER (ADD DEVICES, RESUME SWITCH, SET HOME)
-            SimControls(
-                isPaused = isPaused,
-                onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
-                onAddMember = { name, type, color, emoji ->
-                    viewModel.addNewMember(name, type, color, emoji)
-                },
-                onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
-                onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },
-                homeLat = homeLat,
-                homeLng = homeLng,
-                isSimulationEnabled = isSimulationEnabled,
-                onToggleSimulationMode = { viewModel.toggleSimulationMode(it) }
-            )
-
-            // SECTION 3: EXPANDABLE TELEMETRY DASHBOARD
-            TelemetryDashboard(
-                members = members,
-                selectedMemberId = selectedMemberId,
-                onSelectMember = { viewModel.selectedMemberId.value = it },
-                onCommuteHome = { viewModel.orderHeadingHome(it) },
-                onSendAway = { id, dest -> viewModel.sendAway(id, dest) },
-                onInstantCheckIn = { viewModel.instantCheckInAtHome(it) },
-                onPing = { viewModel.pingMember(it) },
-                onUpdateMember = { viewModel.updateFamilyMember(it) },
-                onDeleteMember = { viewModel.deleteFamilyMember(it) },
-                homeLat = homeLat,
-                homeLng = homeLng
-            )
-
-            // SECTION 4: GEOFENCED TIMELINE AUDIT HISTORY (ROOM DB LOGS)
-            TimelineLogs(
-                logs = logs,
-                onClearLogs = { viewModel.clearLogHistory() }
-            )
-
-            // Core Footer Vitals Disclaimer
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 24.dp),
-                contentAlignment = Alignment.Center
+        // 3. SETTINGS & SIMULATION FULLSCREEN SLIDE OVERLAY SHEET
+        AnimatedVisibility(
+            visible = isSettingsOpen,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(90f)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = CosmicBlack
             ) {
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
                 ) {
-                    Text(
-                        text = "KinTracker Telemetry Version v1.0.4 - Secure Client-Side SQL Database",
-                        color = SecondarySlate.copy(alpha = 0.5f),
-                        fontSize = 8.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "Encrypted Family Location Service. No central server location tracking.",
-                        color = SecondarySlate.copy(alpha = 0.4f),
-                        fontSize = 8.sp
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("⚙️", fontSize = 20.sp)
+                            Text(
+                                text = "KinTracker Circle Settings",
+                                color = TextPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(
+                            onClick = { isSettingsOpen = false },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.White.copy(alpha = 0.12f)
+                            )
+                        ) {
+                            Text("✕", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    val settingsScrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(settingsScrollState),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CloudSyncControls(
+                            isCloudSyncEnabled = isCloudSyncEnabled,
+                            groupSyncToken = groupSyncToken,
+                            myDeviceName = myDeviceName,
+                            myDeviceColorHex = myDeviceColor,
+                            myDeviceEmoji = myDeviceEmoji,
+                            cloudStatusText = cloudStatusText,
+                            onToggleCloudSync = { enabled, token, name, color, emoji ->
+                                viewModel.toggleCloudSync(enabled, token, name, color, emoji)
+                            },
+                            onGenerateGroupKey = { viewModel.generateNewGroupKey() },
+                            isUserSignedIn = isUserSignedIn,
+                            userDisplayName = userDisplayName,
+                            userEmail = userEmail,
+                            onSignIn = { name, email -> viewModel.signInUser(name, email) },
+                            onSignOut = { viewModel.signOutUser() }
+                        )
+
+                        SimControls(
+                            isPaused = isPaused,
+                            onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
+                            onAddMember = { name, type, color, emoji ->
+                                viewModel.addNewMember(name, type, color, emoji)
+                            },
+                            onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
+                            onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },
+                            homeLat = homeLat,
+                            homeLng = homeLng,
+                            isSimulationEnabled = isSimulationEnabled,
+                            onToggleSimulationMode = { viewModel.toggleSimulationMode(it) }
+                        )
+
+                        TimelineLogs(
+                            logs = logs,
+                            onClearLogs = { viewModel.clearLogHistory() }
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 16.dp, bottom = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "KinTracker Telemetry Version v1.0.4 - Secure Client-Side SQL Database",
+                                    color = SecondarySlate.copy(alpha = 0.5f),
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "Encrypted Family Location Service. No central server location tracking.",
+                                    color = SecondarySlate.copy(alpha = 0.4f),
+                                    fontSize = 8.sp
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
