@@ -34,6 +34,7 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -297,6 +298,7 @@ fun MainScreen(
     val isSimulationEnabled by viewModel.isSimulationModeEnabled.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
@@ -377,6 +379,14 @@ fun MainScreen(
                 onSelectMember = { viewModel.selectedMemberId.value = it },
                 homeLat = homeLat,
                 homeLng = homeLng,
+                onTriggerSOS = { viewModel.triggerSOS() },
+                onTriggerCheckIn = { viewModel.triggerCheckIn() },
+                onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
+                onSettingsClick = {
+                    coroutineScope.launch {
+                        scrollState.animateScrollTo(1000)
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 

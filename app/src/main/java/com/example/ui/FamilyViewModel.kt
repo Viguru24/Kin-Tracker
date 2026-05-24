@@ -638,6 +638,53 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun triggerSOS() {
+        viewModelScope.launch {
+            val name = myDeviceName.value
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "me",
+                    memberName = name,
+                    actionText = "🚨 Triggered EMERGENCY SOS ALERT distress beacon! (Simulated Alert)",
+                    iconName = "critical"
+                )
+            )
+            _uiEvents.emit("🚨 SOS BEACON SENT! Distress alert active on family channels.")
+        }
+    }
+
+    fun triggerCheckIn() {
+        viewModelScope.launch {
+            val name = myDeviceName.value
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "me",
+                    memberName = name,
+                    actionText = "📍 checked in safely and shared live coordinates",
+                    iconName = "check_in"
+                )
+            )
+            _uiEvents.emit("📍 Shared safe check-in status with family circle.")
+        }
+    }
+
+    fun sendEmojiReaction(memberId: String, emoji: String) {
+        viewModelScope.launch {
+            val members = familyMembers.value
+            val m = members.firstOrNull { it.id == memberId } ?: return@launch
+            val name = myDeviceName.value
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "me",
+                    memberName = name,
+                    actionText = "shared reaction response '$emoji' with ${m.name}",
+                    iconName = "check_in"
+                )
+            )
+            _uiEvents.emit("Sent reaction $emoji to ${m.name}!")
+        }
+    }
+
     fun updateUserLocation(lat: Double, lng: Double, speed: Float, batteryLevel: Int, isCharging: Boolean) {
         viewModelScope.launch {
             val members = familyMembers.value

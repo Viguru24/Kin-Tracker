@@ -46,6 +46,10 @@ fun RadarMap(
     onSelectMember: (String?) -> Unit,
     homeLat: Double,
     homeLng: Double,
+    onTriggerSOS: () -> Unit = {},
+    onTriggerCheckIn: () -> Unit = {},
+    onSendReaction: (String, String) -> Unit = { _, _ -> },
+    onSettingsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -231,19 +235,140 @@ fun RadarMap(
             }
         )
 
-        // FLOWING OVERLAY #1: STYLE SELECTION PANEL (Map, Midnight, Retro Green) - Highly Compact Design
+        // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
+
+        // 1. FLOATING TOP HUD ACTION BAR
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp, start = 12.dp, end = 12.dp)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Settings trigger button (Scrolls down to sync config)
+            Surface(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clickable { onSettingsClick() },
+                color = Color.White,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Text("⚙️", fontSize = 18.sp)
+                }
+            }
+
+            // Center Dropdown: De Souza Family Selector!
+            var isDropdownExpanded by remember { mutableStateOf(false) }
+            Box {
+                Surface(
+                    modifier = Modifier
+                        .height(42.dp)
+                        .clickable { isDropdownExpanded = true },
+                    color = Color.White,
+                    shape = RoundedCornerShape(21.dp),
+                    border = BorderStroke(1.dp, SlateBorder),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "De Souza Family",
+                            color = Color(0xFF1E1E24),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text("▼", fontSize = 8.sp, color = Color.Gray)
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = isDropdownExpanded,
+                    onDismissRequest = { isDropdownExpanded = false },
+                    modifier = Modifier.background(Color.White).border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("De Souza Family (Primary Circle)", color = Color.Black, fontWeight = FontWeight.Bold) },
+                        onClick = { isDropdownExpanded = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Create New Circle...", color = PrimaryCosmic) },
+                        onClick = { 
+                            isDropdownExpanded = false
+                            onSettingsClick()
+                        }
+                    )
+                }
+            }
+
+            // Inbox / Messages circular Button with Badge "3"
+            Box(
+                modifier = Modifier.wrapContentSize()
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clickable { onTriggerCheckIn() }, // Use safe check-in shortcut or message action
+                    color = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, SlateBorder),
+                    shadowElevation = 6.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("✉️", fontSize = 18.sp)
+                    }
+                }
+                // Custom Red Badge count visual
+                Surface(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .align(Alignment.TopEnd),
+                    color = Color(0xFFE53935),
+                    shape = CircleShape
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("3", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // 2. CHAT BUBBLE OVERLAY (Right side below top bar)
         Surface(
             modifier = Modifier
-                .padding(6.dp)
-                .align(Alignment.TopStart),
-            color = Color.White.copy(alpha = 0.95f),
-            shape = RoundedCornerShape(8.dp),
+                .padding(top = 66.dp, end = 12.dp)
+                .size(42.dp)
+                .align(Alignment.TopEnd)
+                .clickable { onTriggerCheckIn() },
+            color = Color.White,
+            shape = CircleShape,
             border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 2.dp
+            shadowElevation = 6.dp
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Text("💬", fontSize = 18.sp)
+            }
+        }
+
+        // 3. MAP STYLE SELECTION HUD (Pill style floating at Bottom Left)
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 14.dp, vertical = 72.dp)
+                .align(Alignment.BottomStart),
+            color = Color.White.copy(alpha = 0.95f),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, SlateBorder),
+            shadowElevation = 4.dp
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(1.dp),
+                modifier = Modifier.padding(horizontal = 3.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf(
@@ -254,10 +379,10 @@ fun RadarMap(
                     val isSelected = mapTypeMode == mode
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(if (isSelected) PrimaryCosmic else Color.Transparent)
                             .clickable { mapTypeMode = mode }
-                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
                         Text(
                             text = label,
@@ -270,10 +395,70 @@ fun RadarMap(
             }
         }
 
-        // COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd)
+        // 4. CAPSULE ACTION OVERLAYS (Bottom row of map)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 14.dp)
+                .align(Alignment.BottomStart),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            // "Check in" floating action capsule
+            Surface(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clickable { onTriggerCheckIn() },
+                color = Color.White,
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🛡️", fontSize = 14.sp)
+                    Text(
+                        text = "Check in",
+                        color = Color(0xFF5D2EE6), // Purple color matches image
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // "SOS" panic safety capsule
+            Surface(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clickable { onTriggerSOS() },
+                color = Color(0xFFE53935), // Urgent Red SOS pill background
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.5.dp, Color.White),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🚨", fontSize = 14.sp)
+                    Text(
+                        text = "SOS",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+            }
+        }
+
+        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom & Compass Recenter)
         Column(
             modifier = Modifier
-                .padding(14.dp)
+                .padding(end = 14.dp, bottom = 72.dp)
                 .align(Alignment.BottomEnd),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalAlignment = Alignment.End
@@ -341,6 +526,50 @@ fun RadarMap(
                                 .size(5.dp)
                                 .background(PrimaryCosmic, CircleShape)
                         )
+                    }
+                }
+            }
+        }
+
+        // 6. QUICK EMOJI REACTION TOOLBAR OVERLAY (Renders when someone other than 'me' is selected)
+        if (selectedMemberId != null && selectedMemberId != "me") {
+            val sMember = members.firstOrNull { it.id == selectedMemberId }
+            if (sMember != null) {
+                Surface(
+                    modifier = Modifier
+                        .padding(horizontal = 14.dp, vertical = 126.dp)
+                        .align(Alignment.BottomStart),
+                    color = Color.White.copy(alpha = 0.98f),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.5.dp, Color(0xFF5D2EE6).copy(alpha = 0.4f)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(
+                            Pair("🍅", "Boo!"),
+                            Pair("❤️", "Love ya!"),
+                            Pair("😳", "Slow down!")
+                        ).forEach { (emoji, label) ->
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { onSendReaction(sMember.id, "$emoji $label") }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = Color(0xFFF2F0FA)
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = emoji, fontSize = 13.sp)
+                                    Text(text = label, color = Color(0xFF5D2EE6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }
