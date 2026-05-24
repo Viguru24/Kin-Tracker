@@ -70,6 +70,19 @@ fun RadarMap(
         }
     }
 
+    // Target zoom and center only when selection changes
+    LaunchedEffect(selectedMemberId) {
+        if (selectedMemberId != null) {
+            val member = members.firstOrNull { it.id == selectedMemberId }
+            if (member != null) {
+                mapViewRef?.let { map ->
+                    map.controller.animateTo(GeoPoint(member.y, member.x))
+                    map.controller.setZoom(15.5)
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -155,11 +168,6 @@ fun RadarMap(
                         }
                     }
                     mapView.overlays.add(memberMarker)
-
-                    // Target camera focus on the selected member
-                    if (isSelected) {
-                        mapView.controller.animateTo(memberGeo)
-                    }
                 }
 
                 // Apply OpenStreetMap customizable styling options using matrices
