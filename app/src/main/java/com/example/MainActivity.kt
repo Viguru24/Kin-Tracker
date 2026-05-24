@@ -500,16 +500,6 @@ fun MainScreen(
                                 )
                             }
                         }
-
-                        // Mini check-in trigger shortcut
-                        IconButton(
-                            onClick = { viewModel.triggerCheckIn() },
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(Color(0xFF5D2EE6), CircleShape)
-                        ) {
-                            Text("📍", fontSize = 14.sp)
-                        }
                     }
                 }
             }
