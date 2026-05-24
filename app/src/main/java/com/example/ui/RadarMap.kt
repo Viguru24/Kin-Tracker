@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -231,39 +233,78 @@ fun RadarMap(
             }
         }
 
-        // FLOWING OVERLAY #3: ANCHOR RECENTER COMPASS FAB
-        Surface(
+        // COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd)
+        Column(
             modifier = Modifier
                 .padding(14.dp)
-                .align(Alignment.BottomEnd)
-                .size(44.dp)
-                .clickable {
-                    onSelectMember(null) // Reset selected member focus
-                    mapViewRef?.let {
-                        it.controller.animateTo(GeoPoint(homeLat, homeLng))
-                        it.controller.setZoom(15.5)
-                    }
-                },
-            color = Color.White,
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 6.dp
+                .align(Alignment.BottomEnd),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.End
         ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize()
+            // WHERE AM I NOW (FIND ME ON MAP) FAB
+            Surface(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clickable {
+                        val me = members.firstOrNull { it.id == "me" }
+                        if (me != null && me.y != 0.0 && me.x != 0.0) {
+                            onSelectMember("me") // Focus selection
+                            mapViewRef?.let {
+                                it.controller.animateTo(GeoPoint(me.y, me.x))
+                                it.controller.setZoom(15.5)
+                            }
+                        }
+                    },
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .border(1.5.dp, PrimaryCosmic, CircleShape),
-                    contentAlignment = Alignment.Center
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = "Where am I now",
+                        tint = RadarCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // ANCHOR RECENTER COMPASS FAB (HOME)
+            Surface(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clickable {
+                        onSelectMember(null) // Reset selected member focus
+                        mapViewRef?.let {
+                            it.controller.animateTo(GeoPoint(homeLat, homeLng))
+                            it.controller.setZoom(15.5)
+                        }
+                    },
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(5.dp)
-                            .background(PrimaryCosmic, CircleShape)
-                    )
+                            .size(16.dp)
+                            .border(1.5.dp, PrimaryCosmic, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .background(PrimaryCosmic, CircleShape)
+                        )
+                    }
                 }
             }
         }

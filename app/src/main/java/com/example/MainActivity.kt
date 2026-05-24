@@ -1,6 +1,7 @@
 package com.example
 
 import android.os.Bundle
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -104,6 +105,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkAndRequestLocationPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
         val finePermission = PackageManager.PERMISSION_GRANTED == 
                 ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
         val coarsePermission = PackageManager.PERMISSION_GRANTED == 
@@ -112,12 +121,7 @@ class MainActivity : ComponentActivity() {
         if (finePermission || coarsePermission) {
             startLocationUpdates()
         } else {
-            requestPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
+            requestPermissionLauncher.launch(permissions.toTypedArray())
         }
     }
 
@@ -189,6 +193,18 @@ class MainActivity : ComponentActivity() {
                 } catch (e: Exception) {
                     // Safe fallback
                 }
+            }
+
+            // 3. Start high-reliability Foreground Service for active background location tracking
+            try {
+                val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                // Safe fallback
             }
         } catch (e: Exception) {
             // Catch any security or unsupported provider/illegal argument errors safely
@@ -383,14 +399,17 @@ fun MainScreen(
                 onSignOut = { viewModel.signOutUser() }
             )
 
-            // SECTION 2: HARDWARE SIMULATION CONTROLLER (ADD DEVICES, RESUME SWITCH)
+            // SECTION 2: HARDWARE SIMULATION CONTROLLER (ADD DEVICES, RESUME SWITCH, SET HOME)
             SimControls(
                 isPaused = isPaused,
                 onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
                 onAddMember = { name, type, color ->
                     viewModel.addNewMember(name, type, color)
                 },
-                onCalibrateHome = { viewModel.forceResetHomeGPS() },
+                onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
+                onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },
+                homeLat = homeLat,
+                homeLng = homeLng,
                 isSimulationEnabled = isSimulationEnabled,
                 onToggleSimulationMode = { viewModel.toggleSimulationMode(it) }
             )

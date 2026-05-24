@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -32,11 +33,15 @@ fun SimControls(
     onTogglePause: () -> Unit,
     onAddMember: (String, String, String) -> Unit,
     onCalibrateHome: () -> Unit,
+    onSaveCustomHome: (Double, Double) -> Unit,
+    homeLat: Double,
+    homeLng: Double,
     isSimulationEnabled: Boolean,
     onToggleSimulationMode: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expandedRegister by remember { mutableStateOf(false) }
+    var expandedHome by remember { mutableStateOf(false) }
 
     // Forms fields
     var newName by remember { mutableStateOf("") }
@@ -53,6 +58,15 @@ fun SimControls(
         "#E040FB", // Hot violet
         "#00FF87"  // Neon green
     )
+
+    // Permanent home field inputs synchronized with current values
+    var inputLat by remember { mutableStateOf(homeLat.toString()) }
+    var inputLng by remember { mutableStateOf(homeLng.toString()) }
+
+    LaunchedEffect(homeLat, homeLng) {
+        inputLat = homeLat.toString()
+        inputLng = homeLng.toString()
+    }
 
     Card(
         modifier = modifier
@@ -86,51 +100,24 @@ fun SimControls(
                     )
                     Column {
                         Text(
-                            text = if (isPaused) "SIMULATION ACTIVE (PAUSED)" else "LIVE COCKPIT FEEDING",
+                            text = if (isPaused) "DASHBOARD FEED (PAUSED)" else "LIVE GPS FEEDING",
                             color = if (isPaused) ActiveAmber else GlowingEmerald,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = if (isPaused) "Updates freeze temporarily" else "Real-time positional updates enabled",
+                            text = if (isPaused) "Updates suspended temporarily" else "Real-time positional tracking enabled",
                             color = SecondarySlate,
                             fontSize = 9.sp
                         )
                     }
                 }
 
-                // Row containing Calibrate GPS and Pause switches
+                // Row containing Pause and Debug switches
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Calibrate GPS Button
-                    Button(
-                        onClick = onCalibrateHome,
-                        colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(28.dp).testTag("sim_calibrate_gps_btn")
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Calibrate GPS",
-                                tint = RadarCyan,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Calibrate GPS",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                        }
-                    }
-
                     // Pausing switch (looks custom and stylish)
                     Button(
                         onClick = onTogglePause,
@@ -142,7 +129,7 @@ fun SimControls(
                         modifier = Modifier.height(28.dp).testTag("sim_toggle_pause_btn")
                     ) {
                         Text(
-                            text = if (isPaused) "Resume Live" else "Pause Feed",
+                            text = if (isPaused) "Resume" else "Pause",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isPaused) Color.White else TextPrimary
@@ -160,7 +147,7 @@ fun SimControls(
                         modifier = Modifier.height(28.dp).testTag("sim_toggle_mode_btn")
                     ) {
                         Text(
-                            text = if (isSimulationEnabled) "Demo Assets ON" else "Real Trackers ONLY",
+                            text = if (isSimulationEnabled) "Demo ON" else "Trackers Only",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -172,6 +159,160 @@ fun SimControls(
             Spacer(modifier = Modifier.height(6.dp))
             HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
+
+            // Expand Home Base Settings Button (Permanent Home Section) - Set and Forget!
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expandedHome = !expandedHome }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Home,
+                        contentDescription = "Home Base",
+                        tint = RadarCyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Permanent Home Landmark (Set & Forget)",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = if (expandedHome) "Collapse" else "Configure",
+                    color = RadarCyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            AnimatedVisibility(visible = expandedHome) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Set your high-accuracy permanent Home. Once saved, this baseline does not change unless you manually adjust it here.",
+                        color = SecondarySlate,
+                        fontSize = 10.sp
+                    )
+
+                    // Current Coordinates Stats Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Current Saved Lat", fontSize = 9.sp, color = SecondarySlate)
+                            Text(String.format(java.util.Locale.US, "%.6f", homeLat), fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                        }
+                        Column {
+                            Text("Current Saved Lng", fontSize = 9.sp, color = SecondarySlate)
+                            Text(String.format(java.util.Locale.US, "%.6f", homeLng), fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Button: "This is my home, I set it and I forget it"
+                    Button(
+                        onClick = onCalibrateHome,
+                        colors = ButtonDefaults.buttonColors(containerColor = RadarCyan),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Lock Current Location", modifier = Modifier.size(14.dp), tint = Color.Black)
+                            Text(
+                                text = "This is my home: lock current location",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 4.dp))
+
+                    Text(
+                        text = "Or manually type in custom Home coordinates separately:",
+                        color = SecondarySlate,
+                        fontSize = 9.sp
+                    )
+
+                    // Manual Coordinate Inputs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = inputLat,
+                            onValueChange = { inputLat = it },
+                            label = { Text("Home Latitude", fontSize = 10.sp) },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RadarCyan,
+                                unfocusedBorderColor = SlateBorder
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = inputLng,
+                            onValueChange = { inputLng = it },
+                            label = { Text("Home Longitude", fontSize = 10.sp) },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RadarCyan,
+                                unfocusedBorderColor = SlateBorder
+                            )
+                        )
+                    }
+
+                    // Button: Save Custom Coordinates
+                    Button(
+                        onClick = {
+                            val latVal = inputLat.toDoubleOrNull()
+                            val lngVal = inputLng.toDoubleOrNull()
+                            if (latVal != null && lngVal != null) {
+                                onSaveCustomHome(latVal, lngVal)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(32.dp)
+                    ) {
+                        Text(
+                            text = "Save Custom Coordinates Separately",
+                            color = TextPrimary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            HorizontalDivider(color = SlateBorder.copy(alpha = 0.3f))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Expand Register Form button
             Row(
@@ -219,124 +360,101 @@ fun SimControls(
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("Family Member Name", fontSize = 11.sp, color = SecondarySlate) },
-                        textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                        label = { Text("Device Display Name") },
+                        placeholder = { Text("e.g. Louis (Dad)") },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("sim_add_member_name"),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
                             focusedBorderColor = RadarCyan,
                             unfocusedBorderColor = SlateBorder,
-                            cursorColor = RadarCyan,
-                            focusedLabelColor = RadarCyan,
-                            unfocusedLabelColor = SecondarySlate
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
                         ),
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(62.dp)
-                            .testTag("sim_add_name_field")
+                        singleLine = true
                     )
 
-                    // Item B: Dropdown relation picker
+                    // Relation selection dropdown (Elegant visual selector instead of boring spinner)
+                    Text(text = "Commuter Relation Category", fontSize = 11.sp, color = SecondarySlate, fontWeight = FontWeight.Bold)
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, SlateBorder, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column {
-                            Text("Relation Circle Type", color = SecondarySlate, fontSize = 9.sp)
-                            Text(newRelation, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        relations.take(4).forEach { rel ->
+                            val isSel = newRelation == rel
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) PrimaryCosmic else Color.White.copy(alpha = 0.05f))
+                                    .border(1.dp, if (isSel) RadarCyan else SlateBorder, RoundedCornerShape(8.dp))
+                                    .clickable { newRelation = rel }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = rel, color = if (isSel) Color.White else TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
-
-                        // Compact Row representation of options to select (horizontal buttons)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.weight(1f, fill = false)
-                        ) {
-                            BoxWithConstraints {
-                                var expandedMenu by remember { mutableStateOf(false) }
-                                Button(
-                                    onClick = { expandedMenu = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
-                                    shape = RoundedCornerShape(4.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(26.dp)
-                                ) {
-                                    Text("Change", fontSize = 10.sp, color = TextPrimary)
-                                }
-                                DropdownMenu(
-                                    expanded = expandedMenu,
-                                    onDismissRequest = { expandedMenu = false },
-                                    modifier = Modifier.background(CosmicSlateCard)
-                                ) {
-                                    relations.forEach { relation ->
-                                        DropdownMenuItem(
-                                            text = { Text(relation, color = TextPrimary, fontSize = 12.sp) },
-                                            onClick = {
-                                                newRelation = relation
-                                                expandedMenu = false
-                                            }
-                                        )
-                                    }
-                                }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        relations.drop(4).forEach { rel ->
+                            val isSel = newRelation == rel
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSel) PrimaryCosmic else Color.White.copy(alpha = 0.05f))
+                                    .border(1.dp, if (isSel) RadarCyan else SlateBorder, RoundedCornerShape(8.dp))
+                                    .clickable { newRelation = rel }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = rel, color = if (isSel) Color.White else TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
 
-                    // Item C: Color Picker
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    // Avatar custom Color layout palette picker
+                    Text(text = "Map Pin Accent Theme", fontSize = 11.sp, color = SecondarySlate, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Select Radar Tracker Color Token:", color = SecondarySlate, fontSize = 10.sp)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(vertical = 4.dp).testTag("color_picker_row")
-                        ) {
-                            colorsList.forEach { hex ->
-                                val colorValue = try {
-                                    Color(android.graphics.Color.parseColor(hex))
-                                } catch (e: Exception) {
-                                    Color(0xFF26A69A)
-                                }
-                                val isSelected = hex == selectedColorHex
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .background(colorValue, CircleShape)
-                                        .border(
-                                            width = if (isSelected) 2.5.dp else 0.dp,
-                                            color = if (isSelected) TextPrimary else Color.Transparent,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { selectedColorHex = hex }
-                                )
-                            }
+                        colorsList.forEach { col ->
+                            val isSel = selectedColorHex == col
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(col)))
+                                    .border(
+                                        width = if (isSel) 2.5.dp else 0.dp,
+                                        color = if (isSel) Color.White else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { selectedColorHex = col }
+                            )
                         }
                     }
 
-                    // Submit Registration Button
+                    // Action Button to register Live device
                     Button(
                         onClick = {
                             if (newName.isNotBlank()) {
                                 onAddMember(newName, newRelation, selectedColorHex)
-                                newName = "" // reset
-                                expandedRegister = false // collapse
+                                newName = ""
+                                expandedRegister = false
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = RadarCyan,
-                            disabledContainerColor = SlateBorder
-                        ),
-                        enabled = newName.isNotBlank(),
-                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(38.dp)
-                            .testTag("sim_register_member_btn")
+                            .height(40.dp)
+                            .testTag("submit_registered_device_btn"),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             text = "Register Live Tracker GPS",

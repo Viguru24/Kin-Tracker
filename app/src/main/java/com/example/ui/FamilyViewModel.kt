@@ -83,12 +83,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         userEmail.value = prefs.getString("userEmail", "louisdesouza@gmail.com") ?: "louisdesouza@gmail.com"
         myDeviceName.value = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
         myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
-        groupSyncToken.value = prefs.getString("groupSyncToken", "") ?: ""
+        val savedToken = prefs.getString("groupSyncToken", "") ?: ""
+        if (savedToken.isBlank()) {
+            val derived = convertToValidToken(userEmail.value)
+            groupSyncToken.value = derived
+            prefs.edit().putString("groupSyncToken", derived).apply()
+        } else {
+            groupSyncToken.value = savedToken
+        }
         isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true)
         isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false)
         homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
         homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
-        isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", false)
+        isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
     }
 
     fun toggleSimulationMode(enabled: Boolean) {
@@ -157,7 +164,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         get() = homeLngFlow.value
         set(value) { homeLngFlow.value = value }
 
-    var isHomeCalibrated = false
+    var isHomeCalibrated = true
 
     init {
         val database = AppDatabase.getDatabase(application)
@@ -630,22 +637,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val members = familyMembers.value
             val me = members.firstOrNull { it.id == "me" } ?: return@launch
 
-            if (!isHomeCalibrated) {
-                homeLat = lat
-                homeLng = lng
-                isHomeCalibrated = true
-                _uiEvents.emit("GPS Synced! Home baseline calibrated to your current location.")
-                repository.insertLog(
-                    ActivityLog(
-                        memberId = "me",
-                        memberName = me.name,
-                        actionText = "calibrated home baseline to current coordinates (${String.format(java.util.Locale.US, "%.4f", lat)}, ${String.format(java.util.Locale.US, "%.4f", lng)})",
-                        iconName = "check_in"
-                    )
-                )
-                savePreferences()
-            }
-
             // Calculate offset distance in degrees relative to calibrated Home
             val latDiff = lat - homeLat
             val lngDiff = lng - homeLng
@@ -697,7 +688,49 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun forceResetHomeGPS() {
-        isHomeCalibrated = false
+        setHomeToCurrentLocation()
+    }
+
+    fun setHomeToCurrentLocation() {
+        viewModelScope.launch {
+            val me = familyMembers.value.firstOrNull { it.id == "me" }
+            if (me != null && me.y != 0.0 && me.x != 0.0) {
+                homeLat = me.y
+                homeLng = me.x
+                isHomeCalibrated = true
+                savePreferences()
+                _uiEvents.emit("Home locked! Saved current position as permanent Home.")
+                repository.insertLog(
+                    ActivityLog(
+                        memberId = "me",
+                        memberName = me.name,
+                        actionText = "locked permanent Home coordinates to (${String.format(java.util.Locale.US, "%.5f", homeLat)}, ${String.format(java.util.Locale.US, "%.5f", homeLng)})",
+                        iconName = "home"
+                    )
+                )
+            } else {
+                _uiEvents.emit("Waiting for GPS signal to register current position...")
+            }
+        }
+    }
+
+    fun saveCustomHome(lat: Double, lng: Double) {
+        viewModelScope.launch {
+            homeLat = lat
+            homeLng = lng
+            isHomeCalibrated = true
+            savePreferences()
+            _uiEvents.emit("Manual Home saved successfully!")
+            val me = familyMembers.value.firstOrNull { it.id == "me" }
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "me",
+                    memberName = me?.name ?: "Louis (Dad)",
+                    actionText = "updated manual Home landmarks to (${String.format(java.util.Locale.US, "%.5f", lat)}, ${String.format(java.util.Locale.US, "%.5f", lng)})",
+                    iconName = "home"
+                )
+            )
+        }
     }
 
     // MANUAL GPS MOCK CONTROLLER FOR REPLICATING COORDINATES IN EMULATORS

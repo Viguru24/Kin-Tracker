@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
@@ -47,7 +48,7 @@ fun CloudSyncControls(
     var selectedColorHex by remember { mutableStateOf(myDeviceColorHex) }
     var expandedSetup by remember { mutableStateOf(false) }
 
-    // local inputs for sign-in fields
+    // Forms fields for authentication fields
     var authNameInput by remember { mutableStateOf("Louis de Souza") }
     var authEmailInput by remember { mutableStateOf("louisdesouza@gmail.com") }
 
@@ -79,7 +80,7 @@ fun CloudSyncControls(
         Column(
             modifier = Modifier.padding(14.dp)
         ) {
-            // SECTION: USER ACCOUNT AUTHENTICATION PANEL
+            // MAIN PROFILE STATS & IDENTITY (Permanently signed in)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,12 +104,12 @@ fun CloudSyncControls(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .background(Color(android.graphics.Color.parseColor(myDeviceColorHex)), CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(selectedColorHex)), CircleShape)
                                     .border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "U",
+                                    text = userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "L",
                                     color = Color.White,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Black
@@ -130,132 +131,43 @@ fun CloudSyncControls(
                             }
                         }
 
-                        // Transparent high-contrast modern Sign Out button
-                        Button(
-                            onClick = onSignOut,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                            border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.6f)),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .height(28.dp)
-                                .testTag("sign_out_button")
-                        ) {
-                            Text(
-                                text = "Sign Out",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = ErrorRed
-                            )
-                        }
-                    }
-                } else {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                        // Status of account link
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(6.dp)
-                                    .background(ActiveAmber, CircleShape)
+                                    .background(GlowingEmerald, CircleShape)
                             )
                             Text(
-                                text = "OFFLINE PROFILE - ACCOUNT SIGN IN",
-                                color = ActiveAmber,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Black,
+                                text = "LINKED PERMANENTLY",
+                                color = GlowingEmerald,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
-
-                        // Form for Sign-In
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = authNameInput,
-                                    onValueChange = { authNameInput = it },
-                                    label = { Text("Display Name", fontSize = 10.sp, color = SecondarySlate) },
-                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = TextPrimary,
-                                        unfocusedTextColor = TextPrimary,
-                                        focusedBorderColor = RadarCyan,
-                                        unfocusedBorderColor = SlateBorder,
-                                        cursorColor = RadarCyan,
-                                        focusedLabelColor = RadarCyan,
-                                        unfocusedLabelColor = SecondarySlate
-                                    ),
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(62.dp)
-                                )
-
-                                OutlinedTextField(
-                                    value = authEmailInput,
-                                    onValueChange = { authEmailInput = it },
-                                    label = { Text("Account Email", fontSize = 10.sp, color = SecondarySlate) },
-                                    textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = TextPrimary,
-                                        unfocusedTextColor = TextPrimary,
-                                        focusedBorderColor = RadarCyan,
-                                        unfocusedBorderColor = SlateBorder,
-                                        cursorColor = RadarCyan,
-                                        focusedLabelColor = RadarCyan,
-                                        unfocusedLabelColor = SecondarySlate
-                                    ),
-                                    singleLine = true,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(62.dp)
-                                )
-                            }
-
-                            // Dynamic Sign In Trigger Button
-                            Button(
-                                onClick = {
-                                    if (authNameInput.isNotBlank() && authEmailInput.isNotBlank()) {
-                                        onSignIn(authNameInput, authEmailInput)
-                                        nameInput = authNameInput
-                                    }
-                                },
-                                enabled = authNameInput.isNotBlank() && authEmailInput.isNotBlank(),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = RadarCyan,
-                                    disabledContainerColor = SlateBorder
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .height(128.dp)
-                                    .width(76.dp)
-                                    .testTag("sign_in_button")
-                            ) {
-                                Text(
-                                    text = "Sign In",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (authNameInput.isNotBlank() && authEmailInput.isNotBlank()) Color.White else SecondarySlate
-                                )
-                            }
-                        }
+                    }
+                } else {
+                    // Quick fallback click to log straight back in as Louis de Souza
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSignIn("Louis de Souza", "louisdesouza@gmail.com") },
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "OFFLINE PROFILE - TAP TO RESTORE LOUIS DE SOUZA MAIN ACCOUNT",
+                            color = ActiveAmber,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
 
             // Header Row: Cloud Status and Info
             Row(
@@ -278,13 +190,13 @@ fun CloudSyncControls(
                     )
                     Column {
                         Text(
-                            text = "FAMILY INTERCOM & CLOUD SYNC",
+                            text = "AUTOMATIC INTERCOM BACKGROUND SYNC",
                             color = if (isCloudSyncEnabled) GlowingEmerald else TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = cloudStatusText,
+                            text = if (isCloudSyncEnabled) "ONLINE • AUTO-SYNC ACTIVE" else "LOCAL ONLY MODE",
                             color = if (isCloudSyncEnabled) RadarCyan else SecondarySlate,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
@@ -302,7 +214,7 @@ fun CloudSyncControls(
                     modifier = Modifier.height(28.dp)
                 ) {
                     Text(
-                        text = if (expandedSetup) "Close" else "Setup Sync",
+                        text = if (expandedSetup) "Hide details" else "Sharing details",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -314,7 +226,7 @@ fun CloudSyncControls(
             HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Short overview showing active sync details when collapsed
+            // Short overview showing active sync details when collapsed (Tidy offline/online summary)
             if (!expandedSetup) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -323,64 +235,33 @@ fun CloudSyncControls(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
-                            text = "Identity: $myDeviceName",
+                            text = "Commuter Circle Sync Key active. Real-time background update active. Share key below if linking external devices.",
                             color = SecondarySlate,
-                            fontSize = 11.sp
+                            fontSize = 10.sp
                         )
-                        if (groupSyncToken.isNotBlank()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Group Code: $groupSyncToken",
-                                    color = TextPrimary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.Share,
-                                    contentDescription = "Copy code",
-                                    tint = RadarCyan,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable {
-                                            clipboardManager.setText(AnnotatedString(groupSyncToken))
-                                        }
-                                )
-                            }
-                        } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                text = "No active sync room code.",
-                                color = SecondarySlate,
-                                fontSize = 11.sp
+                                text = "Stable sharing key: ${groupSyncToken.take(15)}...",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Copy code",
+                                tint = RadarCyan,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clickable {
+                                        clipboardManager.setText(AnnotatedString(groupSyncToken))
+                                    }
                             )
                         }
                     }
-
-                    // Quick Switch Toggle
-                    Switch(
-                        checked = isCloudSyncEnabled,
-                        onCheckedChange = { checked ->
-                            if (checked) {
-                                if (tokenInput.isBlank()) {
-                                    expandedSetup = true
-                                } else {
-                                    onToggleCloudSync(true, tokenInput, nameInput, selectedColorHex)
-                                }
-                            } else {
-                                onToggleCloudSync(false, tokenInput, nameInput, selectedColorHex)
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = GlowingEmerald,
-                            uncheckedThumbColor = SecondarySlate,
-                            uncheckedTrackColor = SlateBorder
-                        ),
-                        modifier = Modifier.height(24.dp)
-                    )
                 }
             }
 
@@ -388,150 +269,138 @@ fun CloudSyncControls(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
+                        .padding(top = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Connect multiple phones together by entering the SAME Group Sync Code on all of them! Choose different names so everyone gets their own blip on the radar.",
+                        text = "Your sync token is derived automatically from your main profile email. All devices signed into the same account will pair automatically without manual pairing room setup configuration.",
                         color = SecondarySlate,
-                        fontSize = 10.sp,
-                        lineHeight = 14.sp
+                        fontSize = 10.sp
                     )
 
-                    // Form Field 1: Your custom name on the tracker map (like WIFE, Daughter name)
+                    // Display active sync key
                     OutlinedTextField(
-                        value = nameInput,
-                        onValueChange = { nameInput = it },
-                        label = { Text("Your Phone Name (e.g. wife, daughter, dad)", fontSize = 10.sp, color = SecondarySlate) },
-                        textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 12.sp),
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        label = { Text("Active Commuter Circle Sync Key") },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_token_input"),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
                             focusedBorderColor = RadarCyan,
-                            unfocusedBorderColor = SlateBorder,
-                            cursorColor = RadarCyan,
-                            focusedLabelColor = RadarCyan,
-                            unfocusedLabelColor = SecondarySlate
+                            unfocusedBorderColor = SlateBorder
                         ),
                         singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(62.dp)
-                    )
-
-                    // Form Field 2: Group Code Room String
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = tokenInput,
-                            onValueChange = { tokenInput = it },
-                            label = { Text("Group Sync Code", fontSize = 10.sp, color = SecondarySlate) },
-                            textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = RadarCyan,
-                                unfocusedBorderColor = SlateBorder,
-                                cursorColor = RadarCyan,
-                                focusedLabelColor = RadarCyan,
-                                unfocusedLabelColor = SecondarySlate
-                            ),
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(62.dp)
-                        )
-
-                        // Button to Generate a brand new unique key
-                        Button(
-                            onClick = onGenerateGroupKey,
-                            colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp),
-                            modifier = Modifier.height(44.dp)
-                        ) {
-                            Text("Generate", fontSize = 10.sp, color = RadarCyan)
-                        }
-                    }
-
-                    // Form Field 3: Color picker for your map blip
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text("Your Personal Radar Color:", color = SecondarySlate, fontSize = 10.sp)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            colorsList.forEach { hex ->
-                                val colorValue = try {
-                                    Color(android.graphics.Color.parseColor(hex))
-                                } catch (e: Exception) {
-                                    Color(0xFF26A69A)
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Copy Key",
+                                modifier = Modifier.clickable {
+                                    clipboardManager.setText(AnnotatedString(tokenInput))
                                 }
-                                val isSelected = hex == selectedColorHex
-                                Box(
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .background(colorValue, CircleShape)
-                                        .border(
-                                            width = if (isSelected) 2.dp else 0.dp,
-                                            color = if (isSelected) TextPrimary else Color.Transparent,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { selectedColorHex = hex }
-                                )
-                            }
-                        }
-                    }
-
-                    // Action Activation Buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Join/Connect Button
-                        Button(
-                            onClick = {
-                                if (tokenInput.isNotBlank() && nameInput.isNotBlank()) {
-                                    onToggleCloudSync(true, tokenInput, nameInput, selectedColorHex)
-                                    expandedSetup = false
-                                }
-                            },
-                            enabled = tokenInput.isNotBlank() && nameInput.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isCloudSyncEnabled) ActiveAmber else GlowingEmerald
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(38.dp)
-                        ) {
-                            Text(
-                                text = if (isCloudSyncEnabled) "Update Cloud Settings" else "Enable Live Cloud Sync",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
                             )
                         }
+                    )
 
-                        if (isCloudSyncEnabled) {
-                            // Turn Off Sync Button
-                            Button(
-                                onClick = {
-                                    onToggleCloudSync(false, tokenInput, nameInput, selectedColorHex)
-                                    expandedSetup = false
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(38.dp)
-                            ) {
-                                Text("Stop Sync", fontSize = 10.sp, color = Color.White)
-                            }
+                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Device Display Name on Map
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("My Device Name on Map List") },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("cloud_device_name_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = RadarCyan,
+                            unfocusedBorderColor = SlateBorder
+                        ),
+                        singleLine = true
+                    )
+
+                    // Color picker palette
+                    Text(
+                        text = "My Personal Map Pin Color Accent",
+                        fontSize = 11.sp,
+                        color = SecondarySlate,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        colorsList.forEach { col ->
+                            val isSel = selectedColorHex == col
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(col)))
+                                    .border(
+                                        width = if (isSel) 2.5.dp else 0.dp,
+                                        color = if (isSel) Color.White else Color.Transparent,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { selectedColorHex = col }
+                            )
                         }
+                    }
+
+                    // Apply and Synchronize Background button
+                    Button(
+                        onClick = {
+                            onToggleCloudSync(true, tokenInput, nameInput, selectedColorHex)
+                            expandedSetup = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .testTag("apply_sync_custom_btn")
+                    ) {
+                        Text(
+                            text = "Save Device Setup Sync Settings",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    // Toggle to disable Cloud Intercom update cycles entirely
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Enable Cloud Sync",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Switch(
+                            checked = isCloudSyncEnabled,
+                            onCheckedChange = { checked ->
+                                onToggleCloudSync(checked, tokenInput, nameInput, selectedColorHex)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = GlowingEmerald,
+                                uncheckedThumbColor = SecondarySlate,
+                                uncheckedTrackColor = SlateBorder
+                            )
+                        )
                     }
                 }
             }
