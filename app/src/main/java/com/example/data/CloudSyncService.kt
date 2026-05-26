@@ -27,7 +27,7 @@ interface CloudSyncService {
     suspend fun createNewGroup(@Body body: RequestBody): Response<ResponseBody>
 
     companion object {
-        private const val BASE_URL = "https://api.keyvalue.xyz/"
+        private const val BASE_URL = "https://api.cosmowhisper.com/sync/"
 
         fun create(): CloudSyncService {
             val logging = HttpLoggingInterceptor().apply {
