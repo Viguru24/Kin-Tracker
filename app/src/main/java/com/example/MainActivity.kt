@@ -308,6 +308,7 @@ fun MainScreen(
     val userDisplayName by viewModel.userDisplayName.collectAsStateWithLifecycle()
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
     val isSimulationEnabled by viewModel.isSimulationModeEnabled.collectAsStateWithLifecycle()
+    val isWifeCloudSimulationEnabled by viewModel.isWifeCloudSimulationEnabled.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
@@ -595,7 +596,9 @@ fun MainScreen(
                             userDisplayName = userDisplayName,
                             userEmail = userEmail,
                             onSignIn = { name, email -> viewModel.signInUser(name, email) },
-                            onSignOut = { viewModel.signOutUser() }
+                            onSignOut = { viewModel.signOutUser() },
+                            isWifeCloudSimulationEnabled = isWifeCloudSimulationEnabled,
+                            onToggleWifeCloudSimulation = { viewModel.toggleWifeCloudSimulation(it) }
                         )
 
                         SimControls(
@@ -609,7 +612,8 @@ fun MainScreen(
                             homeLat = homeLat,
                             homeLng = homeLng,
                             isSimulationEnabled = isSimulationEnabled,
-                            onToggleSimulationMode = { viewModel.toggleSimulationMode(it) }
+                            onToggleSimulationMode = { viewModel.toggleSimulationMode(it) },
+                            onMockGpsPreset = { idx -> viewModel.triggerManualGpsMockPreset(idx) }
                         )
 
                         TimelineLogs(

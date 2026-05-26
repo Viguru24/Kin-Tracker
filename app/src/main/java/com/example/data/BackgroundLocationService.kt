@@ -260,6 +260,11 @@ class BackgroundLocationService : Service() {
         val myName = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
         val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
         val myEmoji = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
+        var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
+        if (dUuid.isBlank()) {
+            dUuid = java.util.UUID.randomUUID().toString().substring(0, 6)
+            prefs.edit().putString("myDeviceUUID", dUuid).apply()
+        }
 
         serviceScope.launch {
             try {
@@ -280,7 +285,7 @@ class BackgroundLocationService : Service() {
 
                 // 2. Map coordinates
                 val lastActiveTimestamp = System.currentTimeMillis()
-                val myCloudId = "device_" + myName.lowercase().replace("\\s".toRegex(), "")
+                val myCloudId = "device_" + myName.lowercase().replace("\\s".toRegex(), "") + "_" + dUuid
                 val myCloudMember = CloudMember(
                     id = myCloudId,
                     name = myName,

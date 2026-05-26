@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +39,7 @@ fun SimControls(
     homeLng: Double,
     isSimulationEnabled: Boolean,
     onToggleSimulationMode: (Boolean) -> Unit,
+    onMockGpsPreset: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expandedRegister by remember { mutableStateOf(false) }
@@ -161,6 +163,51 @@ fun SimControls(
             Spacer(modifier = Modifier.height(6.dp))
             HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(8.dp))
+
+            if (onMockGpsPreset != null) {
+                Text(
+                    text = "MOCK GPS PRESETS (TELEPORT MY PIN)",
+                    color = GlowingMagenta,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = "Instantly change this device's map location coordinates. Start another browser window with the app to watch the pins connect and sync live!",
+                    color = SecondarySlate,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp
+                )
+                
+                Spacer(modifier = Modifier.height(6.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val presets = listOf(
+                        "Home 🏡" to 0,
+                        "Walk 🚶" to 1,
+                        "Drive 🚗" to 2,
+                        "Commute 🚀" to 3
+                    )
+                    presets.forEach { (label, idx) ->
+                        Button(
+                            onClick = { onMockGpsPreset.invoke(idx) },
+                            colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).height(28.dp)
+                        ) {
+                            Text(label, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = SlateBorder.copy(alpha = 0.3f))
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
             // Expand Home Base Settings Button (Permanent Home Section) - Set and Forget!
             Row(
