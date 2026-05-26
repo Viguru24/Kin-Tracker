@@ -694,49 +694,50 @@ fun RadarMap(
             }
         }
 
-        // 6. QUICK EMOJI REACTION TOOLBAR OVERLAY (Renders when someone other than 'me' is selected)
-        if (selectedMemberId != null && selectedMemberId != "me") {
-            val sMember = members.firstOrNull { it.id == selectedMemberId }
-            if (sMember != null) {
-                Surface(
-                    modifier = Modifier
-                        .padding(start = 14.dp, end = 14.dp, bottom = bottomPadding + 110.dp)
-                        .align(Alignment.BottomStart),
-                    color = Color.White.copy(alpha = 0.98f),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.5.dp, Color(0xFF5D2EE6).copy(alpha = 0.4f)),
-                    shadowElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+        // 6. QUICK EMOJI REACTION TOOLBAR — always visible near top, auto-targets first family member
+        val reactionTarget = members.firstOrNull { it.id != "me" }
+        if (reactionTarget != null) {
+            Row(
+                modifier = Modifier
+                    .padding(top = 62.dp, start = 12.dp, end = 12.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    Triple("🍅", "Boo!", "boo_reaction_btn"),
+                    Triple("❤️", "Love ya!", "love_reaction_btn"),
+                    Triple("😳", "Slow down!", "slowdown_reaction_btn")
+                ).forEach { (emoji, label, tag) ->
+                    Surface(
+                        modifier = Modifier
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .clickable { onSendReaction(reactionTarget.id, "$emoji $label") }
+                            .testTag(tag),
+                        color = Color.White.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(15.dp),
+                        border = BorderStroke(1.dp, Color(0xFF5D2EE6).copy(alpha = 0.35f)),
+                        shadowElevation = 4.dp
                     ) {
-                        listOf(
-                            Pair("🍅", "Boo!"),
-                            Pair("❤️", "Love ya!"),
-                            Pair("😳", "Slow down!")
-                        ).forEach { (emoji, label) ->
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable { onSendReaction(sMember.id, "$emoji $label") }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                color = Color(0xFFF2F0FA)
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(text = emoji, fontSize = 13.sp)
-                                    Text(text = label, color = Color(0xFF5D2EE6), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = emoji, fontSize = 12.sp)
+                            Text(
+                                text = label,
+                                color = Color(0xFF5D2EE6),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
         }
+
     }
 }
 
