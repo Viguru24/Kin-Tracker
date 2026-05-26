@@ -173,7 +173,7 @@ fun RadarMap(
                 val homeMarker = Marker(mapView).apply {
                     position = GeoPoint(homeLat, homeLng)
                     icon = createHomeMarkerDrawable(context)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = if (atHomeEmojis.isNotEmpty()) "Home base [$atHomeEmojis]" else "Home base"
                     snippet = if (atHomeMembers.isEmpty()) "Nobody is home at the moment" else "At Home right now: $atHomeNames"
                     setOnMarkerClickListener { m, _ ->
@@ -254,7 +254,7 @@ fun RadarMap(
                     val memberMarker = Marker(mapView).apply {
                         position = memberGeo
                         icon = createColoredMarkerDrawable(context, markerColor, markerLabel, isSelected || isSos)
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         title = member.name
                         snippet = "${member.statusText} (${member.batteryPercentage}% power)"
                         setOnMarkerClickListener { m, _ ->
@@ -741,104 +741,192 @@ fun RadarMap(
     }
 }
 
-// Helper factories to design density-independent colored text vector marker icons
+// Life360-style circular bubble marker with teardrop stem and drop shadow
 private fun createColoredMarkerDrawable(
     context: Context,
     colorHex: String,
-    initials: String,
+    emoji: String,
     isSelected: Boolean
 ): Drawable {
-    val sizeDp = if (isSelected) 46 else 38
     val density = context.resources.displayMetrics.density
-    val sizePx = (sizeDp * density).toInt()
 
-    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    // Bubble diameter: 54dp normal, 66dp selected
+    val bubbleDp = if (isSelected) 66 else 54
+    val bubblePx = (bubbleDp * density).toInt()
+
+    // Stem: 10dp wide, 14dp tall
+    val stemW = (10 * density).toInt()
+    val stemH = (14 * density).toInt()
+
+    // Shadow blur and offset
+    val shadowRadius = (4 * density)
+    val shadowDy = (2 * density)
+    val shadowPad = (shadowRadius + shadowDy).toInt() + 2
+
+    // Total bitmap: width = bubblePx + shadowPad*2, height = bubblePx + stemH + shadowPad*2
+    val bmpW = bubblePx + shadowPad * 2
+    val bmpH = bubblePx + stemH + shadowPad * 2
+    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
     val parsedColor = try {
         android.graphics.Color.parseColor(colorHex)
     } catch (e: Exception) {
-        android.graphics.Color.DKGRAY
+        android.graphics.Color.parseColor("#5D2EE6")
     }
 
-    val paint = Paint().apply {
-        isAntiAlias = true
+    val cx = bmpW / 2f
+    val bubbleTop = shadowPad.toFloat()
+    val bubbleBottom = bubbleTop + bubblePx
+    val bubbleCy = bubbleTop + bubblePx / 2f
+    val bubbleR = bubblePx / 2f
+
+    val stemTipX = cx
+    val stemTipY = bubbleBottom + stemH - shadowPad
+
+    // ── Shadow layer (drawn first, slightly offset) ──
+    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        alpha = 55
+        maskFilter = android.graphics.BlurMaskFilter(shadowRadius, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
+    // Shadow circle
+    canvas.drawCircle(cx + 1.5f, bubbleCy + shadowDy + 1.5f, bubbleR - density, shadowPaint)
 
-    val center = sizePx / 2f
-    val radius = sizePx / 2.3f
+    // ── White fill circle ──
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, bubbleCy, bubbleR - density, fillPaint)
 
-    // Ambient glow outer background layer for selected marker
+    // ── Selected: outer glow ring ──
     if (isSelected) {
-        paint.color = parsedColor
-        paint.alpha = 80
-        canvas.drawCircle(center, center, radius, paint)
+        val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = parsedColor
+            alpha = 60
+            style = Paint.Style.STROKE
+            strokeWidth = 5f * density
+        }
+        canvas.drawCircle(cx, bubbleCy, bubbleR - 0.5f * density, glowPaint)
     }
 
-    // High contrast white ring layout
-    paint.alpha = 255
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(center, center, radius - (if (isSelected) 4 * density else 2 * density), paint)
-
-    // Solid core colored circle
-    paint.color = parsedColor
-    canvas.drawCircle(center, center, radius - (if (isSelected) 6 * density else 4 * density), paint)
-
-    // Embedded initials display text
-    paint.color = android.graphics.Color.WHITE
-    val isEmoji = initials.any { it.code > 127 }
-    if (isEmoji) {
-        paint.textSize = (if (isSelected) 19f else 16f) * density
-    } else {
-        paint.textSize = (if (isSelected) 13f else 11f) * density
+    // ── Colored border ring ──
+    val ringWidth = if (isSelected) 3.5f * density else 2.8f * density
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = parsedColor
+        style = Paint.Style.STROKE
+        strokeWidth = ringWidth
     }
-    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    paint.textAlign = Paint.Align.CENTER
+    canvas.drawCircle(cx, bubbleCy, bubbleR - ringWidth / 2f - density * 0.5f, ringPaint)
 
-    val textY = center - (paint.descent() + paint.ascent()) / 2f
-    val drawTextString = if (isEmoji) initials else initials.take(2).uppercase()
-    canvas.drawText(drawTextString, center, textY, paint)
+    // ── Teardrop stem: filled triangle pointing down ──
+    val stemPath = android.graphics.Path()
+    val stemBaseHalf = stemW / 2f
+    stemPath.moveTo(cx - stemBaseHalf, bubbleBottom - density * 2f)
+    stemPath.lineTo(cx + stemBaseHalf, bubbleBottom - density * 2f)
+    stemPath.lineTo(stemTipX, stemTipY)
+    stemPath.close()
+    val stemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.FILL
+    }
+    canvas.drawPath(stemPath, stemPaint)
+    // Stem border edges matching the ring color
+    val stemBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = parsedColor
+        style = Paint.Style.STROKE
+        strokeWidth = ringWidth * 0.85f
+        strokeJoin = Paint.Join.ROUND
+    }
+    canvas.drawPath(stemPath, stemBorderPaint)
+
+    // ── Emoji centered in the bubble ──
+    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = (if (isSelected) 28f else 22f) * density
+        typeface = Typeface.DEFAULT
+    }
+    // Vertically center using font metrics
+    val fm = emojiPaint.fontMetrics
+    val textY = bubbleCy - (fm.ascent + fm.descent) / 2f
+    canvas.drawText(emoji, cx, textY, emojiPaint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
 
-// Helper to design central green homestead indicator drawable
-private fun createHomeMarkerDrawable(context: Context): Drawable {
-    val sizeDp = 44
-    val density = context.resources.displayMetrics.density
-    val sizePx = (sizeDp * density).toInt()
 
-    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+// Life360-style home bubble marker
+private fun createHomeMarkerDrawable(context: Context): Drawable {
+    val density = context.resources.displayMetrics.density
+
+    val bubblePx = (52 * density).toInt()
+    val stemW = (10 * density).toInt()
+    val stemH = (13 * density).toInt()
+    val shadowRadius = (4 * density)
+    val shadowDy = (2 * density)
+    val shadowPad = (shadowRadius + shadowDy).toInt() + 2
+
+    val bmpW = bubblePx + shadowPad * 2
+    val bmpH = bubblePx + stemH + shadowPad * 2
+    val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
-    val paint = Paint().apply {
-        isAntiAlias = true
+    val homeColor = android.graphics.Color.parseColor("#2E7D32")
+    val cx = bmpW / 2f
+    val bubbleTop = shadowPad.toFloat()
+    val bubbleBottom = bubbleTop + bubblePx
+    val bubbleCy = bubbleTop + bubblePx / 2f
+    val bubbleR = bubblePx / 2f
+    val stemTipY = bubbleBottom + stemH - shadowPad
+
+    // Shadow
+    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        alpha = 50
+        maskFilter = android.graphics.BlurMaskFilter(shadowRadius, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
+    canvas.drawCircle(cx + 1.5f, bubbleCy + shadowDy + 1.5f, bubbleR - density, shadowPaint)
 
-    val center = sizePx / 2f
-    val radius = sizePx / 2.3f
+    // White fill
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(cx, bubbleCy, bubbleR - density, fillPaint)
 
-    // Glowing green pulsing surround
-    paint.color = android.graphics.Color.parseColor("#2E7D32")
-    paint.alpha = 80
-    canvas.drawCircle(center, center, radius, paint)
+    // Green border ring
+    val ringWidth = 3f * density
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = homeColor
+        style = Paint.Style.STROKE
+        strokeWidth = ringWidth
+    }
+    canvas.drawCircle(cx, bubbleCy, bubbleR - ringWidth / 2f - density * 0.5f, ringPaint)
 
-    // Protective high-contrast white boundaries
-    paint.alpha = 255
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(center, center, radius - 3 * density, paint)
+    // Stem
+    val stemPath = android.graphics.Path()
+    stemPath.moveTo(cx - stemW / 2f, bubbleBottom - density * 2f)
+    stemPath.lineTo(cx + stemW / 2f, bubbleBottom - density * 2f)
+    stemPath.lineTo(cx, stemTipY)
+    stemPath.close()
+    canvas.drawPath(stemPath, fillPaint)
+    val stemBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = homeColor
+        style = Paint.Style.STROKE
+        strokeWidth = ringWidth * 0.85f
+        strokeJoin = Paint.Join.ROUND
+    }
+    canvas.drawPath(stemPath, stemBorderPaint)
 
-    // Midnight dark solid core matching theme aesthetics
-    paint.color = android.graphics.Color.parseColor("#1A1C1E")
-    canvas.drawCircle(center, center, radius - 5 * density, paint)
-
-    // Bold Home 'H' title
-    paint.color = android.graphics.Color.parseColor("#2E7D32")
-    paint.textSize = 14 * density
-    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    paint.textAlign = Paint.Align.CENTER
-    val textY = center - (paint.descent() + paint.ascent()) / 2f
-    canvas.drawText("H", center, textY, paint)
+    // House emoji
+    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        textSize = 22f * density
+        typeface = Typeface.DEFAULT
+    }
+    val fm = emojiPaint.fontMetrics
+    canvas.drawText("🏠", cx, bubbleCy - (fm.ascent + fm.descent) / 2f, emojiPaint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
