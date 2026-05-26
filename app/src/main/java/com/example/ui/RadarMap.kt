@@ -244,11 +244,16 @@ fun RadarMap(
                         mapView.overlays.add(polyline)
                     }
 
+                    // Check if member has triggered an active SOS emergency distress beacon
+                    val isSos = member.statusText.contains("🚨 EMERGENCY SOS ACTIVE") || member.statusText.contains("🚨 SOS")
+                    
                     // Dynamically build colored, initials/emoji-based density-scaled marker pin
-                    val markerLabel = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
+                    val markerLabel = if (isSos) "🚨" else if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
+                    val markerColor = if (isSos) "#FF1744" else member.avatarColorHex
+                    
                     val memberMarker = Marker(mapView).apply {
                         position = memberGeo
-                        icon = createColoredMarkerDrawable(context, member.avatarColorHex, markerLabel, isSelected)
+                        icon = createColoredMarkerDrawable(context, markerColor, markerLabel, isSelected || isSos)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         title = member.name
                         snippet = "${member.statusText} (${member.batteryPercentage}% power)"
