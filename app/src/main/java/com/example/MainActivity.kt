@@ -139,12 +139,20 @@ class MainActivity : ComponentActivity() {
             }
 
             val isGpsEnabled = try {
-                locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
+                if (hasFine) {
+                    locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
+                } else {
+                    false
+                }
             } catch (e: Exception) {
                 false
             }
             val isNetworkEnabled = try {
-                locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ?: false
+                if (hasFine || hasCoarse) {
+                    locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ?: false
+                } else {
+                    false
+                }
             } catch (e: Exception) {
                 false
             }
@@ -160,7 +168,7 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (e: Exception) { /* Handled safely */ }
             }
-            if (isNetworkEnabled) {
+            if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
                     locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let { loc ->
                         if (bestLastLocation == null || loc.time > bestLastLocation!!.time) {
@@ -185,7 +193,7 @@ class MainActivity : ComponentActivity() {
                     // Safe fallback
                 }
             }
-            if (isNetworkEnabled) {
+            if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
@@ -282,6 +290,7 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
+    val locationTrails by viewModel.locationTrails.collectAsStateWithLifecycle()
     val logs by viewModel.activityLogs.collectAsStateWithLifecycle()
     val isPaused by viewModel.isSimulationPaused.collectAsStateWithLifecycle()
     val selectedMemberId by viewModel.selectedMemberId.collectAsStateWithLifecycle()
@@ -344,6 +353,7 @@ fun MainScreen(
             onSelectMember = { viewModel.selectedMemberId.value = it },
             homeLat = homeLat,
             homeLng = homeLng,
+            locationTrails = locationTrails,
             onTriggerSOS = { viewModel.triggerSOS() },
             onTriggerCheckIn = { viewModel.triggerCheckIn() },
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
@@ -364,6 +374,7 @@ fun MainScreen(
                     }
                 }
             },
+            bottomPadding = sheetHeight,
             modifier = Modifier.fillMaxSize()
         )
 

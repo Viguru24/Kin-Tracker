@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -470,39 +471,45 @@ fun TelemetryDashboard(
                                 )
                             }
 
-                            // Battery Gauge and isCharging
+                            // High-fidelity physical battery gauge (capsule-styled)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(8.dp))
+                                    .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                             ) {
                                 if (member.isCharging) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Charging",
-                                        tint = GlowingEmerald,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "${member.batteryPercentage}%",
-                                        color = GlowingEmerald,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                } else {
-                                    val isLow = member.batteryPercentage <= 20
-                                    Icon(
-                                        imageVector = if (isLow) Icons.Default.Warning else Icons.Default.Person,
-                                        contentDescription = "Battery Status",
-                                        tint = if (isLow) ErrorRed else SecondarySlate,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "${member.batteryPercentage}%",
-                                        color = if (isLow) ErrorRed else TextPrimary,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isLow) FontWeight.Bold else FontWeight.Normal
+                                    Text("⚡", fontSize = 11.sp, color = Color(0xFF00FF87))
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .width(28.dp)
+                                        .height(13.dp)
+                                        .border(1.dp, if (member.batteryPercentage <= 20) Color(0xFFE53935) else Color.White.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+                                        .padding(1.5.dp)
+                                ) {
+                                    val barColor = when {
+                                        member.isCharging -> Color(0xFF00FF87)
+                                        member.batteryPercentage <= 20 -> Color(0xFFE53935)
+                                        member.batteryPercentage <= 50 -> Color(0xFFFFB300)
+                                        else -> Color(0xFF00FF87)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .fillMaxWidth((member.batteryPercentage / 100f).coerceIn(0f, 1f))
+                                            .background(barColor, RoundedCornerShape(1.dp))
                                     )
                                 }
+                                Text(
+                                    text = "${member.batteryPercentage}%",
+                                    color = if (member.isCharging) Color(0xFF00FF87) else if (member.batteryPercentage <= 20) Color(0xFFE53935) else TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
                         }
 

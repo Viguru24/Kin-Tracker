@@ -23,6 +23,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class BackgroundLocationService : Service() {
 
@@ -30,6 +34,12 @@ class BackgroundLocationService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var locationManager: LocationManager? = null
     private lateinit var repository: FamilyRepository
+
+    private val cloudService = CloudSyncService.create()
+    private val moshi = Moshi.Builder()
+        .add(KotlinJsonAdapterFactory())
+        .build()
+    private val payloadAdapter = moshi.adapter(CloudGroupPayload::class.java)
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -70,18 +80,26 @@ class BackgroundLocationService : Service() {
             }
 
             val isGpsEnabled = try {
-                locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
+                if (hasFine) {
+                    locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
+                } else {
+                    false
+                }
             } catch (e: Exception) {
                 false
             }
             
             val isNetworkEnabled = try {
-                locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ?: false
+                if (hasFine || hasCoarse) {
+                    locationManager?.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ?: false
+                } else {
+                    false
+                }
             } catch (e: Exception) {
                 false
             }
 
-            if (isGpsEnabled) {
+            if (hasFine && isGpsEnabled) {
                 try {
                     locationManager?.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER,
@@ -94,7 +112,7 @@ class BackgroundLocationService : Service() {
                     // Safe fallback
                 }
             }
-            if (isNetworkEnabled) {
+            if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
@@ -110,12 +128,20 @@ class BackgroundLocationService : Service() {
 
             // Also request immediate location to initialize
             val lastKnownGps = try {
-                locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                if (hasFine) {
+                    locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                } else {
+                    null
+                }
             } catch (e: Exception) {
                 null
             }
             val lastKnownNet = try {
-                locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                if (hasFine || hasCoarse) {
+                    locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                } else {
+                    null
+                }
             } catch (e: Exception) {
                 null
             }
@@ -210,8 +236,94 @@ class BackgroundLocationService : Service() {
                     statusText = status
                 )
                 repository.updateMember(updatedMe)
+                
+                // Immediately push to cloud key-value server so family members see live travel
+                backgroundCloudSync(location, batteryPct, isCharging, speedMph, status)
             } catch (e: Exception) {
                 // Fallback
+            }
+        }
+    }
+
+    private fun backgroundCloudSync(
+        location: Location,
+        batteryPct: Int,
+        isCharging: Boolean,
+        speedMph: Double,
+        status: String
+    ) {
+        val prefs = getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+        val isCloudSyncEnabled = prefs.getBoolean("isCloudSyncEnabled", true)
+        val token = prefs.getString("groupSyncToken", "") ?: ""
+        if (!isCloudSyncEnabled || token.isBlank()) return
+
+        val myName = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
+        val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+        val myEmoji = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
+
+        serviceScope.launch {
+            try {
+                // 1. GET Current Group Data from key-value store
+                val response = cloudService.getGroupData(token)
+                var payload: CloudGroupPayload? = null
+
+                if (response.isSuccessful) {
+                    val jsonString = response.body()?.string() ?: ""
+                    if (jsonString.isNotBlank() && jsonString != "null" && jsonString != "{}") {
+                        try {
+                            payload = payloadAdapter.fromJson(jsonString)
+                        } catch (e: Exception) {
+                            // Suppress
+                        }
+                    }
+                }
+
+                // 2. Map coordinates
+                val lastActiveTimestamp = System.currentTimeMillis()
+                val myCloudId = "device_" + myName.lowercase().replace("\\s".toRegex(), "")
+                val myCloudMember = CloudMember(
+                    id = myCloudId,
+                    name = myName,
+                    avatarColorHex = myColor,
+                    x = location.longitude,
+                    y = location.latitude,
+                    batteryPercentage = batteryPct,
+                    isCharging = isCharging,
+                    speedMph = speedMph,
+                    statusText = status,
+                    isComingHome = false,
+                    etaMinutes = 0,
+                    lastActive = lastActiveTimestamp,
+                    avatarEmoji = myEmoji
+                )
+
+                // 3. Consolidated payload
+                val newPayload = if (payload != null) {
+                    val updatedMembers = payload.members.toMutableMap()
+                    updatedMembers[myCloudId] = myCloudMember
+                    payload.copy(
+                        lastUpdated = lastActiveTimestamp,
+                        members = updatedMembers
+                    )
+                } else {
+                    val prefsHomeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
+                    val prefsHomeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
+                    val isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
+                    CloudGroupPayload(
+                        homeLat = prefsHomeLat,
+                        homeLng = prefsHomeLng,
+                        isHomeCalibrated = isHomeCalibrated,
+                        lastUpdated = lastActiveTimestamp,
+                        members = mapOf(myCloudId to myCloudMember)
+                    )
+                }
+
+                // 4. PUT updated payload to cloud
+                val payloadJson = payloadAdapter.toJson(newPayload)
+                val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
+                cloudService.updateGroupData(token, requestBody)
+            } catch (e: Exception) {
+                // Ignore network errors in background
             }
         }
     }

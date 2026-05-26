@@ -280,6 +280,81 @@ fun CloudSyncControls(
                         fontSize = 10.sp
                     )
 
+                    // STEP-BY-STEP PAIRING GUIDE FOR WIFE / SECOND PHONE
+                    var showStepsWalkthrough by remember { mutableStateOf(false) }
+                    val shareContext = androidx.compose.ui.platform.LocalContext.current
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = SlateBorder.copy(alpha = 0.3f)),
+                        border = BorderStroke(1.dp, if (showStepsWalkthrough) RadarCyan.copy(alpha = 0.5f) else Color.Transparent)
+                    ) {
+                        Column(modifier = Modifier.clickable { showStepsWalkthrough = !showStepsWalkthrough }.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("👩", fontSize = 14.sp)
+                                    Text(
+                                        text = "Guide: Pair Your Wife's Phone",
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = if (showStepsWalkthrough) "Hide" else "Show step-by-step",
+                                    color = RadarCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            if (showStepsWalkthrough) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(
+                                        "1. Install KinTracker on her phone.",
+                                        "2. Open Settings (⚙️) on her phone and expand the Map Sharing area.",
+                                        "3. Type or paste your unique Family Sharing Key (shown below) into her settings.",
+                                        "4. Toggle on her 'Enable Cloud Sync' switch to begin active map sharing."
+                                    ).forEach { stepText ->
+                                        Text(
+                                            text = stepText,
+                                            color = TextSecondary,
+                                            fontSize = 10.sp,
+                                            lineHeight = 13.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                clipboardManager.setText(AnnotatedString(tokenInput))
+                                                val inviteUrl = "https://api.whatsapp.com/send?text=" + android.net.Uri.encode(
+                                                    "Hey! Download KinTracker, then enter our family group key in settings to sync our maps: $tokenInput"
+                                                )
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(inviteUrl))
+                                                shareContext.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                // Fallback
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        shape = RoundedCornerShape(6.dp),
+                                        modifier = Modifier.height(26.dp)
+                                    ) {
+                                        Text("Invite & Send Key via WhatsApp 💬", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Display active sync key
                     OutlinedTextField(
                         value = tokenInput,

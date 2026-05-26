@@ -48,6 +48,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     // Toggle for auto-simulation speed or pause
     val isSimulationPaused = MutableStateFlow(false)
 
+    // Real-time location trails (past 30 coordinates per member for visual breadcrumb trails on the custom OSM map)
+    private val _locationTrails = MutableStateFlow<Map<String, List<Pair<Double, Double>>>>(emptyMap())
+    val locationTrails: StateFlow<Map<String, List<Pair<Double, Double>>>> = _locationTrails
+
     // Set to track members who have triggered approaching home alerts during their current journey
     private val triggeredApproachingHomeAlerts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -196,6 +200,56 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 started = SharingStarted.WhileSubscribed(5000),
                 initialValue = emptyList()
             )
+
+        // Keep track of locations updates real-time to render visual pathways (last 30 points)
+        viewModelScope.launch {
+            // Seed visual trails dynamically using current home coordinates to showcase active routes immediately on start!
+            val seedTrails = mutableMapOf<String, List<Pair<Double, Double>>>()
+            seedTrails["isabel"] = listOf(
+                Pair(homeLat, homeLng),
+                Pair(homeLat + 0.0006, homeLng + 0.0008),
+                Pair(homeLat + 0.0012, homeLng + 0.0016),
+                Pair(homeLat + 0.0018, homeLng + 0.0024),
+                Pair(homeLat + 0.0024, homeLng + 0.0032),
+                Pair(homeLat + 0.003, homeLng + 0.004)
+            )
+            seedTrails["annette"] = listOf(
+                Pair(homeLat, homeLng),
+                Pair(homeLat + 0.001, homeLng - 0.0006),
+                Pair(homeLat + 0.002, homeLng - 0.0012),
+                Pair(homeLat + 0.003, homeLng - 0.0018),
+                Pair(homeLat + 0.004, homeLng - 0.0024),
+                Pair(homeLat + 0.005, homeLng - 0.003)
+            )
+            seedTrails["eloise"] = listOf(
+                Pair(homeLat, homeLng),
+                Pair(homeLat - 0.001, homeLng - 0.001),
+                Pair(homeLat - 0.002, homeLng - 0.002),
+                Pair(homeLat - 0.003, homeLng - 0.003),
+                Pair(homeLat - 0.004, homeLng - 0.005)
+            )
+            _locationTrails.value = seedTrails
+
+            familyMembers.collect { membersList ->
+                if (membersList.isEmpty()) return@collect
+                val currentTrails = _locationTrails.value.toMutableMap()
+                var updated = false
+                membersList.forEach { m ->
+                    // Exclude standard reset coordinates if they are uninitialized values
+                    if (m.x == 0.0 && m.y == 0.0) return@forEach
+                    
+                    val coords = currentTrails[m.id] ?: emptyList()
+                    val newPoint = Pair(m.y, m.x) // Pair(Lat, Lng) matches (y, x)
+                    if (coords.isEmpty() || coords.last() != newPoint) {
+                        currentTrails[m.id] = (coords + newPoint).takeLast(30)
+                        updated = true
+                    }
+                }
+                if (updated) {
+                    _locationTrails.value = currentTrails
+                }
+            }
+        }
 
         // Seed default parameters and start the engine
         viewModelScope.launch {
@@ -1020,6 +1074,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         // Suppress parse errors if uninitialized or fresh
                     }
                 }
+            } else if (response.code() == 404) {
+                // New, uninitialized group token on api.keyvalue.xyz.
+                // Proceed with payload as null to initialize the space on the server via our PUT request.
+                payload = null
             } else {
                 cloudStatusText.value = "Sync Offline (GET Code ${response.code()})"
                 return
@@ -1087,9 +1145,21 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val db = AppDatabase.getDatabase(getApplication())
             val existingLocal = repository.getFamilyMembersOnce()
             val incomingCloudMembers = newPayload.members.values
+            val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
 
             for (cloudM in incomingCloudMembers) {
                 if (cloudM.id == myCloudId) continue // Always map our own via actual local gps and sensor hardware
+
+                // Automatically clean up duplicate custom placeholder nodes if her real live device joins!
+                val matchingByName = existingLocal.firstOrNull {
+                    it.id != "me" &&
+                    !it.id.startsWith("device_") &&
+                    !defaultSimulatedIds.contains(it.id) &&
+                    it.name.trim().equals(cloudM.name.trim(), ignoreCase = true)
+                }
+                if (matchingByName != null) {
+                    repository.deleteMember(matchingByName)
+                }
 
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
                 
@@ -1126,16 +1196,16 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
             // Purge any simulated default members from Local Map to avoid mixing simulated nodes during real tracking.
             val activeCloudIds = incomingCloudMembers.map { it.id }.toSet()
-            val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
                 if (!isSimulationModeEnabled.value && defaultSimulatedIds.contains(localM.id)) {
                     repository.deleteMember(localM)
                     continue
                 }
-                if (!defaultSimulatedIds.contains(localM.id)) {
+                // Only clean up former device trackers that are no longer part of this cluster, never custom manually added members
+                if (localM.id.startsWith("device_")) {
                     if (!activeCloudIds.contains(localM.id)) {
-                        // This is a dummy node, remove to prevent radar clutter!
+                        // This is a retired cloud device, remove to prevent radar clutter!
                         repository.deleteMember(localM)
                     }
                 }
