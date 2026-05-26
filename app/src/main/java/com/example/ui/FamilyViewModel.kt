@@ -69,6 +69,31 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private var simulatedWifeAngle = 0.0
     private val localMockCloudData = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    // Active states for "me" to broadcast to the cloud
+    val isMySosAlertActive = MutableStateFlow(false)
+    val myActiveReaction = MutableStateFlow<String?>(null)
+    var myReactionExpirationTime = 0L
+    val isMyCheckInTriggered = MutableStateFlow(false)
+    var myCheckInExpirationTime = 0L
+    
+    // Tracking map for deduplicating incoming reactions/check-ins from other cloud members
+    private val lastProcessedReaction = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val lastProcessedCheckIn = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun getMyActiveStatusText(baseStatus: String): String {
+        if (isMySosAlertActive.value) {
+            return "🚨 EMERGENCY SOS ACTIVE! distress beacon triggered!"
+        }
+        val reaction = myActiveReaction.value
+        if (reaction != null && System.currentTimeMillis() < myReactionExpirationTime) {
+            return "💬 Reaction: $reaction"
+        }
+        if (isMyCheckInTriggered.value && System.currentTimeMillis() < myCheckInExpirationTime) {
+            return "📍 Checked in safely at Home base!"
+        }
+        return baseStatus
+    }
+
     // Account Authentication State (Auto-signed in by default)
     val isUserSignedIn = MutableStateFlow(true)
     val userDisplayName = MutableStateFlow("Louis de Souza")
@@ -720,21 +745,37 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun triggerSOS() {
         viewModelScope.launch {
             val name = myDeviceName.value
-            repository.insertLog(
-                ActivityLog(
-                    memberId = "me",
-                    memberName = name,
-                    actionText = "🚨 Triggered EMERGENCY SOS ALERT distress beacon! (Simulated Alert)",
-                    iconName = "critical"
+            isMySosAlertActive.value = !isMySosAlertActive.value // Toggle SOS alert state
+            if (isMySosAlertActive.value) {
+                repository.insertLog(
+                    ActivityLog(
+                        memberId = "me",
+                        memberName = name,
+                        actionText = "🚨 Triggered EMERGENCY SOS ALERT distress beacon!",
+                        iconName = "critical"
+                    )
                 )
-            )
-            _uiEvents.emit("🚨 SOS BEACON SENT! Distress alert active on family channels.")
+                _uiEvents.emit("🚨 SOS BEACON SENT! Distress alert active on family channels.")
+            } else {
+                repository.insertLog(
+                    ActivityLog(
+                        memberId = "me",
+                        memberName = name,
+                        actionText = "🟢 Emergency SOS distress beacon cleared",
+                        iconName = "home"
+                    )
+                )
+                _uiEvents.emit("🟢 SOS distress beacon cleared.")
+            }
         }
     }
 
     fun triggerCheckIn() {
         viewModelScope.launch {
             val name = myDeviceName.value
+            isMyCheckInTriggered.value = true
+            myCheckInExpirationTime = System.currentTimeMillis() + 15000 // Expose for 15 seconds
+            
             repository.insertLog(
                 ActivityLog(
                     memberId = "me",
@@ -752,11 +793,15 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val members = familyMembers.value
             val m = members.firstOrNull { it.id == memberId } ?: return@launch
             val name = myDeviceName.value
+            
+            myActiveReaction.value = "$emoji (to ${m.name})"
+            myReactionExpirationTime = System.currentTimeMillis() + 12000 // Expose for 12 seconds
+            
             repository.insertLog(
                 ActivityLog(
                     memberId = "me",
                     memberName = name,
-                    actionText = "shared reaction response '$emoji' with ${m.name}",
+                    actionText = "sent reaction '$emoji' to ${m.name}",
                     iconName = "check_in"
                 )
             )
@@ -1247,7 +1292,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 batteryPercentage = meMember.batteryPercentage,
                 isCharging = meMember.isCharging,
                 speedMph = meMember.speedMph,
-                statusText = meMember.statusText,
+                statusText = getMyActiveStatusText(meMember.statusText),
                 isComingHome = meMember.isComingHome,
                 etaMinutes = meMember.etaMinutes,
                 lastActive = lastActiveTimestamp,
@@ -1330,6 +1375,56 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     "Inactive (Last active " + sdf.format(java.util.Date(cloudM.lastActive)) + ")"
                 } else {
                     cloudM.statusText
+                }
+
+                // Process reactions, SOS, and check-ins from other members in real-time!
+                if (!isOffline && matchingLocal != null) {
+                    val previousStatus = matchingLocal.statusText
+                    val currentStatus = cloudM.statusText
+                    if (previousStatus != currentStatus) {
+                        if (currentStatus.contains("🚨 EMERGENCY SOS ACTIVE")) {
+                            // Insert an urgent SOS activity log locally
+                            repository.insertLog(
+                                ActivityLog(
+                                    memberId = cloudM.id,
+                                    memberName = cloudM.name,
+                                    actionText = "🚨 Triggered EMERGENCY SOS ALERT distress beacon!",
+                                    iconName = "critical"
+                                )
+                            )
+                            _uiEvents.emit("🚨 SOS ALERT: ${cloudM.name} triggered SOS panic button!")
+                        } else if (currentStatus.startsWith("💬 Reaction: ")) {
+                            val reactionText = currentStatus.substringAfter("Reaction: ")
+                            // Only trigger overlay/notification if it's a new unique reaction string
+                            if (lastProcessedReaction[cloudM.id] != currentStatus) {
+                                lastProcessedReaction[cloudM.id] = currentStatus
+                                // Insert a reaction activity log locally
+                                repository.insertLog(
+                                    ActivityLog(
+                                        memberId = cloudM.id,
+                                        memberName = cloudM.name,
+                                        actionText = "sent reaction: $reactionText",
+                                        iconName = "check_in"
+                                    )
+                                )
+                                _uiEvents.emit("${cloudM.name} sent reaction: $reactionText")
+                            }
+                        } else if (currentStatus.contains("📍 Checked in safely")) {
+                            if (lastProcessedCheckIn[cloudM.id] != currentStatus) {
+                                lastProcessedCheckIn[cloudM.id] = currentStatus
+                                // Insert a check-in activity log locally
+                                repository.insertLog(
+                                    ActivityLog(
+                                        memberId = cloudM.id,
+                                        memberName = cloudM.name,
+                                        actionText = "📍 checked in safely at Home base",
+                                        iconName = "check_in"
+                                    )
+                                )
+                                _uiEvents.emit("📍 ${cloudM.name} checked in safely at Home!")
+                            }
+                        }
+                    }
                 }
 
                 val mappedLocal = FamilyMember(
