@@ -36,7 +36,6 @@ import com.example.ui.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import android.Manifest
 import android.content.Context
@@ -317,12 +316,26 @@ fun MainScreen(
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
+    // Full-screen SOS overlay — shown when a SOS alert is triggered
+    var activeSosOverlay by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        viewModel.uiEvents.collectLatest { message ->
-            activeAlertMessage = message
-            delay(3500) // Keep visible for 3.5 seconds
-            activeAlertMessage = null
+        viewModel.uiEvents.collect { message ->
+            if (message.contains("SOS ALERT") || message.contains("SOS BEACON")) {
+                // Show full-screen SOS overlay for 5 seconds
+                activeSosOverlay = message
+                coroutineScope.launch {
+                    delay(5000)
+                    activeSosOverlay = null
+                }
+            } else {
+                // Show regular toast for 3.5 seconds (replaces current if any)
+                activeAlertMessage = message
+                coroutineScope.launch {
+                    delay(3500)
+                    if (activeAlertMessage == message) activeAlertMessage = null
+                }
+            }
         }
     }
 
@@ -649,7 +662,7 @@ fun MainScreen(
             }
         }
 
-        // Floating Dynamic Alerts Toast HUD Overlay
+        // Floating Dynamic Alerts Toast HUD Overlay (drawn last = always on top in Box)
         AnimatedVisibility(
             visible = activeAlertMessage != null,
             enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -657,7 +670,6 @@ fun MainScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 28.dp)
-                .zIndex(100f)
         ) {
             val message = activeAlertMessage ?: ""
             Surface(
@@ -690,12 +702,64 @@ fun MainScreen(
                 }
             }
         }
+
+        // Full-Screen SOS Emergency Overlay — covers everything, impossible to miss
+        AnimatedVisibility(
+            visible = activeSosOverlay != null,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(400)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val sosMsg = activeSosOverlay ?: ""
+            val infiniteTransition = rememberInfiniteTransition(label = "sos_pulse")
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.55f,
+                targetValue = 0.9f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(500, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "sos_alpha"
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFCC0000).copy(alpha = alpha))
+                    .clickable { activeSosOverlay = null },
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Text(
+                        text = "🚨",
+                        fontSize = 72.sp
+                    )
+                    Text(
+                        text = "EMERGENCY SOS",
+                        color = Color.White,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = sosMsg.removePrefix("🚨 "),
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Tap anywhere to dismiss",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
     }
 }
-
-// Annotation to provide correct UI drawing in layered viewports
-private fun Modifier.zIndex(value: Float): Modifier = this.then(
-    object : Modifier.Element {
-        override fun toString() = "zIndex($value)"
-    }
-)
