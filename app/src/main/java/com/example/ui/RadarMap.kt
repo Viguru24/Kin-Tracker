@@ -6,6 +6,11 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.FamilyMember
 import com.example.ui.theme.*
+import kotlinx.coroutines.delay
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -465,21 +471,6 @@ fun RadarMap(
                 )
             }
 
-            // 2. WHATSAPP CHAT BUTTON (Themed green border & clear chat bubble)
-            Surface(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clickable { onOpenWhatsApp() }
-                    .testTag("whatsapp_chat_button"),
-                color = Color.White,
-                shape = CircleShape,
-                border = BorderStroke(1.5.dp, Color(0xFF25D366)), // Real WhatsApp Green!
-                shadowElevation = 6.dp
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Text("💬", fontSize = 18.sp)
-                }
-            }
         }
 
         // 1d. CAM FOLLOW ACTIVE FLOATING BADGE
@@ -556,7 +547,46 @@ fun RadarMap(
             }
         }
 
-        // 4. CAPSULE ACTION OVERLAYS (Bottom row of map)
+        // 4. BOTTOM ACTION ROW — Check in | WhatsApp | [spacer] | SOS
+        var checkInPressed by remember { mutableStateOf(false) }
+        var showCheckInConfirm by remember { mutableStateOf(false) }
+        val checkInScope = rememberCoroutineScope()
+
+        // Check in confirmation banner — slides up above the bottom bar when sent
+        AnimatedVisibility(
+            visible = showCheckInConfirm,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 14.dp, bottom = bottomPadding + 58.dp)
+        ) {
+            Surface(
+                color = Color(0xFF1B5E20),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Color(0xFF00C853)),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("✅", fontSize = 16.sp)
+                    Column {
+                        Text(
+                            "Check-in sent to your family circle!",
+                            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Everyone can see you're safe.",
+                            color = Color.White.copy(alpha = 0.75f), fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -565,37 +595,76 @@ fun RadarMap(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
         ) {
-            // "Check in" floating action capsule
-            Surface(
-                modifier = Modifier
-                    .height(44.dp)
-                    .clickable { onTriggerCheckIn() },
-                color = Color.White,
-                shape = RoundedCornerShape(22.dp),
-                border = BorderStroke(1.dp, SlateBorder),
-                shadowElevation = 6.dp
+            // Left cluster: Check in + WhatsApp
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Check in — turns green + confirms when pressed
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable {
+                            onTriggerCheckIn()
+                            checkInPressed = true
+                            showCheckInConfirm = true
+                            checkInScope.launch {
+                                delay(3000)
+                                showCheckInConfirm = false
+                                checkInPressed = false
+                            }
+                        },
+                    color = if (checkInPressed) Color(0xFF00C853) else Color.White,
+                    shape = RoundedCornerShape(22.dp),
+                    border = BorderStroke(1.5.dp, if (checkInPressed) Color(0xFF00C853) else SlateBorder),
+                    shadowElevation = 6.dp
                 ) {
-                    Text("🛡️", fontSize = 14.sp)
-                    Text(
-                        text = "Check in",
-                        color = Color(0xFF5D2EE6), // Purple color matches image
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (checkInPressed) "✅" else "🛡️", fontSize = 14.sp)
+                        Text(
+                            text = if (checkInPressed) "Sent!" else "Check in",
+                            color = if (checkInPressed) Color.White else Color(0xFF5D2EE6),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // WhatsApp — moved out of the overcrowded top bar
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable { onOpenWhatsApp() }
+                        .testTag("whatsapp_chat_button"),
+                    color = Color.White,
+                    shape = RoundedCornerShape(22.dp),
+                    border = BorderStroke(1.5.dp, Color(0xFF25D366)),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("💬", fontSize = 14.sp)
+                        Text(
+                            "WhatsApp",
+                            color = Color(0xFF25D366), fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
-            // "SOS" panic safety capsule
+            // SOS
             Surface(
                 modifier = Modifier
                     .height(44.dp)
                     .clickable { onTriggerSOS() },
-                color = Color(0xFFE53935), // Urgent Red SOS pill background
+                color = Color(0xFFE53935),
                 shape = RoundedCornerShape(22.dp),
                 border = BorderStroke(1.5.dp, Color.White),
                 shadowElevation = 8.dp
@@ -657,13 +726,14 @@ fun RadarMap(
                 }
             }
 
-            // ANCHOR RECENTER COMPASS FAB (HOME)
+            // ANCHOR RECENTER: GO TO HOME
             Surface(
                 modifier = Modifier
-                    .size(44.dp)
+                    .width(64.dp)
+                    .height(44.dp)
                     .clickable {
-                        isCameraFollowingMe = false // Disable tracking
-                        onSelectMember(null) // Reset selected member focus
+                        isCameraFollowingMe = false
+                        onSelectMember(null)
                         mapViewRef?.let {
                             it.controller.animateTo(GeoPoint(homeLat, homeLng))
                             it.controller.setZoom(15.5)
@@ -674,22 +744,18 @@ fun RadarMap(
                 border = BorderStroke(1.dp, SlateBorder),
                 shadowElevation = 6.dp
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .border(1.5.dp, PrimaryCosmic, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(5.dp)
-                                .background(PrimaryCosmic, CircleShape)
-                        )
-                    }
+                    Text("🏠", fontSize = 14.sp)
+                    Text(
+                        "Home",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PrimaryCosmic
+                    )
                 }
             }
         }
