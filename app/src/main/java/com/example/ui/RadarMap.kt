@@ -520,6 +520,36 @@ fun RadarMap(
 
         }
 
+        // FLOATING HIGH-VISIBILITY PREMIUM VERSION BADGE (DIRECTLY ON MAIN PAGE)
+        Surface(
+            modifier = Modifier
+                .padding(top = 66.dp, start = 12.dp)
+                .align(Alignment.TopStart),
+            color = Color(0xFF1E1E24).copy(alpha = 0.85f),
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.5.dp, RadarCyan.copy(alpha = 0.8f)),
+            shadowElevation = 8.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(RadarCyan, CircleShape)
+                )
+                Text(
+                    text = "VERSION 1.1",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
         // 1d. CAM FOLLOW ACTIVE FLOATING BADGE
         if (isCameraFollowingMe) {
             Box(
