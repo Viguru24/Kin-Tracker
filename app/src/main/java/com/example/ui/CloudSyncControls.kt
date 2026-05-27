@@ -53,8 +53,8 @@ fun CloudSyncControls(
     var expandedSetup by remember { mutableStateOf(false) }
 
     // Forms fields for authentication fields
-    var authNameInput by remember { mutableStateOf("Louis de Souza") }
-    var authEmailInput by remember { mutableStateOf("louisdesouza@gmail.com") }
+    var authNameInput by remember { mutableStateOf("") }
+    var authEmailInput by remember { mutableStateOf("") }
 
     // Synchronize inputs with ViewModel state
     LaunchedEffect(groupSyncToken) {
@@ -113,7 +113,7 @@ fun CloudSyncControls(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = if (myDeviceEmoji.isNotBlank()) myDeviceEmoji else (userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "L"),
+                                    text = if (myDeviceEmoji.isNotBlank()) myDeviceEmoji else (userDisplayName.firstOrNull()?.uppercaseChar()?.toString() ?: "?"),
                                     color = Color.White,
                                     fontSize = if (myDeviceEmoji.isNotBlank()) 16.sp else 14.sp,
                                     fontWeight = FontWeight.Black
@@ -159,11 +159,11 @@ fun CloudSyncControls(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSignIn("Louis de Souza", "louisdesouza@gmail.com") },
+                            .clickable { onSignIn(authNameInput, authEmailInput) },
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "OFFLINE PROFILE - TAP TO RESTORE LOUIS DE SOUZA MAIN ACCOUNT",
+                            text = "OFFLINE - TAP TO SET UP YOUR ACCOUNT",
                             color = ActiveAmber,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
@@ -532,13 +532,13 @@ fun CloudSyncControls(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Simulate Second Phone (Wife) on Cloud 📲",
+                                    text = "Simulate Second Phone (Partner) on Cloud 📲",
                                     color = GlowingMagenta,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Simulates your wife's phone (Annette) pushing real-time GPS locations to your sharing key. Perfect for testing live radar tracking!",
+                                    text = "Simulates a partner's phone pushing real-time GPS locations to your sharing key. Perfect for testing live radar tracking!",
                                     color = SecondarySlate,
                                     fontSize = 9.sp,
                                     lineHeight = 11.sp

@@ -513,7 +513,7 @@ fun MainScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Column {
                                 Text(
-                                    text = "De Souza Circle",
+                                    text = "My Family Circle",
                                     color = Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold

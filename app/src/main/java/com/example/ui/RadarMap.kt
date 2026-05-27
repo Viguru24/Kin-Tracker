@@ -342,7 +342,7 @@ fun RadarMap(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "De Souza Family",
+                            text = "My Family Circle",
                             color = Color(0xFF1E1E24),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -357,7 +357,7 @@ fun RadarMap(
                     modifier = Modifier.background(Color.White).border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
                 ) {
                     DropdownMenuItem(
-                        text = { Text("De Souza Family (Primary Circle)", color = Color.Black, fontWeight = FontWeight.Bold) },
+                        text = { Text("My Family Circle (Primary)", color = Color.Black, fontWeight = FontWeight.Bold) },
                         onClick = { isDropdownExpanded = false }
                     )
                     DropdownMenuItem(
@@ -393,7 +393,7 @@ fun RadarMap(
                             .background(Color(0xFF00FF87), CircleShape)
                     )
                     Text(
-                        text = "Map Cache: Synced CR8 4DS 🗺️",
+                        text = "Map Cache: Synced ✅ 🗺️",
                         color = Color(0xFFB9F6CA),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -427,7 +427,7 @@ fun RadarMap(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Yes! KinTracker is fully optimized for local autonomy and offline use. Every tile retrieved around your configured home (CR8 4DS and CR8 4DA areas) is saved permanently on your device's internal SQLite tile database.",
+                                text = "Yes! KinTracker is fully optimized for local autonomy and offline use. Every tile retrieved around your configured Home location is saved permanently on your device's internal SQLite tile database.",
                                 color = TextSecondary,
                                 fontSize = 12.sp
                             )

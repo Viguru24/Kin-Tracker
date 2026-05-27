@@ -410,7 +410,7 @@ fun SimControls(
                         value = newName,
                         onValueChange = { newName = it },
                         label = { Text("Device Display Name") },
-                        placeholder = { Text("e.g. Louis (Dad)") },
+                        placeholder = { Text("e.g. Sarah (Mum)") },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().testTag("sim_add_member_name"),
                         colors = OutlinedTextFieldDefaults.colors(

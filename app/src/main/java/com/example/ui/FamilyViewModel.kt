@@ -58,7 +58,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     // Cloud Sync Configuration State
     val isCloudSyncEnabled = MutableStateFlow(true)
     val groupSyncToken = MutableStateFlow("")
-    val myDeviceName = MutableStateFlow("Louis (Dad)")
+    val myDeviceName = MutableStateFlow("My Device")
     val myDeviceColor = MutableStateFlow("#AA22FF")
     val myDeviceEmoji = MutableStateFlow("👨") // Added profile picture emoji preference!
     val myDeviceUUID = MutableStateFlow("")
@@ -96,8 +96,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     // Account Authentication State (Auto-signed in by default)
     val isUserSignedIn = MutableStateFlow(true)
-    val userDisplayName = MutableStateFlow("Louis de Souza")
-    val userEmail = MutableStateFlow("louisdesouza@gmail.com")
+    val userDisplayName = MutableStateFlow("")
+    val userEmail = MutableStateFlow("")
 
     private fun savePreferences() {
          val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
@@ -123,9 +123,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
      private fun loadPreferences() {
          val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
          isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
-         userDisplayName.value = prefs.getString("userDisplayName", "Louis de Souza") ?: "Louis de Souza"
-         userEmail.value = prefs.getString("userEmail", "louisdesouza@gmail.com") ?: "louisdesouza@gmail.com"
-         myDeviceName.value = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
+         userDisplayName.value = prefs.getString("userDisplayName", "") ?: ""
+         userEmail.value = prefs.getString("userEmail", "") ?: ""
+         myDeviceName.value = prefs.getString("myDeviceName", "My Device") ?: "My Device"
          myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
          myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
          
@@ -902,7 +902,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             repository.insertLog(
                 ActivityLog(
                     memberId = "me",
-                    memberName = me?.name ?: "Louis (Dad)",
+                    memberName = me?.name ?: myDeviceName.value,
                     actionText = "updated manual Home landmarks to (${String.format(java.util.Locale.US, "%.5f", lat)}, ${String.format(java.util.Locale.US, "%.5f", lng)})",
                     iconName = "home"
                 )
@@ -1071,7 +1071,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 isCloudSyncEnabled.value = true
                 
                 if (myDeviceName.value == "You" || myDeviceName.value == "You (GPS)") {
-                    myDeviceName.value = "Louis (Dad)"
+                    myDeviceName.value = "My Device"
                 }
                 
                 val current = repository.getFamilyMembersOnce()
@@ -1086,7 +1086,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 startCloudSyncLoop()
             } catch (e: Exception) {
                 if (groupSyncToken.value.isBlank()) {
-                    groupSyncToken.value = "8c91a7_louis_tracker_sync"
+                    groupSyncToken.value = java.util.UUID.randomUUID().toString().substring(0, 12) + "_kt_sync"
                 }
                 isCloudSyncEnabled.value = true
                 cloudStatusText.value = "Local Sync Mode Active"
@@ -1101,11 +1101,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             isWifeCloudSimulationEnabled.value = enabled
             savePreferences()
             if (enabled) {
-                _uiEvents.emit("Wife (Annette) cloud simulation active!")
+                _uiEvents.emit("Partner simulation active!")
                 startWifeCloudSimulationLoop()
             } else {
                 simulatedWifeJob?.cancel()
-                _uiEvents.emit("Wife (Annette) cloud simulation deactivated.")
+                _uiEvents.emit("Partner simulation deactivated.")
                 
                 // Clean up simulated wife device from cloud payload
                 val token = groupSyncToken.value
@@ -1186,7 +1186,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         
                         val wifeCloudMember = com.example.data.CloudMember(
                             id = wifeCloudId,
-                            name = "Annette (Mama - Simulated Phone)",
+                            name = "Partner (Simulated Phone)",
                             avatarColorHex = "#EC407A", // Pink
                             x = simulatedLng,
                             y = simulatedLat,
