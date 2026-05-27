@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.FamilyMember
 import com.example.ui.theme.*
 
+@OptIn(ExperimentalFoundationApi::class)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TelemetryDashboard(
