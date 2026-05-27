@@ -683,7 +683,7 @@ fun MainScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = "KinTracker Telemetry Version v1.0.4 - Secure Client-Side SQL Database",
+                                    text = "KinTracker Telemetry Version v1.1 - Secure Client-Side SQL Database",
                                     color = SecondarySlate.copy(alpha = 0.5f),
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace
