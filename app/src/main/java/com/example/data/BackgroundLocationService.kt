@@ -257,7 +257,7 @@ class BackgroundLocationService : Service() {
         val token = prefs.getString("groupSyncToken", "") ?: ""
         if (!isCloudSyncEnabled || token.isBlank()) return
 
-        val myName = prefs.getString("myDeviceName", "Louis (Dad)") ?: "Louis (Dad)"
+        val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
         val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
         val myEmoji = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
         var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
