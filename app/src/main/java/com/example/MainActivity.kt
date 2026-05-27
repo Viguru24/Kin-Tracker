@@ -383,17 +383,28 @@ fun MainScreen(
             onSettingsClick = { isSettingsOpen = true },
             onOpenWhatsApp = {
                 try {
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        data = android.net.Uri.parse("https://api.whatsapp.com/send")
-                        `package` = "com.whatsapp"
+                    // Open WhatsApp app directly — no chat link, just launches the app
+                    val intent = context.packageManager.getLaunchIntentForPackage("com.whatsapp")
+                        ?: context.packageManager.getLaunchIntentForPackage("com.whatsapp.w4b") // WhatsApp Business
+                    if (intent != null) {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    } else {
+                        // WhatsApp not installed — open Play Store listing
+                        val storeIntent = Intent(Intent.ACTION_VIEW,
+                            android.net.Uri.parse("market://details?id=com.whatsapp"))
+                        storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(storeIntent)
                     }
-                    context.startActivity(intent)
                 } catch (e: Exception) {
+                    // Last resort: browser
                     try {
-                        val webIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://api.whatsapp.com"))
+                        val webIntent = Intent(Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://www.whatsapp.com"))
+                        webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         context.startActivity(webIntent)
                     } catch (ex: Exception) {
-                        viewModel.triggerUIFeedback("Could not open WhatsApp link.")
+                        viewModel.triggerUIFeedback("Could not open WhatsApp.")
                     }
                 }
             },
