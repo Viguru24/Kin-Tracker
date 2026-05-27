@@ -1,6 +1,16 @@
 package com.example.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import android.content.Context
+import java.io.File
+import java.io.FileOutputStream
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,6 +73,7 @@ fun TelemetryDashboard(
 
     // Edit Dialog Composable
     memberToEdit?.let { member ->
+        val context = LocalContext.current
         var editName by remember(member.id) { mutableStateOf(member.name) }
         var editStatus by remember(member.id) { mutableStateOf(member.statusText) }
         var editBattery by remember(member.id) { mutableStateOf(member.batteryPercentage.toFloat()) }
@@ -71,6 +82,19 @@ fun TelemetryDashboard(
         var editEta by remember(member.id) { mutableStateOf(member.etaMinutes.toString()) }
         var editColorHex by remember(member.id) { mutableStateOf(member.avatarColorHex) }
         var editEmoji by remember(member.id) { mutableStateOf(member.avatarEmoji) }
+        var editPhone by remember(member.id) { mutableStateOf(member.phoneNumber) }
+        var editPhotoPath by remember(member.id) { mutableStateOf(member.photoPath) }
+
+        val launcher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                val localFile = saveUriToInternalStorage(context, uri)
+                if (localFile != null) {
+                    editPhotoPath = localFile.absolutePath
+                }
+            }
+        }
 
         AlertDialog(
             onDismissRequest = { memberToEdit = null },
@@ -106,6 +130,82 @@ fun TelemetryDashboard(
                         ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().height(62.dp).testTag("edit_name_input")
+                    )
+
+                    // Profile Photo selection
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Current photo/avatar preview
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(Color(android.graphics.Color.parseColor(editColorHex)).copy(alpha = 0.2f))
+                                .border(1.5.dp, Color(android.graphics.Color.parseColor(editColorHex)), CircleShape)
+                                .clickable { launcher.launch("image/*") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (editPhotoPath.isNotEmpty() && java.io.File(editPhotoPath).exists()) {
+                                val bitmap = remember(editPhotoPath) {
+                                    android.graphics.BitmapFactory.decodeFile(editPhotoPath)
+                                }
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Profile Photo",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(text = editEmoji, fontSize = 20.sp)
+                                }
+                            } else {
+                                Text(text = editEmoji, fontSize = 20.sp)
+                            }
+                        }
+                        
+                        Button(
+                            onClick = { launcher.launch("image/*") },
+                            colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Choose Photo", color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        if (editPhotoPath.isNotEmpty()) {
+                            TextButton(
+                                onClick = { editPhotoPath = "" },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Remove", color = ErrorRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    // Phone Number
+                    OutlinedTextField(
+                        value = editPhone,
+                        onValueChange = { editPhone = it },
+                        label = { Text("Phone Number (WhatsApp)", fontSize = 11.sp, color = SecondarySlate) },
+                        textStyle = LocalTextStyle.current.copy(color = TextPrimary, fontSize = 13.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = RadarCyan,
+                            unfocusedBorderColor = SlateBorder,
+                            cursorColor = RadarCyan,
+                            focusedLabelColor = RadarCyan,
+                            unfocusedLabelColor = SecondarySlate
+                        ),
+                        singleLine = true,
+                        placeholder = { Text("+447803171262", color = SecondarySlate.copy(alpha = 0.5f), fontSize = 13.sp) },
+                        modifier = Modifier.fillMaxWidth().height(62.dp).testTag("edit_phone_input")
                     )
 
                     // Status
@@ -295,7 +395,9 @@ fun TelemetryDashboard(
                                 speedMph = parsedSpeed,
                                 etaMinutes = parsedEta,
                                 avatarColorHex = editColorHex,
-                                avatarEmoji = editEmoji
+                                avatarEmoji = editEmoji,
+                                phoneNumber = editPhone,
+                                photoPath = editPhotoPath
                             )
                             onUpdateMember(updated)
                             memberToEdit = null
@@ -445,12 +547,33 @@ fun TelemetryDashboard(
                                     .background(avatarColor, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
-                                    color = Color.White,
-                                    fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (member.photoPath.isNotEmpty() && java.io.File(member.photoPath).exists()) {
+                                    val bitmap = remember(member.photoPath) {
+                                        android.graphics.BitmapFactory.decodeFile(member.photoPath)
+                                    }
+                                    if (bitmap != null) {
+                                        Image(
+                                            bitmap = bitmap.asImageBitmap(),
+                                            contentDescription = "Profile Photo",
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text(
+                                            text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
+                                            color = Color.White,
+                                            fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
+                                        color = Color.White,
+                                        fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
 
                             // Name & Status
@@ -764,5 +887,23 @@ fun getTransportInfo(speedMph: Double, statusText: String): Triple<String, andro
         else -> {
             Triple("Driving", Icons.Filled.DirectionsCar, ActiveAmber) // Amber gold driving color
         }
+    }
+}
+
+private fun saveUriToInternalStorage(context: Context, uri: Uri): File? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val fileName = "profile_${System.currentTimeMillis()}.jpg"
+        val file = File(context.filesDir, fileName)
+        val outputStream = FileOutputStream(file)
+        inputStream.use { input ->
+            outputStream.use { output ->
+                input.copyTo(output)
+            }
+        }
+        file
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }

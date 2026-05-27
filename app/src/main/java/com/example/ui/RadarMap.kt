@@ -177,25 +177,8 @@ fun RadarMap(
                 }
                 mapView.overlays.add(geofenceBoundary)
 
-                // Draw central HOME baseline anchor marker pin
-                val homeMarker = Marker(mapView).apply {
-                    position = GeoPoint(homeLat, homeLng)
-                    icon = createHomeMarkerDrawable(context)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    title = if (atHomeEmojis.isNotEmpty()) "Home base [$atHomeEmojis]" else "Home base"
-                    snippet = if (atHomeMembers.isEmpty()) "Nobody is home at the moment" else "At Home right now: $atHomeNames"
-                    setOnMarkerClickListener { m, _ ->
-                        onSelectMember(null)
-                        m.showInfoWindow()
-                        true
-                    }
-                }
-                mapView.overlays.add(homeMarker)
 
-                // 2. SPOKE LAYOUT — members at home radiate outward from the home pin
-                // so every face is individually visible, each connected by a coloured spoke line.
-                // Spoke directions (clockwise from East, as the user described):
-                // Right, Top, Left, Top-Right, Top-Left, Bottom-Right, Bottom-Left, Bottom
+
                 val spokeAnglesRad = listOf(
                     Math.toRadians(90.0),   // East  → Right
                     Math.toRadians(0.0),    // North → Top
@@ -206,7 +189,7 @@ fun RadarMap(
                     Math.toRadians(225.0),  // SW    → Bottom-Left
                     Math.toRadians(180.0)   // South → Bottom
                 )
-                val spokeRadiusDeg = 0.0027  // ~300m — clearly visible at zoom 15
+                val spokeRadiusDeg = 0.00065  // ~70m — just popping outside the home base circle area boundary!
                 val cosLat = kotlin.math.cos(Math.toRadians(homeLat))
 
                 val displayPositions = mutableMapOf<String, GeoPoint>()
@@ -231,53 +214,33 @@ fun RadarMap(
                     }
                 }
 
-                // 3. Draw active family members and connect transit paths
+                // 3. Draw active family members and connect transit paths (Spoke lines first so they are behind/below everything else)
                 members.forEach { member ->
-                    val memberLat = member.y
-                    val memberLng = member.x
-                    val memberGeo = GeoPoint(memberLat, memberLng)
-                    val displayGeo = displayPositions[member.id] ?: memberGeo
                     val atHome = isAtHomeMap[member.id] == true
-
+                    val displayGeo = displayPositions[member.id] ?: GeoPoint(member.y, member.x)
                     val isSelected = member.id == selectedMemberId
-
-                    // Draw visual breadcrumb trails showing previous location history (Visual Trails)
-                    val trailPoints = locationTrails[member.id] ?: emptyList()
-                    if (trailPoints.size >= 2) {
-                        val trailPolyline = Polyline(mapView).apply {
-                            val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
-                            setPoints(geoPoints)
-                            val memberColorInt = try {
-                                android.graphics.Color.parseColor(member.avatarColorHex)
-                            } catch (e: Exception) {
-                                android.graphics.Color.BLUE
-                            }
-                            outlinePaint.color = memberColorInt
-                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            if (isSelected) {
-                                outlinePaint.strokeWidth = 4.5f * density
-                                outlinePaint.alpha = 220
-                            } else {
-                                outlinePaint.strokeWidth = 2.5f * density
-                                outlinePaint.alpha = 90
-                            }
-                        }
-                        mapView.overlays.add(trailPolyline)
-                    }
 
                     val memberColor = try {
                         android.graphics.Color.parseColor(member.avatarColorHex)
                     } catch (e: Exception) { android.graphics.Color.BLUE }
 
                     if (atHome) {
-                        // Draw coloured spoke line: displayGeo → home pin
+                        // Dynamically calculate the latitude offset for the home center pin in degrees based on the current map zoom level.
+                        // At zoom level 15.5/16, the 39dp center offset is roughly 0.00028 degrees.
+                        // Zooming in doubles the geographic resolution per pixel, meaning the geographic offset in degrees must shrink by 2x per zoom level!
+                        val currentZoom = mapView.zoomLevelDouble
+                        val zoomDiff = currentZoom - 15.5
+                        val scaleFactor = Math.pow(2.0, zoomDiff)
+                        val dynamicOffset = 0.00028 / scaleFactor
+
+                        // Draw coloured spoke line: displayGeo → home pin center
                         val spokeLine = Polyline(mapView).apply {
-                            setPoints(listOf(displayGeo, GeoPoint(homeLat, homeLng)))
+                            setPoints(listOf(displayGeo, GeoPoint(homeLat + dynamicOffset, homeLng)))
                             outlinePaint.color = memberColor
                             outlinePaint.strokeWidth = if (isSelected) 3.5f * density else 2.2f * density
                             outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                             outlinePaint.alpha = if (isSelected) 230 else 170
-                            outlinePaint.pathEffect = null  // solid line, not dashed
+                            outlinePaint.pathEffect = null  // solid line
                         }
                         mapView.overlays.add(spokeLine)
                     } else {
@@ -285,7 +248,7 @@ fun RadarMap(
                         val dist2 = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
                         if (dist2 >= 0.05) {
                             val polyline = Polyline(mapView).apply {
-                                val points = listOf(GeoPoint(homeLat, homeLng), memberGeo)
+                                val points = listOf(GeoPoint(homeLat, homeLng), GeoPoint(member.y, member.x))
                                 setPoints(points)
                                 outlinePaint.color = memberColor
                                 val isHighlighted = isSelected || member.isComingHome
@@ -299,16 +262,54 @@ fun RadarMap(
                         }
                     }
 
-                    // Check for active SOS emergency distress beacon
+                    // Draw visual breadcrumb trails showing previous location history
+                    val trailPoints = locationTrails[member.id] ?: emptyList()
+                    if (trailPoints.size >= 2) {
+                        val trailPolyline = Polyline(mapView).apply {
+                            val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
+                            setPoints(geoPoints)
+                            outlinePaint.color = memberColor
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            if (isSelected) {
+                                outlinePaint.strokeWidth = 4.5f * density
+                                outlinePaint.alpha = 220
+                            } else {
+                                outlinePaint.strokeWidth = 2.5f * density
+                                outlinePaint.alpha = 90
+                            }
+                        }
+                        mapView.overlays.add(trailPolyline)
+                    }
+                }
+
+                // 4. Draw central HOME baseline anchor marker pin on top of spoke lines
+                val homeMarker = Marker(mapView).apply {
+                    position = GeoPoint(homeLat, homeLng)
+                    icon = createHomeMarkerDrawable(context)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) // Draw it properly sitting on the stem point
+                    title = if (atHomeEmojis.isNotEmpty()) "Home base [$atHomeEmojis]" else "Home base"
+                    snippet = if (atHomeMembers.isEmpty()) "Nobody is home at the moment" else "At Home right now: $atHomeNames"
+                    setOnMarkerClickListener { m, _ ->
+                        onSelectMember(null)
+                        m.showInfoWindow()
+                        true
+                    }
+                }
+                mapView.overlays.add(homeMarker)
+
+                // 5. Draw the face bubble markers at their display positions on the very top layer
+                members.forEach { member ->
+                    val displayGeo = displayPositions[member.id] ?: GeoPoint(member.y, member.x)
+                    val atHome = isAtHomeMap[member.id] == true
+                    val isSelected = member.id == selectedMemberId
                     val isSos = member.statusText.contains("🚨 EMERGENCY SOS ACTIVE") || member.statusText.contains("🚨 SOS")
 
-                    // Build the face bubble marker at its display position
                     val markerLabel = if (isSos) "🚨" else if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
                     val markerColorHex = if (isSos) "#FF1744" else member.avatarColorHex
 
                     val memberMarker = Marker(mapView).apply {
                         position = displayGeo
-                        icon = createColoredMarkerDrawable(context, markerColorHex, markerLabel, isSelected || isSos)
+                        icon = createColoredMarkerDrawable(context, markerColorHex, markerLabel, isSelected || isSos, member.photoPath)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         title = member.name
                         snippet = "${if (atHome) "At Home" else member.statusText} (${member.batteryPercentage}% power)"
@@ -858,7 +859,8 @@ private fun createColoredMarkerDrawable(
     context: Context,
     colorHex: String,
     emoji: String,
-    isSelected: Boolean
+    isSelected: Boolean,
+    photoPath: String = ""
 ): Drawable {
     val density = context.resources.displayMetrics.density
 
@@ -952,6 +954,34 @@ private fun createColoredMarkerDrawable(
         strokeJoin = Paint.Join.ROUND
     }
     canvas.drawPath(stemPath, stemBorderPaint)
+
+    // ── Local Photo centered in the bubble if present ──
+    if (photoPath.isNotEmpty()) {
+        try {
+            val file = File(photoPath)
+            if (file.exists()) {
+                val photoBmp = android.graphics.BitmapFactory.decodeFile(photoPath)
+                if (photoBmp != null) {
+                    val clipR = bubbleR - ringWidth - density * 0.5f
+                    val clipSize = (clipR * 2).toInt()
+                    val scaledBmp = Bitmap.createScaledBitmap(photoBmp, clipSize, clipSize, true)
+                    val shader = android.graphics.BitmapShader(scaledBmp, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                    val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        this.shader = shader
+                    }
+                    canvas.save()
+                    canvas.translate(cx - clipR, bubbleCy - clipR)
+                    canvas.drawCircle(clipR, clipR, clipR, shaderPaint)
+                    canvas.restore()
+                    
+                    // Return early so we don't draw the emoji text on top of the image
+                    return BitmapDrawable(context.resources, bitmap)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     // ── Emoji centered in the bubble ──
     val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

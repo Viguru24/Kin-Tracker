@@ -29,6 +29,9 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -382,29 +385,35 @@ fun MainScreen(
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
             onSettingsClick = { isSettingsOpen = true },
             onOpenWhatsApp = {
-                try {
-                    // Open WhatsApp app directly — no chat link, just launches the app
-                    val intent = context.packageManager.getLaunchIntentForPackage("com.whatsapp")
-                        ?: context.packageManager.getLaunchIntentForPackage("com.whatsapp.w4b") // WhatsApp Business
-                    if (intent != null) {
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } else {
-                        // WhatsApp not installed — open Play Store listing
-                        val storeIntent = Intent(Intent.ACTION_VIEW,
-                            android.net.Uri.parse("market://details?id=com.whatsapp"))
-                        storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(storeIntent)
-                    }
-                } catch (e: Exception) {
-                    // Last resort: browser
+                val selectedMember = members.firstOrNull { it.id == selectedMemberId }
+                val phone = selectedMember?.phoneNumber
+                if (phone.isNullOrBlank()) {
+                    val name = selectedMember?.name ?: "selected family member"
+                    viewModel.triggerUIFeedback("No phone number set for $name. Set it in Settings.")
+                } else {
+                    val cleanPhone = phone.replace("+", "").replace(" ", "").replace("-", "")
+                    val url = "https://wa.me/$cleanPhone"
                     try {
-                        val webIntent = Intent(Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://www.whatsapp.com"))
-                        webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(webIntent)
-                    } catch (ex: Exception) {
-                        viewModel.triggerUIFeedback("Could not open WhatsApp.")
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        // Try standard WhatsApp first
+                        intent.setPackage("com.whatsapp")
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            // Try WhatsApp Business next
+                            try {
+                                intent.setPackage("com.whatsapp.w4b")
+                                context.startActivity(intent)
+                            } catch (e2: Exception) {
+                                // Fallback: open generally (system browser/chooser)
+                                intent.setPackage(null)
+                                context.startActivity(intent)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        viewModel.triggerUIFeedback("Could not open WhatsApp link.")
                     }
                 }
             },
@@ -515,7 +524,23 @@ fun MainScreen(
                                         .border(1.dp, avatarCol, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(text = member.avatarEmoji, fontSize = 15.sp)
+                                    if (member.photoPath.isNotEmpty() && java.io.File(member.photoPath).exists()) {
+                                        val bitmap = remember(member.photoPath) {
+                                            android.graphics.BitmapFactory.decodeFile(member.photoPath)
+                                        }
+                                        if (bitmap != null) {
+                                            Image(
+                                                bitmap = bitmap.asImageBitmap(),
+                                                contentDescription = "Profile Photo",
+                                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Text(text = member.avatarEmoji, fontSize = 15.sp)
+                                        }
+                                    } else {
+                                        Text(text = member.avatarEmoji, fontSize = 15.sp)
+                                    }
                                 }
                             }
                             if (members.size > 4) {

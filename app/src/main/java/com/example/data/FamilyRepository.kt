@@ -68,7 +68,9 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     statusText = "At School",
                     isComingHome = false,
                     etaMinutes = 20,
-                    avatarEmoji = "👩‍🎓"
+                    avatarEmoji = "👩‍🎓",
+                    phoneNumber = "+447760477416",
+                    photoPath = ""
                 ),
                 FamilyMember(
                     id = "annette",
@@ -82,7 +84,9 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     statusText = "Grocery Store",
                     isComingHome = false,
                     etaMinutes = 12,
-                    avatarEmoji = "👩"
+                    avatarEmoji = "👩",
+                    phoneNumber = "+447803171262",
+                    photoPath = ""
                 ),
                 FamilyMember(
                     id = "eloise",
@@ -96,7 +100,9 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     statusText = "Dance Class",
                     isComingHome = false,
                     etaMinutes = 15,
-                    avatarEmoji = "👧"
+                    avatarEmoji = "👧",
+                    phoneNumber = "",
+                    photoPath = ""
                 )
             )
             familyDao.insertFamilyMembers(defaultMembers)

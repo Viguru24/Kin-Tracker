@@ -16,5 +16,7 @@ data class FamilyMember(
     val statusText: String,
     val isComingHome: Boolean,
     val etaMinutes: Int,
-    val avatarEmoji: String = "" // Added support for customizable profile pictures/avatars!
+    val avatarEmoji: String = "",
+    val phoneNumber: String = "",  // International format e.g. +447911123456
+    val photoPath: String = "" // Local file path to profile photo
 )

@@ -58,9 +58,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     // Cloud Sync Configuration State
     val isCloudSyncEnabled = MutableStateFlow(true)
     val groupSyncToken = MutableStateFlow("")
-    val myDeviceName = MutableStateFlow("My Device")
+    val myDeviceName = MutableStateFlow("Dad")
     val myDeviceColor = MutableStateFlow("#AA22FF")
     val myDeviceEmoji = MutableStateFlow("👨") // Added profile picture emoji preference!
+    val myDevicePhone = MutableStateFlow("+447802436159")
+    val myDevicePhotoPath = MutableStateFlow("")
     val myDeviceUUID = MutableStateFlow("")
     val cloudStatusText = MutableStateFlow("Local / offline tracking mode")
     val isSimulationModeEnabled = MutableStateFlow(false)
@@ -118,6 +120,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
              putFloat("homeLat", homeLat.toFloat())
              putFloat("homeLng", homeLng.toFloat())
              putBoolean("isHomeCalibrated", isHomeCalibrated)
+             putString("myDevicePhone", myDevicePhone.value)
+             putString("myDevicePhotoPath", myDevicePhotoPath.value)
              apply()
          }
      }
@@ -127,9 +131,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
          isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
          userDisplayName.value = prefs.getString("userDisplayName", "") ?: ""
          userEmail.value = prefs.getString("userEmail", "") ?: ""
-         myDeviceName.value = prefs.getString("myDeviceName", "My Device") ?: "My Device"
+         myDeviceName.value = prefs.getString("myDeviceName", "Dad") ?: "Dad"
          myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
          myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
+         myDevicePhone.value = prefs.getString("myDevicePhone", "+447802436159") ?: "+447802436159"
+         myDevicePhotoPath.value = prefs.getString("myDevicePhotoPath", "") ?: ""
          
          var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
          if (dUuid.isBlank()) {
@@ -334,7 +340,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     statusText = "Syncing GPS...",
                     isComingHome = false,
                     etaMinutes = 0,
-                    avatarEmoji = myDeviceEmoji.value
+                    avatarEmoji = myDeviceEmoji.value,
+                    phoneNumber = myDevicePhone.value,
+                    photoPath = myDevicePhotoPath.value
                 )
                 repository.insertFamilyMembers(listOf(me))
             } else {
@@ -342,7 +350,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 repository.updateMember(existingMe.copy(
                     name = myDeviceName.value,
                     avatarColorHex = myDeviceColor.value,
-                    avatarEmoji = myDeviceEmoji.value
+                    avatarEmoji = myDeviceEmoji.value,
+                    phoneNumber = myDevicePhone.value,
+                    photoPath = myDevicePhotoPath.value
                 ))
             }
             
@@ -688,7 +698,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 statusText = "At $relationType",
                 isComingHome = false,
                 etaMinutes = (dist * 20).toInt().coerceAtLeast(10),
-                avatarEmoji = avatarEmoji
+                avatarEmoji = avatarEmoji,
+                phoneNumber = "",
+                photoPath = ""
             )
 
             val current = familyMembers.value.toMutableList()
@@ -713,6 +725,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun updateFamilyMember(updated: FamilyMember) {
         viewModelScope.launch {
             repository.updateMember(updated)
+            if (updated.id == "me") {
+                myDeviceName.value = updated.name
+                myDeviceColor.value = updated.avatarColorHex
+                myDeviceEmoji.value = updated.avatarEmoji
+                myDevicePhone.value = updated.phoneNumber
+                myDevicePhotoPath.value = updated.photoPath
+                savePreferences()
+            }
             repository.insertLog(
                 ActivityLog(
                     memberId = updated.id,
@@ -1486,7 +1506,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     statusText = activeStatus,
                     isComingHome = cloudM.isComingHome,
                     etaMinutes = cloudM.etaMinutes,
-                    avatarEmoji = cloudM.avatarEmoji
+                    avatarEmoji = cloudM.avatarEmoji,
+                    phoneNumber = matchingLocal?.phoneNumber ?: "",
+                    photoPath = matchingLocal?.photoPath ?: ""
                 )
 
                 if (matchingLocal == null) {
