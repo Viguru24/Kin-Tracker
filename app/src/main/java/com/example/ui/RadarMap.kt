@@ -192,11 +192,39 @@ fun RadarMap(
                 }
                 mapView.overlays.add(homeMarker)
 
-                // 2. Draw active family members and connect transit paths
+                // 2. Pre-calculate spread positions so overlapping faces fan out and stay visible
+                // Members within ~60m of each other are placed in a small arc — nobody hides behind anyone else
+                val spreadPositions = mutableMapOf<String, GeoPoint>()
+                val placed = mutableListOf<Pair<String, GeoPoint>>()
+                val clusterRadius = 0.00054   // ~60m in degrees
+                val spreadStep   = 0.00022   // ~24m offset per slot
+
+                members.forEach { m ->
+                    val raw = GeoPoint(m.y, m.x)
+                    val nearby = placed.filter { (_, pos) ->
+                        kotlin.math.hypot(pos.latitude - raw.latitude, pos.longitude - raw.longitude) < clusterRadius
+                    }
+                    val finalPos = if (nearby.isEmpty()) {
+                        raw
+                    } else {
+                        val slot = nearby.size
+                        val angle = Math.toRadians(slot * (360.0 / 8))
+                        val cosLat = kotlin.math.cos(Math.toRadians(raw.latitude))
+                        GeoPoint(
+                            raw.latitude  + spreadStep * kotlin.math.sin(angle),
+                            raw.longitude + spreadStep * kotlin.math.cos(angle) / cosLat
+                        )
+                    }
+                    spreadPositions[m.id] = finalPos
+                    placed.add(Pair(m.id, finalPos))
+                }
+
+                // 3. Draw active family members and connect transit paths
                 members.forEach { member ->
                     val memberLat = member.y
                     val memberLng = member.x
                     val memberGeo = GeoPoint(memberLat, memberLng)
+                    val displayGeo = spreadPositions[member.id] ?: memberGeo
 
                     val isSelected = member.id == selectedMemberId
 
@@ -206,7 +234,6 @@ fun RadarMap(
                         val trailPolyline = Polyline(mapView).apply {
                             val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
                             setPoints(geoPoints)
-                            
                             val memberColorInt = try {
                                 android.graphics.Color.parseColor(member.avatarColorHex)
                             } catch (e: Exception) {
@@ -214,13 +241,12 @@ fun RadarMap(
                             }
                             outlinePaint.color = memberColorInt
                             outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            
                             if (isSelected) {
                                 outlinePaint.strokeWidth = 4.5f * density
-                                outlinePaint.alpha = 220 // Highlight selected member trail brightly
+                                outlinePaint.alpha = 220
                             } else {
                                 outlinePaint.strokeWidth = 2.5f * density
-                                outlinePaint.alpha = 90 // Subtle trace for other members
+                                outlinePaint.alpha = 90
                             }
                         }
                         mapView.overlays.add(trailPolyline)
@@ -229,7 +255,7 @@ fun RadarMap(
                     val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
                     val isMemberAtHome = dist < 0.05 || member.statusText.contains("At Home")
 
-                    // Connect connecting route line to home core if they are away from home
+                    // Connect route line to home if away
                     if (!isMemberAtHome) {
                         val polyline = Polyline(mapView).apply {
                             val points = listOf(GeoPoint(homeLat, homeLng), memberGeo)
@@ -246,21 +272,21 @@ fun RadarMap(
                                 0f
                             )
                             if (!isHighlighted) {
-                                outlinePaint.alpha = 100 // Subtle line for non-selected away members
+                                outlinePaint.alpha = 100
                             }
                         }
                         mapView.overlays.add(polyline)
                     }
 
-                    // Check if member has triggered an active SOS emergency distress beacon
+                    // Check for active SOS emergency distress beacon
                     val isSos = member.statusText.contains("🚨 EMERGENCY SOS ACTIVE") || member.statusText.contains("🚨 SOS")
-                    
-                    // Dynamically build colored, initials/emoji-based density-scaled marker pin
+
+                    // Build colored emoji/initials marker — use spread position so overlaps fan out
                     val markerLabel = if (isSos) "🚨" else if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
                     val markerColor = if (isSos) "#FF1744" else member.avatarColorHex
-                    
+
                     val memberMarker = Marker(mapView).apply {
-                        position = memberGeo
+                        position = displayGeo
                         icon = createColoredMarkerDrawable(context, markerColor, markerLabel, isSelected || isSos)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         title = member.name

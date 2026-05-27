@@ -882,23 +882,59 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun setHomeToCurrentLocation() {
         viewModelScope.launch {
             val me = familyMembers.value.firstOrNull { it.id == "me" }
-            if (me != null && me.y != 0.0 && me.x != 0.0) {
-                homeLat = me.y
-                homeLng = me.x
-                isHomeCalibrated = true
-                savePreferences()
-                _uiEvents.emit("Home locked! Saved current position as permanent Home.")
-                repository.insertLog(
-                    ActivityLog(
-                        memberId = "me",
-                        memberName = me.name,
-                        actionText = "locked permanent Home coordinates to (${String.format(java.util.Locale.US, "%.5f", homeLat)}, ${String.format(java.util.Locale.US, "%.5f", homeLng)})",
-                        iconName = "home"
-                    )
-                )
-            } else {
-                _uiEvents.emit("Waiting for GPS signal to register current position...")
+            if (me == null || (me.y == 0.0 && me.x == 0.0)) {
+                _uiEvents.emit("Waiting for GPS signal — please try again in a moment.")
+                return@launch
             }
+
+            // Use the current position as a starting baseline immediately
+            // Then collect up to 8 readings via the live location stream over ~8 seconds
+            // and average them for a much more accurate home fix.
+            _uiEvents.emit("📍 Locking on… collecting GPS readings for accuracy…")
+
+            val samples = mutableListOf<Pair<Double, Double>>()
+            // Seed with current known position
+            samples.add(Pair(me.y, me.x))
+
+            // Collect additional samples from the live updateUserLocation flow
+            // We wait up to 8 seconds, sampling at ~1s intervals via the GPS listener
+            repeat(7) {
+                delay(1100)
+                val latest = familyMembers.value.firstOrNull { it.id == "me" }
+                if (latest != null && latest.y != 0.0 && latest.x != 0.0) {
+                    samples.add(Pair(latest.y, latest.x))
+                }
+            }
+
+            if (samples.isEmpty()) {
+                _uiEvents.emit("Could not get GPS fix — please try again outdoors.")
+                return@launch
+            }
+
+            // Average all collected samples to reduce GPS scatter
+            val avgLat = samples.map { it.first }.average()
+            val avgLng = samples.map { it.second }.average()
+
+            // Estimate accuracy: max deviation from the averaged centre in metres
+            val maxDevM = samples.maxOf { (lat, lng) ->
+                kotlin.math.hypot(lat - avgLat, lng - avgLng) * 111000.0
+            }.toInt()
+
+            homeLat = avgLat
+            homeLng = avgLng
+            isHomeCalibrated = true
+            savePreferences()
+
+            val accuracyStr = if (maxDevM < 5) "±${maxDevM}m (excellent)" else if (maxDevM < 15) "±${maxDevM}m (good)" else "±${maxDevM}m"
+            _uiEvents.emit("🏠 Home locked! Averaged ${samples.size} GPS readings — accuracy $accuracyStr")
+            repository.insertLog(
+                ActivityLog(
+                    memberId = "me",
+                    memberName = me.name,
+                    actionText = "locked Home to averaged GPS fix (${String.format(java.util.Locale.US, "%.6f", homeLat)}, ${String.format(java.util.Locale.US, "%.6f", homeLng)}) — $accuracyStr",
+                    iconName = "home"
+                )
+            )
         }
     }
 
