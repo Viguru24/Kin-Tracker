@@ -316,8 +316,7 @@ fun MainScreen(
     val isUserSignedIn by viewModel.isUserSignedIn.collectAsStateWithLifecycle()
     val userDisplayName by viewModel.userDisplayName.collectAsStateWithLifecycle()
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
-    val isSimulationEnabled by viewModel.isSimulationModeEnabled.collectAsStateWithLifecycle()
-    val isWifeCloudSimulationEnabled by viewModel.isWifeCloudSimulationEnabled.collectAsStateWithLifecycle()
+
 
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
@@ -619,24 +618,16 @@ fun MainScreen(
                             userDisplayName = userDisplayName,
                             userEmail = userEmail,
                             onSignIn = { name, email -> viewModel.signInUser(name, email) },
-                            onSignOut = { viewModel.signOutUser() },
-                            isWifeCloudSimulationEnabled = isWifeCloudSimulationEnabled,
-                            onToggleWifeCloudSimulation = { viewModel.toggleWifeCloudSimulation(it) }
+                            onSignOut = { viewModel.signOutUser() }
                         )
 
-                        SimControls(
+                        SettingsControls(
                             isPaused = isPaused,
                             onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
-                            onAddMember = { name, type, color, emoji ->
-                                viewModel.addNewMember(name, type, color, emoji)
-                            },
                             onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
                             onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },
                             homeLat = homeLat,
-                            homeLng = homeLng,
-                            isSimulationEnabled = isSimulationEnabled,
-                            onToggleSimulationMode = { viewModel.toggleSimulationMode(it) },
-                            onMockGpsPreset = { idx -> viewModel.triggerManualGpsMockPreset(idx) }
+                            homeLng = homeLng
                         )
 
                         TimelineLogs(

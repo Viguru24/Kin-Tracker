@@ -42,8 +42,6 @@ fun CloudSyncControls(
     userEmail: String,
     onSignIn: (name: String, email: String) -> Unit,
     onSignOut: () -> Unit,
-    isWifeCloudSimulationEnabled: Boolean = false,
-    onToggleWifeCloudSimulation: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var tokenInput by remember { mutableStateOf(groupSyncToken) }
@@ -518,44 +516,6 @@ fun CloudSyncControls(
                         )
                     }
 
-                    if (isCloudSyncEnabled) {
-                        Divider(
-                            color = SlateBorder.copy(alpha = 0.5f),
-                            thickness = 1.dp,
-                            modifier = Modifier.padding(vertical = 10.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Simulate Second Phone (Partner) on Cloud 📲",
-                                    color = GlowingMagenta,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Simulates a partner's phone pushing real-time GPS locations to your sharing key. Perfect for testing live radar tracking!",
-                                    color = SecondarySlate,
-                                    fontSize = 9.sp,
-                                    lineHeight = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = isWifeCloudSimulationEnabled,
-                                onCheckedChange = { onToggleWifeCloudSimulation(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = GlowingMagenta,
-                                    uncheckedThumbColor = SecondarySlate,
-                                    uncheckedTrackColor = SlateBorder
-                                )
-                            )
-                        }
-                    }
                 }
             }
         }
