@@ -192,31 +192,43 @@ fun RadarMap(
                 }
                 mapView.overlays.add(homeMarker)
 
-                // 2. Pre-calculate spread positions so overlapping faces fan out and stay visible
-                // Members within ~60m of each other are placed in a small arc — nobody hides behind anyone else
-                val spreadPositions = mutableMapOf<String, GeoPoint>()
-                val placed = mutableListOf<Pair<String, GeoPoint>>()
-                val clusterRadius = 0.00054   // ~60m in degrees
-                val spreadStep   = 0.00022   // ~24m offset per slot
+                // 2. SPOKE LAYOUT — members at home radiate outward from the home pin
+                // so every face is individually visible, each connected by a coloured spoke line.
+                // Spoke directions (clockwise from East, as the user described):
+                // Right, Top, Left, Top-Right, Top-Left, Bottom-Right, Bottom-Left, Bottom
+                val spokeAnglesRad = listOf(
+                    Math.toRadians(90.0),   // East  → Right
+                    Math.toRadians(0.0),    // North → Top
+                    Math.toRadians(270.0),  // West  → Left
+                    Math.toRadians(45.0),   // NE    → Top-Right
+                    Math.toRadians(315.0),  // NW    → Top-Left
+                    Math.toRadians(135.0),  // SE    → Bottom-Right
+                    Math.toRadians(225.0),  // SW    → Bottom-Left
+                    Math.toRadians(180.0)   // South → Bottom
+                )
+                val spokeRadiusDeg = 0.0027  // ~300m — clearly visible at zoom 15
+                val cosLat = kotlin.math.cos(Math.toRadians(homeLat))
+
+                val displayPositions = mutableMapOf<String, GeoPoint>()
+                val isAtHomeMap    = mutableMapOf<String, Boolean>()
+                var spokeSlot = 0
 
                 members.forEach { m ->
-                    val raw = GeoPoint(m.y, m.x)
-                    val nearby = placed.filter { (_, pos) ->
-                        kotlin.math.hypot(pos.latitude - raw.latitude, pos.longitude - raw.longitude) < clusterRadius
-                    }
-                    val finalPos = if (nearby.isEmpty()) {
-                        raw
-                    } else {
-                        val slot = nearby.size
-                        val angle = Math.toRadians(slot * (360.0 / 8))
-                        val cosLat = kotlin.math.cos(Math.toRadians(raw.latitude))
-                        GeoPoint(
-                            raw.latitude  + spreadStep * kotlin.math.sin(angle),
-                            raw.longitude + spreadStep * kotlin.math.cos(angle) / cosLat
+                    val dist = kotlin.math.hypot(m.x - homeLng, m.y - homeLat) * 111.0
+                    val atHome = dist < 0.05 || m.statusText.contains("At Home")
+                    isAtHomeMap[m.id] = atHome
+
+                    if (atHome) {
+                        // Place on a spoke radiating out from home
+                        val angle = spokeAnglesRad[spokeSlot % spokeAnglesRad.size]
+                        displayPositions[m.id] = GeoPoint(
+                            homeLat + spokeRadiusDeg * kotlin.math.sin(angle),
+                            homeLng + spokeRadiusDeg * kotlin.math.cos(angle) / cosLat
                         )
+                        spokeSlot++
+                    } else {
+                        displayPositions[m.id] = GeoPoint(m.y, m.x)
                     }
-                    spreadPositions[m.id] = finalPos
-                    placed.add(Pair(m.id, finalPos))
                 }
 
                 // 3. Draw active family members and connect transit paths
@@ -224,7 +236,8 @@ fun RadarMap(
                     val memberLat = member.y
                     val memberLng = member.x
                     val memberGeo = GeoPoint(memberLat, memberLng)
-                    val displayGeo = spreadPositions[member.id] ?: memberGeo
+                    val displayGeo = displayPositions[member.id] ?: memberGeo
+                    val atHome = isAtHomeMap[member.id] == true
 
                     val isSelected = member.id == selectedMemberId
 
@@ -252,45 +265,53 @@ fun RadarMap(
                         mapView.overlays.add(trailPolyline)
                     }
 
-                    val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                    val isMemberAtHome = dist < 0.05 || member.statusText.contains("At Home")
+                    val memberColor = try {
+                        android.graphics.Color.parseColor(member.avatarColorHex)
+                    } catch (e: Exception) { android.graphics.Color.BLUE }
 
-                    // Connect route line to home if away
-                    if (!isMemberAtHome) {
-                        val polyline = Polyline(mapView).apply {
-                            val points = listOf(GeoPoint(homeLat, homeLng), memberGeo)
-                            setPoints(points)
-                            outlinePaint.color = try {
-                                android.graphics.Color.parseColor(member.avatarColorHex)
-                            } catch (e: Exception) {
-                                android.graphics.Color.BLUE
-                            }
-                            val isHighlighted = isSelected || member.isComingHome
-                            outlinePaint.strokeWidth = if (isHighlighted) 3.5f * density else 1.5f * density
-                            outlinePaint.pathEffect = android.graphics.DashPathEffect(
-                                if (isHighlighted) floatArrayOf(15f, 15f) else floatArrayOf(8f, 12f),
-                                0f
-                            )
-                            if (!isHighlighted) {
-                                outlinePaint.alpha = 100
-                            }
+                    if (atHome) {
+                        // Draw coloured spoke line: displayGeo → home pin
+                        val spokeLine = Polyline(mapView).apply {
+                            setPoints(listOf(displayGeo, GeoPoint(homeLat, homeLng)))
+                            outlinePaint.color = memberColor
+                            outlinePaint.strokeWidth = if (isSelected) 3.5f * density else 2.2f * density
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            outlinePaint.alpha = if (isSelected) 230 else 170
+                            outlinePaint.pathEffect = null  // solid line, not dashed
                         }
-                        mapView.overlays.add(polyline)
+                        mapView.overlays.add(spokeLine)
+                    } else {
+                        // Connect dashed route line from member's real position to home
+                        val dist2 = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                        if (dist2 >= 0.05) {
+                            val polyline = Polyline(mapView).apply {
+                                val points = listOf(GeoPoint(homeLat, homeLng), memberGeo)
+                                setPoints(points)
+                                outlinePaint.color = memberColor
+                                val isHighlighted = isSelected || member.isComingHome
+                                outlinePaint.strokeWidth = if (isHighlighted) 3.5f * density else 1.5f * density
+                                outlinePaint.pathEffect = android.graphics.DashPathEffect(
+                                    if (isHighlighted) floatArrayOf(15f, 15f) else floatArrayOf(8f, 12f), 0f
+                                )
+                                if (!isHighlighted) outlinePaint.alpha = 100
+                            }
+                            mapView.overlays.add(polyline)
+                        }
                     }
 
                     // Check for active SOS emergency distress beacon
                     val isSos = member.statusText.contains("🚨 EMERGENCY SOS ACTIVE") || member.statusText.contains("🚨 SOS")
 
-                    // Build colored emoji/initials marker — use spread position so overlaps fan out
+                    // Build the face bubble marker at its display position
                     val markerLabel = if (isSos) "🚨" else if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
-                    val markerColor = if (isSos) "#FF1744" else member.avatarColorHex
+                    val markerColorHex = if (isSos) "#FF1744" else member.avatarColorHex
 
                     val memberMarker = Marker(mapView).apply {
                         position = displayGeo
-                        icon = createColoredMarkerDrawable(context, markerColor, markerLabel, isSelected || isSos)
+                        icon = createColoredMarkerDrawable(context, markerColorHex, markerLabel, isSelected || isSos)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         title = member.name
-                        snippet = "${member.statusText} (${member.batteryPercentage}% power)"
+                        snippet = "${if (atHome) "At Home" else member.statusText} (${member.batteryPercentage}% power)"
                         setOnMarkerClickListener { m, _ ->
                             onSelectMember(member.id)
                             m.showInfoWindow()
@@ -404,34 +425,31 @@ fun RadarMap(
                 }
             }
 
-            // 1b. OFFLINE MAP ENHANCED TRUST INDICATOR (Answers the offline map question with state and info popup!)
+            // 1b. OFFLINE MAP CACHE STATUS — compact circle (tap for full info)
             var showOfflineInfoDialog by remember { mutableStateOf(false) }
             Surface(
                 modifier = Modifier
-                    .height(42.dp)
+                    .size(42.dp)
                     .clickable { showOfflineInfoDialog = true }
                     .testTag("offline_cache_badge"),
-                color = Color(0xE81A2F1D), // Deep organic forest card styling
-                shape = RoundedCornerShape(21.dp),
-                border = BorderStroke(1.dp, Color(0xFF00C853).copy(alpha = 0.4f)),
+                color = Color(0xE81A2F1D),
+                shape = CircleShape,
+                border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
                 shadowElevation = 6.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(Color(0xFF00FF87), CircleShape)
-                    )
-                    Text(
-                        text = "Map Cache: Synced ✅ 🗺️",
-                        color = Color(0xFFB9F6CA),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(Color(0xFF00FF87), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("✅", fontSize = 11.sp, lineHeight = 12.sp)
+                    }
                 }
             }
 

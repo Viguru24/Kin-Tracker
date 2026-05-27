@@ -582,17 +582,18 @@ fun MainScreen(
                                 containerColor = Color(0xFF5D2EE6),
                                 contentColor = Color.White
                             ),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.testTag("close_settings_button")
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .testTag("close_settings_button")
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text("🗺️", fontSize = 12.sp)
-                                Text("Map", fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                            }
+                            Text(
+                                text = "◀  Back to Map",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
                     }
 
