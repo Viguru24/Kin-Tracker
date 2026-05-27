@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import android.os.Build
+import com.example.ui.OnboardingScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -268,16 +269,24 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
+                val hasOnboarded by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
                 Scaffold(
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("main_scaffold"),
                     containerColor = CosmicBlack
                 ) { innerPadding ->
-                    MainScreen(
-                        viewModel = viewModel,
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    if (!hasOnboarded) {
+                        OnboardingScreen(
+                            viewModel = viewModel,
+                            onComplete = { /* state update triggers recompose automatically */ }
+                        )
+                    } else {
+                        MainScreen(
+                            viewModel = viewModel,
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    }
                 }
             }
         }

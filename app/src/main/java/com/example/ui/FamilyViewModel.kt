@@ -65,6 +65,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val cloudStatusText = MutableStateFlow("Local / offline tracking mode")
     val isSimulationModeEnabled = MutableStateFlow(false)
     val isWifeCloudSimulationEnabled = MutableStateFlow(false)
+    val hasCompletedOnboarding = MutableStateFlow(false)
     private var simulatedWifeJob: kotlinx.coroutines.Job? = null
     private var simulatedWifeAngle = 0.0
     private val localMockCloudData = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -113,6 +114,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
              putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
              putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
              putBoolean("isWifeCloudSimulationEnabled", isWifeCloudSimulationEnabled.value)
+             putBoolean("hasCompletedOnboarding", hasCompletedOnboarding.value)
              putFloat("homeLat", homeLat.toFloat())
              putFloat("homeLng", homeLng.toFloat())
              putBoolean("isHomeCalibrated", isHomeCalibrated)
@@ -147,6 +149,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
          isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true)
          isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false)
          isWifeCloudSimulationEnabled.value = prefs.getBoolean("isWifeCloudSimulationEnabled", false)
+         // If a real sync token was already saved, treat as onboarded (skip wizard for existing users)
+         val alreadyOnboarded = prefs.getBoolean("hasCompletedOnboarding", false)
+         val hasToken = prefs.getString("groupSyncToken", "")?.isNotBlank() == true
+         hasCompletedOnboarding.value = alreadyOnboarded || hasToken
          homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
          homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
          isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
@@ -196,6 +202,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             savePreferences()
             _uiEvents.emit("Signed out successfully from KinTracker")
         }
+    }
+
+    fun completeOnboarding() {
+        hasCompletedOnboarding.value = true
+        savePreferences()
     }
 
     private val cloudService = com.example.data.CloudSyncService.create()
