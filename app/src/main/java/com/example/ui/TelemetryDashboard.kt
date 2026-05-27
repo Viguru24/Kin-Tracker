@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -516,12 +517,17 @@ fun TelemetryDashboard(
                 } catch (e: Exception) {
                     Color(0xFF26A69A) // Emerald safety fallback
                 }
+                var showContextMenu by remember { mutableStateOf(false) }
 
+                Box {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onSelectMember(if (isSelected) null else member.id) }
+                        .combinedClickable(
+                            onClick = { onSelectMember(if (isSelected) null else member.id) },
+                            onLongClick = { showContextMenu = true }
+                        )
                         .testTag("member_card_${member.id}"),
                     colors = CardDefaults.cardColors(
                         containerColor = if (isSelected) SlateBorder else CosmicSlateCard
@@ -862,6 +868,60 @@ fun TelemetryDashboard(
                         }
                     }
                 }
+
+                    // Long-press context menu
+                    DropdownMenu(
+                        expanded = showContextMenu,
+                        onDismissRequest = { showContextMenu = false },
+                        modifier = Modifier
+                            .background(CosmicSlateCard)
+                            .border(BorderStroke(1.dp, SlateBorder), RoundedCornerShape(8.dp))
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit",
+                                        tint = RadarCyan,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text("Edit ${member.name}", color = TextPrimary, fontSize = 13.sp)
+                                }
+                            },
+                            onClick = {
+                                showContextMenu = false
+                                memberToEdit = member
+                            }
+                        )
+                        if (member.id != "me") {
+                            HorizontalDivider(color = DividerGray)
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete",
+                                            tint = ErrorRed,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text("Delete ${member.name}", color = ErrorRed, fontSize = 13.sp)
+                                    }
+                                },
+                                onClick = {
+                                    showContextMenu = false
+                                    memberToDelete = member
+                                }
+                            )
+                        }
+                    }
+                } // end Box
             }
         }
     }

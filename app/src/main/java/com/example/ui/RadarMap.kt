@@ -356,7 +356,7 @@ fun RadarMap(
 
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
 
-        // 1. FLOATING TOP HUD ACTION BAR
+        // 1. FLOATING TOP HUD ACTION BAR — settings (left) + offline badge (right)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -365,7 +365,7 @@ fun RadarMap(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Settings trigger button (Scrolls down to sync config)
+            // Settings trigger button
             Surface(
                 modifier = Modifier
                     .size(42.dp)
@@ -377,52 +377,6 @@ fun RadarMap(
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Text("⚙️", fontSize = 18.sp)
-                }
-            }
-
-            // Center Dropdown: De Souza Family Selector!
-            var isDropdownExpanded by remember { mutableStateOf(false) }
-            Box {
-                Surface(
-                    modifier = Modifier
-                        .height(42.dp)
-                        .clickable { isDropdownExpanded = true },
-                    color = Color.White,
-                    shape = RoundedCornerShape(21.dp),
-                    border = BorderStroke(1.dp, SlateBorder),
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "My Family Circle",
-                            color = Color(0xFF1E1E24),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text("▼", fontSize = 8.sp, color = Color.Gray)
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = isDropdownExpanded,
-                    onDismissRequest = { isDropdownExpanded = false },
-                    modifier = Modifier.background(Color.White).border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("My Family Circle (Primary)", color = Color.Black, fontWeight = FontWeight.Bold) },
-                        onClick = { isDropdownExpanded = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Create New Circle...", color = PrimaryCosmic) },
-                        onClick = { 
-                            isDropdownExpanded = false
-                            onSettingsClick()
-                        }
-                    )
                 }
             }
 
@@ -837,7 +791,7 @@ fun RadarMap(
             }
         }
 
-        // 6. QUICK EMOJI REACTION TOOLBAR — always visible near top, auto-targets first family member
+        // 6. QUICK EMOJI REACTION TOOLBAR — sits cleanly below the top buttons
         val reactionTarget = members.firstOrNull { it.id != "me" }
         if (reactionTarget != null) {
             Row(
