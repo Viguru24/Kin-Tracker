@@ -8,6 +8,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -357,6 +359,9 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {}
 
+        lifecycleScope.launch {
+            com.example.data.HeartbeatManager.sendDailyHeartbeatIfDue(applicationContext)
+        }
 
         setContent {
             MyApplicationTheme {
@@ -430,6 +435,7 @@ fun MainScreen(
     var isFamilyListExpanded by remember { mutableStateOf(false) }
     var isFamilyPopupOpen by remember { mutableStateOf(false) }
     var isShoppingListPopupOpen by remember { mutableStateOf(false) }
+    var isFeedbackOpen by remember { mutableStateOf(false) }
 
 
     // Top toast alert notification channel overlay
@@ -855,6 +861,17 @@ fun MainScreen(
                         )
 
 
+                        Button(
+                            onClick = { isFeedbackOpen = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E6FF2)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                        ) {
+                            Text("💬 Send Feedback & Suggestions", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -881,6 +898,15 @@ fun MainScreen(
                     }
                 }
             }
+        }
+
+        if (isFeedbackOpen) {
+            com.example.ui.FeedbackDialog(
+                onDismiss = { isFeedbackOpen = false },
+                onFeedbackSubmitted = {
+                    viewModel.triggerUIFeedback("Thank you for your feedback! 🚀")
+                }
+            )
         }
 
         // Floating Dynamic Alerts Toast HUD Overlay (drawn last = always on top in Box)

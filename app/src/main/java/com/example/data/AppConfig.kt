@@ -3,6 +3,8 @@ package com.example.data
 object AppConfig {
     // API Sync configuration
     const val BASE_URL = "https://api.cosmowhisper.com/sync/"
+    const val HEARTBEAT_URL = "https://api.cosmowhisper.com/sync/heartbeat"
+    const val FEEDBACK_URL = "https://api.cosmowhisper.com/sync/feedback"
     const val DEFAULT_GROUP_SYNC_TOKEN = "81e5632c_pin_group"
 
     // Default landmark coordinates (Croydon area, UK)
