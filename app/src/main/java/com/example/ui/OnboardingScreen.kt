@@ -51,6 +51,7 @@ fun OnboardingScreen(
     var chosenFlow  by remember { mutableStateOf("") } // "create" | "join"
 
     val generatedKey by viewModel.groupSyncToken.collectAsState()
+    val activeGroupPinCode by viewModel.activeGroupPinCode.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
@@ -113,7 +114,7 @@ fun OnboardingScreen(
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "Welcome to KinTracker",
+                            "Welcome to Pulse Tracker",
                             color = Color.White,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Black,
@@ -280,39 +281,90 @@ fun OnboardingScreen(
                         )
                     }
 
+                    var showCreateNameField by remember { mutableStateOf(false) }
+                    var groupNameInput by remember { mutableStateOf("") }
+
                     // CREATE card
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                chosenFlow = "create"
-                                viewModel.generateNewGroupKey()
-                                step = 2
+                            .clickable(enabled = !showCreateNameField) {
+                                showCreateNameField = true
                             }
                             .testTag("onboarding_create_btn"),
                         shape = RoundedCornerShape(20.dp),
                         color = Color(0xFF7C3AED).copy(alpha = 0.15f),
                         border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF7C3AED))
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier.padding(20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("✨", fontSize = 32.sp)
-                            Column {
-                                Text(
-                                    "Create a Family Circle",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("✨", fontSize = 32.sp)
+                                Column {
+                                    Text(
+                                        "Create a Family Circle",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "I'm the first one — I'll invite everyone else",
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
+
+                            if (showCreateNameField) {
+                                OutlinedTextField(
+                                    value = groupNameInput,
+                                    onValueChange = { groupNameInput = it },
+                                    label = { Text("Group / Circle Name", color = SecondarySlate) },
+                                    placeholder = { Text("e.g. My Family Group", color = SecondarySlate.copy(alpha = 0.5f)) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFF7C3AED),
+                                        unfocusedBorderColor = SlateBorder,
+                                        cursorColor = Color(0xFF7C3AED),
+                                        focusedContainerColor = Color.White.copy(alpha = 0.04f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.02f)
+                                    )
                                 )
-                                Text(
-                                    "I'm the first one — I'll invite everyone else",
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp
-                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            chosenFlow = "create"
+                                            viewModel.createGroupWithPin(groupNameInput.trim().ifBlank { "Family Circle" })
+                                            step = 2
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f).height(38.dp)
+                                    ) {
+                                        Text("Create Circle 👑", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    TextButton(
+                                        onClick = { showCreateNameField = false },
+                                        modifier = Modifier.height(38.dp)
+                                    ) {
+                                        Text("Cancel", color = SecondarySlate, fontSize = 11.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -383,7 +435,7 @@ fun OnboardingScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Share this key with everyone you want on your map. They'll tap \"Join a Family Circle\" and paste it in.",
+                                "Share this 4-digit PIN with everyone you want in your circle. They'll tap \"Join a Family Circle\" and enter it to join instantly.",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center,
@@ -404,17 +456,17 @@ fun OnboardingScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    "Your Family Key",
+                                    "Your 4-Digit PIN Code",
                                     color = SecondarySlate,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    generatedKey,
+                                    activeGroupPinCode.ifBlank { "----" },
                                     color = Color(0xFFB39DDB),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
                                     textAlign = TextAlign.Center
                                 )
@@ -425,15 +477,15 @@ fun OnboardingScreen(
                         Button(
                             onClick = {
                                 try {
-                                    clipboard.setText(AnnotatedString(generatedKey))
-                                    val inviteText = "Hey! I've set up KinTracker so we can see each other on a live map. Download the app, tap \"Join a Family Circle\" and enter this key:\n\n$generatedKey"
+                                    clipboard.setText(AnnotatedString(activeGroupPinCode))
+                                    val inviteText = "Hey! I've set up Pulse Tracker so we can see each other on a live map. Download the app, tap \"Join a Family Circle\" and enter this 4-digit PIN:\n\n$activeGroupPinCode"
                                     val intent = android.content.Intent(
                                         android.content.Intent.ACTION_VIEW,
                                         android.net.Uri.parse("https://api.whatsapp.com/send?text=" + android.net.Uri.encode(inviteText))
                                     )
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
-                                    clipboard.setText(AnnotatedString(generatedKey))
+                                    clipboard.setText(AnnotatedString(activeGroupPinCode))
                                 }
                             },
                             shape = RoundedCornerShape(14.dp),
@@ -445,18 +497,18 @@ fun OnboardingScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("💬", fontSize = 16.sp)
-                                Text("Share Key via WhatsApp", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Share PIN via WhatsApp", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
 
                         // Copy only
                         OutlinedButton(
-                            onClick = { clipboard.setText(AnnotatedString(generatedKey)) },
+                            onClick = { clipboard.setText(AnnotatedString(activeGroupPinCode)) },
                             shape = RoundedCornerShape(14.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
                             modifier = Modifier.fillMaxWidth().height(44.dp)
                         ) {
-                            Text("📋  Copy Key Only", fontSize = 13.sp, color = SecondarySlate)
+                            Text("📋  Copy PIN Only", fontSize = 13.sp, color = SecondarySlate)
                         }
 
                         Spacer(Modifier.height(8.dp))
@@ -465,7 +517,6 @@ fun OnboardingScreen(
                         Button(
                             onClick = {
                                 viewModel.completeOnboarding()
-                                viewModel.toggleCloudSync(true, generatedKey, myName.trim().ifBlank { "My Device" }, myColor, myEmoji)
                                 onComplete()
                             },
                             shape = RoundedCornerShape(16.dp),
@@ -481,7 +532,7 @@ fun OnboardingScreen(
                     }
 
                 } else {
-                    // ── Join: paste / type the key
+                    // ── Join: enter 4-digit PIN
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -491,7 +542,7 @@ fun OnboardingScreen(
                     ) {
                         Spacer(Modifier.height(48.dp))
 
-                        Text("🔗", fontSize = 56.sp)
+                        Text("👥", fontSize = 56.sp)
 
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
@@ -504,7 +555,7 @@ fun OnboardingScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Ask the person who created the circle to send you their Family Key, then paste it below.",
+                                "Ask the person who created the circle to send you their 4-digit PIN, then enter it below.",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center,
@@ -514,9 +565,13 @@ fun OnboardingScreen(
 
                         OutlinedTextField(
                             value = joinToken,
-                            onValueChange = { joinToken = it.trim() },
-                            label = { Text("Family Key", color = SecondarySlate) },
-                            placeholder = { Text("Paste the key here…", color = SecondarySlate.copy(alpha = 0.5f)) },
+                            onValueChange = { input ->
+                                if (input.length <= 4 && input.all { it.isDigit() }) {
+                                    joinToken = input
+                                }
+                            },
+                            label = { Text("4-Digit PIN", color = SecondarySlate) },
+                            placeholder = { Text("e.g. 1234", color = SecondarySlate.copy(alpha = 0.5f)) },
                             singleLine = true,
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth().testTag("onboarding_join_key_field"),
@@ -535,21 +590,25 @@ fun OnboardingScreen(
                         TextButton(
                             onClick = {
                                 val fromClip = clipboard.getText()?.text ?: ""
-                                if (fromClip.isNotBlank()) joinToken = fromClip.trim()
+                                val digitsOnly = fromClip.filter { it.isDigit() }.take(4)
+                                if (digitsOnly.isNotBlank()) joinToken = digitsOnly
                             }
                         ) {
-                            Text("📋  Paste from clipboard", color = RadarCyan, fontSize = 12.sp)
+                            Text("📋  Paste PIN from clipboard", color = RadarCyan, fontSize = 12.sp)
                         }
 
                         Button(
                             onClick = {
-                                if (joinToken.isNotBlank()) {
-                                    viewModel.completeOnboarding()
-                                    viewModel.toggleCloudSync(true, joinToken, myName.trim().ifBlank { "My Device" }, myColor, myEmoji)
-                                    onComplete()
+                                if (joinToken.length == 4) {
+                                    viewModel.joinGroupWithPin(joinToken) { success, _ ->
+                                        if (success) {
+                                            viewModel.completeOnboarding()
+                                            onComplete()
+                                        }
+                                    }
                                 }
                             },
-                            enabled = joinToken.isNotBlank(),
+                            enabled = joinToken.length == 4,
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF26A69A),

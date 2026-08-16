@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.familytracker.lnvwe"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "1.1"
+    versionCode = 3
+    versionName = "1.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -62,6 +62,15 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+}
+
+val androidExtension = extensions.getByType<com.android.build.api.dsl.ApplicationExtension>()
+(androidExtension as? com.android.build.gradle.AppExtension)?.applicationVariants?.all {
+  val variant = this
+  variant.outputs.all {
+    val output = this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+    output.outputFileName = "PulseTracker-v${variant.versionName}-${variant.name}.apk"
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -126,4 +135,9 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.withType<Test> {
+    systemProperty("robolectric.sdk", "34")
+}
+
 

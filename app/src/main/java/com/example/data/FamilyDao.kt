@@ -31,4 +31,52 @@ interface FamilyDao {
 
     @Query("DELETE FROM activity_logs")
     suspend fun clearActivityLogs()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroupPinMapping(mapping: GroupPinMapping)
+
+    @Query("SELECT * FROM group_pin_mappings ORDER BY createdTimestamp DESC")
+    fun getAllGroupPinMappings(): Flow<List<GroupPinMapping>>
+
+    @Query("SELECT * FROM group_pin_mappings WHERE pinCode = :pinCode")
+    suspend fun getGroupPinMappingByPin(pinCode: String): GroupPinMapping?
+
+    @Delete
+    suspend fun deleteGroupPinMapping(mapping: GroupPinMapping)
+
+    @Query("UPDATE group_pin_mappings SET isActive = 0")
+    suspend fun deactivateAllGroups()
+
+    @Query("UPDATE group_pin_mappings SET isActive = 1 WHERE pinCode = :pinCode")
+    suspend fun activateGroup(pinCode: String)
+
+    @Query("SELECT * FROM group_pin_mappings WHERE isActive = 1 LIMIT 1")
+    suspend fun getActiveGroupPinMappingOnce(): GroupPinMapping?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSafeZone(zone: SafeZone)
+
+    @Delete
+    suspend fun deleteSafeZone(zone: SafeZone)
+
+    @Query("SELECT * FROM safe_zones ORDER BY name ASC")
+    fun getAllSafeZones(): Flow<List<SafeZone>>
+
+    @Query("SELECT * FROM safe_zones")
+    suspend fun getAllSafeZonesOnce(): List<SafeZone>
+
+    @Query("SELECT * FROM shopping_items ORDER BY isChecked ASC, timestamp DESC")
+    fun getShoppingItems(): Flow<List<ShoppingItem>>
+
+    @Query("SELECT * FROM shopping_items")
+    suspend fun getShoppingItemsOnce(): List<ShoppingItem>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertShoppingItem(item: ShoppingItem): Long
+
+    @Update
+    suspend fun updateShoppingItem(item: ShoppingItem)
+
+    @Delete
+    suspend fun deleteShoppingItem(item: ShoppingItem)
 }

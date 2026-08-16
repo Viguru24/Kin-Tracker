@@ -20,13 +20,15 @@ import com.example.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.toRequestBody
+
+import android.os.PowerManager
+import android.os.Looper
+import android.os.Bundle
 
 class BackgroundLocationService : Service() {
 
@@ -34,21 +36,32 @@ class BackgroundLocationService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
     private var locationManager: LocationManager? = null
     private lateinit var repository: FamilyRepository
+    private var wakeLock: PowerManager.WakeLock? = null
 
-    private val cloudService = CloudSyncService.create()
-    private val moshi = Moshi.Builder()
-        .add(KotlinJsonAdapterFactory())
-        .build()
-    private val payloadAdapter = moshi.adapter(CloudGroupPayload::class.java)
+    private var isAppInForeground = false
 
-    private val locationListener = object : LocationListener {
+    private val directLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            updateUserPositionInDb(location)
+            acquireWakeLock()
+            serviceScope.launch {
+                BackgroundSyncProcessor.processLocationUpdate(applicationContext, location)
+            }
         }
-        @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KinTracker:LocationWakeLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            wakeLock?.acquire(15 * 60 * 1000L) // 15 min sliding window
+        } catch (e: Exception) {}
     }
 
     override fun onCreate() {
@@ -57,8 +70,93 @@ class BackgroundLocationService : Service() {
         repository = FamilyRepository(database.familyDao())
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         
+        acquireWakeLock()
         createNotificationChannel()
         startForegroundServiceWithNotification()
+        startLocationUpdates()
+        scheduleRepeatingSyncAlarm()
+        startContinuousSyncLoop()
+    }
+
+    private fun startContinuousSyncLoop() {
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    acquireWakeLock()
+                    val hasFine = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    } else true
+                    val hasCoarse = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    } else true
+
+                    if (hasFine || hasCoarse) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasFine) {
+                            try {
+                                locationManager?.getCurrentLocation(
+                                    LocationManager.GPS_PROVIDER,
+                                    null,
+                                    mainExecutor
+                                ) { loc ->
+                                    if (loc != null) {
+                                        serviceScope.launch {
+                                            BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {}
+                        }
+
+                        val gps = if (hasFine) locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
+                        val net = locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                        val best = if (gps != null && net != null) {
+                            if (gps.time > net.time) gps else net
+                        } else gps ?: net
+
+                        best?.let { loc ->
+                            BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
+                        }
+                    }
+                } catch (e: Exception) {}
+                delay(20000L)
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        intent?.action?.let { action ->
+            when (action) {
+                "ACTION_FOREGROUND" -> {
+                    if (!isAppInForeground) {
+                        isAppInForeground = true
+                        restartLocationUpdates()
+                    }
+                }
+                "ACTION_BACKGROUND" -> {
+                    if (isAppInForeground) {
+                        isAppInForeground = false
+                        restartLocationUpdates()
+                    }
+                }
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun getReceiverPendingIntent(): PendingIntent {
+        val intent = Intent(this, LocationUpdateReceiver::class.java)
+        return PendingIntent.getBroadcast(
+            this,
+            0,
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun restartLocationUpdates() {
+        try {
+            locationManager?.removeUpdates(getReceiverPendingIntent())
+        } catch (e: Exception) {}
         startLocationUpdates()
     }
 
@@ -99,14 +197,24 @@ class BackgroundLocationService : Service() {
                 false
             }
 
+            val interval = if (isAppInForeground) 3000L else 60000L
+            val minDistance = if (isAppInForeground) 1.0f else 10.0f
+            val pendingIntent = getReceiverPendingIntent()
+
             if (hasFine && isGpsEnabled) {
                 try {
                     locationManager?.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER,
-                        3000L, // Every 3 seconds
-                        1.0f,  // 1 meter changes
-                        locationListener,
-                        android.os.Looper.getMainLooper()
+                        interval,
+                        minDistance,
+                        pendingIntent
+                    )
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        interval,
+                        minDistance,
+                        directLocationListener,
+                        Looper.getMainLooper()
                     )
                 } catch (e: Exception) {
                     // Safe fallback
@@ -116,10 +224,16 @@ class BackgroundLocationService : Service() {
                 try {
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
-                        3000L,
-                        1.0f,
-                        locationListener,
-                        android.os.Looper.getMainLooper()
+                        interval,
+                        minDistance,
+                        pendingIntent
+                    )
+                    locationManager?.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        interval,
+                        minDistance,
+                        directLocationListener,
+                        Looper.getMainLooper()
                     )
                 } catch (e: Exception) {
                     // Safe fallback
@@ -150,186 +264,39 @@ class BackgroundLocationService : Service() {
             } else {
                 lastKnownGps ?: lastKnownNet
             }
-            bestLocation?.let { updateUserPositionInDb(it) }
+            bestLocation?.let { loc ->
+                serviceScope.launch {
+                    BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
+                }
+            }
 
         } catch (e: Exception) {
             // Safe fallback
         }
     }
 
-    private fun updateUserPositionInDb(location: Location) {
-        var batteryPct = 85
-        var isCharging = false
+    private fun scheduleRepeatingSyncAlarm() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        val intent = Intent(this, SyncAlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            2,
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
+        val interval = 5 * 60 * 1000L
+        val triggerAt = System.currentTimeMillis() + interval
+        
         try {
-            val batteryStatusIntent = registerReceiver(
-                null,
-                IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            alarmManager.setRepeating(
+                android.app.AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                interval,
+                pendingIntent
             )
-            if (batteryStatusIntent != null) {
-                val level = batteryStatusIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val scale = batteryStatusIntent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                if (level >= 0 && scale > 0) {
-                    batteryPct = (level * 100 / scale)
-                }
-                val status = batteryStatusIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-                isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                             status == BatteryManager.BATTERY_STATUS_FULL
-            }
         } catch (e: Exception) {
-            // Fallback
-        }
-
-        serviceScope.launch {
-            try {
-                // Read home position from shared preferences
-                val prefs = getSharedPreferences("kintracker_prefs", MODE_PRIVATE)
-                val homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
-                val homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
-
-                val current = repository.getFamilyMembersOnce()
-                val me = current.firstOrNull { it.id == "me" } ?: return@launch
-
-                // Distance calculation
-                val latDiff = location.latitude - homeLat
-                val lngDiff = location.longitude - homeLng
-                val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(homeLat))
-                val yDistanceKm = latDiff * 111.0
-                val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
-                val isAtHome = distanceTotalKm < 0.05 // 50 meters
-
-                val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
-
-                val status = if (isAtHome) {
-                    "At Home (Live GPS)"
-                } else {
-                    "Live GPS tracking (${String.format(Locale.US, "%.2f", distanceTotalKm)} km away)"
-                }
-
-                // Check approaching home alert conditions
-                val triggeredPrefs = getSharedPreferences("triggered_alerts", MODE_PRIVATE)
-                val isMeTriggered = triggeredPrefs.getBoolean("me", false)
-
-                if (isAtHome) {
-                    triggeredPrefs.edit().putBoolean("me", false).apply()
-                } else if (distanceTotalKm <= 0.40) {
-                    if (!isMeTriggered && distanceTotalKm > 0.08) {
-                        triggeredPrefs.edit().putBoolean("me", true).apply()
-                        repository.insertLog(
-                            ActivityLog(
-                                memberId = "me",
-                                memberName = me.name,
-                                actionText = "is close to Home (~${String.format(Locale.US, "%.0f", distanceTotalKm * 1000)}m away)",
-                                iconName = "home"
-                            )
-                        )
-                    }
-                } else {
-                    triggeredPrefs.edit().putBoolean("me", false).apply()
-                }
-
-                val updatedMe = me.copy(
-                    x = location.longitude,
-                    y = location.latitude,
-                    batteryPercentage = batteryPct,
-                    isCharging = isCharging,
-                    speedMph = speedMph,
-                    statusText = status
-                )
-                repository.updateMember(updatedMe)
-                
-                // Immediately push to cloud key-value server so family members see live travel
-                backgroundCloudSync(location, batteryPct, isCharging, speedMph, status)
-            } catch (e: Exception) {
-                // Fallback
-            }
-        }
-    }
-
-    private fun backgroundCloudSync(
-        location: Location,
-        batteryPct: Int,
-        isCharging: Boolean,
-        speedMph: Double,
-        status: String
-    ) {
-        val prefs = getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
-        val isCloudSyncEnabled = prefs.getBoolean("isCloudSyncEnabled", true)
-        val token = prefs.getString("groupSyncToken", "") ?: ""
-        if (!isCloudSyncEnabled || token.isBlank()) return
-
-        val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
-        val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
-        val myEmoji = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
-        var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
-        if (dUuid.isBlank()) {
-            dUuid = java.util.UUID.randomUUID().toString().substring(0, 6)
-            prefs.edit().putString("myDeviceUUID", dUuid).apply()
-        }
-
-        serviceScope.launch {
-            try {
-                // 1. GET Current Group Data from key-value store
-                val response = cloudService.getGroupData(token)
-                var payload: CloudGroupPayload? = null
-
-                if (response.isSuccessful) {
-                    val jsonString = response.body()?.string() ?: ""
-                    if (jsonString.isNotBlank() && jsonString != "null" && jsonString != "{}") {
-                        try {
-                            payload = payloadAdapter.fromJson(jsonString)
-                        } catch (e: Exception) {
-                            // Suppress
-                        }
-                    }
-                }
-
-                // 2. Map coordinates
-                val lastActiveTimestamp = System.currentTimeMillis()
-                val myCloudId = "device_" + myName.lowercase().replace("\\s".toRegex(), "") + "_" + dUuid
-                val myCloudMember = CloudMember(
-                    id = myCloudId,
-                    name = myName,
-                    avatarColorHex = myColor,
-                    x = location.longitude,
-                    y = location.latitude,
-                    batteryPercentage = batteryPct,
-                    isCharging = isCharging,
-                    speedMph = speedMph,
-                    statusText = status,
-                    isComingHome = false,
-                    etaMinutes = 0,
-                    lastActive = lastActiveTimestamp,
-                    avatarEmoji = myEmoji
-                )
-
-                // 3. Consolidated payload
-                val newPayload = if (payload != null) {
-                    val updatedMembers = payload.members.toMutableMap()
-                    updatedMembers[myCloudId] = myCloudMember
-                    payload.copy(
-                        lastUpdated = lastActiveTimestamp,
-                        members = updatedMembers
-                    )
-                } else {
-                    val prefsHomeLat = prefs.getFloat("homeLat", 51.332308f).toDouble()
-                    val prefsHomeLng = prefs.getFloat("homeLng", -0.117188f).toDouble()
-                    val isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
-                    CloudGroupPayload(
-                        homeLat = prefsHomeLat,
-                        homeLng = prefsHomeLng,
-                        isHomeCalibrated = isHomeCalibrated,
-                        lastUpdated = lastActiveTimestamp,
-                        members = mapOf(myCloudId to myCloudMember)
-                    )
-                }
-
-                // 4. PUT updated payload to cloud
-                val payloadJson = payloadAdapter.toJson(newPayload)
-                val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
-                cloudService.updateGroupData(token, requestBody)
-            } catch (e: Exception) {
-                // Ignore network errors in background
-            }
+            e.printStackTrace()
         }
     }
 
@@ -337,7 +304,7 @@ class BackgroundLocationService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 "kintracker_channel",
-                "KinTracker GPS Monitor",
+                "Pulse Tracker GPS Monitor",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Keeps tracking accurate during commutes"
@@ -360,7 +327,7 @@ class BackgroundLocationService : Service() {
             )
 
             val notification = NotificationCompat.Builder(this, "kintracker_channel")
-                .setContentTitle("KinTracker Active Map")
+                .setContentTitle("Pulse Tracker Active Map")
                 .setContentText("Listening to live commuter safety loops in background")
                 .setSmallIcon(android.R.drawable.ic_dialog_map)
                 .setContentIntent(pendingIntent)
@@ -372,7 +339,6 @@ class BackgroundLocationService : Service() {
                 try {
                     startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 } catch (se: SecurityException) {
-                    // Fallback to standard foreground without TYPE_LOCATION if permission is temporary or absent in testing
                     startForeground(1, notification)
                 }
             } else {
@@ -386,11 +352,40 @@ class BackgroundLocationService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            locationManager?.removeUpdates(locationListener)
+            locationManager?.removeUpdates(getReceiverPendingIntent())
+            locationManager?.removeUpdates(directLocationListener)
         } catch (e: Exception) {
             // Fallback
         }
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {}
         serviceJob.cancel()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val restartServiceIntent = Intent(applicationContext, this.javaClass).also {
+            it.setPackage(packageName)
+        }
+        val restartServicePendingIntent = PendingIntent.getService(
+            this,
+            1,
+            restartServiceIntent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_ONE_SHOT
+            }
+        )
+        val alarmService = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        alarmService.set(
+            android.app.AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + 1000,
+            restartServicePendingIntent
+        )
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

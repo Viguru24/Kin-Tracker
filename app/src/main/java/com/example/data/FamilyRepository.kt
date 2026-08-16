@@ -1,36 +1,39 @@
 package com.example.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class FamilyRepository(private val familyDao: FamilyDao) {
 
     val familyMembers: Flow<List<FamilyMember>> = familyDao.getFamilyMembers()
     val activityLogs: Flow<List<ActivityLog>> = familyDao.getActivityLogs()
 
-    suspend fun getFamilyMembersOnce(): List<FamilyMember> = familyDao.getFamilyMembersOnce()
+    suspend fun getFamilyMembersOnce(): List<FamilyMember> = withContext(Dispatchers.IO) {
+        familyDao.getFamilyMembersOnce()
+    }
 
-    suspend fun updateMember(member: FamilyMember) {
+    suspend fun updateMember(member: FamilyMember) = withContext(Dispatchers.IO) {
         familyDao.updateFamilyMember(member)
     }
 
-    suspend fun deleteMember(member: FamilyMember) {
+    suspend fun deleteMember(member: FamilyMember) = withContext(Dispatchers.IO) {
         familyDao.deleteFamilyMember(member)
     }
 
-    suspend fun insertFamilyMembers(members: List<FamilyMember>) {
+    suspend fun insertFamilyMembers(members: List<FamilyMember>) = withContext(Dispatchers.IO) {
         familyDao.insertFamilyMembers(members)
     }
 
-    suspend fun insertLog(log: ActivityLog) {
+    suspend fun insertLog(log: ActivityLog) = withContext(Dispatchers.IO) {
         familyDao.insertActivityLog(log)
     }
 
-    suspend fun clearLogs() {
+    suspend fun clearLogs() = withContext(Dispatchers.IO) {
         familyDao.clearActivityLogs()
     }
 
-    suspend fun ensureDefaultDataInserted(homeLat: Double, homeLng: Double) {
+    suspend fun ensureDefaultDataInserted(homeLat: Double, homeLng: Double) = withContext(Dispatchers.IO) {
         // Query current list of members
         val currentMembers = familyDao.getFamilyMembersOnce()
         // If they contain any of the old IDs, clear database to initialize correctly
@@ -41,21 +44,21 @@ class FamilyRepository(private val familyDao: FamilyDao) {
             }
         }
 
-        // Clean up duplicate automated simulate "louis" member.
-        // The real owner is "me" presenting as Louis (Dad).
         val currentRefreshed = familyDao.getFamilyMembersOnce()
-        val hasMe = currentRefreshed.any { it.id == "me" }
-        val hasLouis = currentRefreshed.any { it.id == "louis" }
-        if (hasLouis) {
-            val louisMember = currentRefreshed.firstOrNull { it.id == "louis" }
-            if (louisMember != null) {
-                familyDao.deleteFamilyMember(louisMember)
+        for (m in currentRefreshed) {
+            if (m.id == "louis") {
+                familyDao.deleteFamilyMember(m)
             }
         }
 
         val updatedMembers = familyDao.getFamilyMembersOnce()
-        if (updatedMembers.isEmpty()) {
-            val defaultMembers = listOf(
+        val hasIsabel = updatedMembers.any { it.id == "isabel" || it.name.contains("Isabel", ignoreCase = true) }
+        val hasAnnette = updatedMembers.any { it.id == "annette" || it.name.contains("Annette", ignoreCase = true) }
+        val hasEloise = updatedMembers.any { it.id == "eloise" || it.name.contains("Eloise", ignoreCase = true) }
+
+        val membersToRestore = mutableListOf<FamilyMember>()
+        if (!hasIsabel) {
+            membersToRestore.add(
                 FamilyMember(
                     id = "isabel",
                     name = "Isabel (Older Daughter)",
@@ -71,7 +74,11 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     avatarEmoji = "👩‍🎓",
                     phoneNumber = "+447760477416",
                     photoPath = ""
-                ),
+                )
+            )
+        }
+        if (!hasAnnette) {
+            membersToRestore.add(
                 FamilyMember(
                     id = "annette",
                     name = "Annette (Mama)",
@@ -87,7 +94,11 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     avatarEmoji = "👩",
                     phoneNumber = "+447803171262",
                     photoPath = ""
-                ),
+                )
+            )
+        }
+        if (!hasEloise) {
+            membersToRestore.add(
                 FamilyMember(
                     id = "eloise",
                     name = "Eloise (Younger Daughter)",
@@ -105,13 +116,82 @@ class FamilyRepository(private val familyDao: FamilyDao) {
                     photoPath = ""
                 )
             )
-            familyDao.insertFamilyMembers(defaultMembers)
+        }
+        if (membersToRestore.isNotEmpty()) {
+            familyDao.insertFamilyMembers(membersToRestore)
+        }
 
             // Insert initial logs
-            insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active", iconName = "check_in"))
-            insertLog(ActivityLog(memberId = "isabel", memberName = "Isabel (Older Daughter)", actionText = "entered High School Zone", iconName = "away"))
-            insertLog(ActivityLog(memberId = "annette", memberName = "Annette (Mama)", actionText = "arrived at Supermarket", iconName = "away"))
-            insertLog(ActivityLog(memberId = "eloise", memberName = "Eloise (Younger Daughter)", actionText = "checked in of Dance Studio", iconName = "away"))
+            familyDao.insertActivityLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active", iconName = "check_in"))
+            familyDao.insertActivityLog(ActivityLog(memberId = "isabel", memberName = "Isabel (Older Daughter)", actionText = "entered High School Zone", iconName = "away"))
+            familyDao.insertActivityLog(ActivityLog(memberId = "annette", memberName = "Annette (Mama)", actionText = "arrived at Supermarket", iconName = "away"))
+            familyDao.insertActivityLog(ActivityLog(memberId = "eloise", memberName = "Eloise (Younger Daughter)", actionText = "checked in of Dance Studio", iconName = "away"))
+
+        val currentShopping = familyDao.getShoppingItemsOnce()
+        if (currentShopping.isEmpty()) {
+            familyDao.insertShoppingItem(ShoppingItem(name = "Fresh Milk 🥛", isChecked = false, addedByMemberId = "annette", addedByMemberName = "Annette (Mama)"))
+            familyDao.insertShoppingItem(ShoppingItem(name = "Sourdough Bread 🍞", isChecked = false, addedByMemberId = "me", addedByMemberName = "Louis"))
+            familyDao.insertShoppingItem(ShoppingItem(name = "Ice Cream 🍦", isChecked = false, addedByMemberId = "eloise", addedByMemberName = "Eloise (Younger Daughter)"))
         }
+    }
+
+
+    val groupPinMappings: Flow<List<GroupPinMapping>> = familyDao.getAllGroupPinMappings()
+
+    suspend fun insertGroupPinMapping(mapping: GroupPinMapping) = withContext(Dispatchers.IO) {
+        familyDao.insertGroupPinMapping(mapping)
+    }
+
+    suspend fun deactivateAllGroups() = withContext(Dispatchers.IO) {
+        familyDao.deactivateAllGroups()
+    }
+
+    suspend fun activateGroup(pin: String) = withContext(Dispatchers.IO) {
+        familyDao.deactivateAllGroups()
+        familyDao.activateGroup(pin)
+    }
+
+    suspend fun getActiveGroupPinMappingOnce(): GroupPinMapping? = withContext(Dispatchers.IO) {
+        familyDao.getActiveGroupPinMappingOnce()
+    }
+
+    suspend fun getGroupPinMappingByPin(pin: String): GroupPinMapping? = withContext(Dispatchers.IO) {
+        familyDao.getGroupPinMappingByPin(pin)
+    }
+
+    suspend fun deleteGroupPinMapping(mapping: GroupPinMapping) = withContext(Dispatchers.IO) {
+        familyDao.deleteGroupPinMapping(mapping)
+    }
+
+    val safeZones: Flow<List<SafeZone>> = familyDao.getAllSafeZones()
+
+    suspend fun insertSafeZone(zone: SafeZone) = withContext(Dispatchers.IO) {
+        familyDao.insertSafeZone(zone)
+    }
+
+    suspend fun deleteSafeZone(zone: SafeZone) = withContext(Dispatchers.IO) {
+        familyDao.deleteSafeZone(zone)
+    }
+
+    suspend fun getAllSafeZonesOnce(): List<SafeZone> = withContext(Dispatchers.IO) {
+        familyDao.getAllSafeZonesOnce()
+    }
+
+    val shoppingItems: Flow<List<ShoppingItem>> = familyDao.getShoppingItems()
+
+    suspend fun getShoppingItemsOnce(): List<ShoppingItem> = withContext(Dispatchers.IO) {
+        familyDao.getShoppingItemsOnce()
+    }
+
+    suspend fun insertShoppingItem(item: ShoppingItem): Long = withContext(Dispatchers.IO) {
+        familyDao.insertShoppingItem(item)
+    }
+
+    suspend fun updateShoppingItem(item: ShoppingItem) = withContext(Dispatchers.IO) {
+        familyDao.updateShoppingItem(item)
+    }
+
+    suspend fun deleteShoppingItem(item: ShoppingItem) = withContext(Dispatchers.IO) {
+        familyDao.deleteShoppingItem(item)
     }
 }

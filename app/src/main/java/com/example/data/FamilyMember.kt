@@ -18,5 +18,7 @@ data class FamilyMember(
     val etaMinutes: Int,
     val avatarEmoji: String = "",
     val phoneNumber: String = "",  // International format e.g. +447911123456
-    val photoPath: String = "" // Local file path to profile photo
+    val photoPath: String = "",    // Local file path to profile photo
+    val lastActive: Long = 0L,     // Unix ms timestamp of last cloud update
+    val locationSince: Long = 0L   // Unix ms timestamp of when member arrived at current location
 )

@@ -55,11 +55,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import org.osmdroid.config.Configuration
 import java.io.File
+import android.speech.tts.TextToSpeech
+import java.util.Locale
+import com.example.data.FamilyMember
+import com.example.data.ShoppingItem
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.foundation.basicMarquee
+
+
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: FamilyViewModel by viewModels()
     private var locationManager: LocationManager? = null
+    private var textToSpeech: TextToSpeech? = null
+
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -76,6 +86,14 @@ class MainActivity : ComponentActivity() {
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
+            startLocationUpdates()
+        }
+    }
+
+    private val requestBackgroundPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
             startLocationUpdates()
         }
     }
@@ -141,6 +159,19 @@ class MainActivity : ComponentActivity() {
             if (!hasFine && !hasCoarse) {
                 return
             }
+
+            // Check and request background location permission on Android Q+ (10+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val hasBackground = ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!hasBackground) {
+                    requestBackgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                }
+            }
+
+            checkBatteryOptimization()
 
             val isGpsEnabled = try {
                 if (hasFine) {
@@ -232,6 +263,34 @@ class MainActivity : ComponentActivity() {
         checkAndRequestLocationPermissions()
     }
 
+    override fun onResume() {
+        super.onResume()
+        try {
+            val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java).apply {
+                action = "ACTION_FOREGROUND"
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {}
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java).apply {
+                action = "ACTION_BACKGROUND"
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        } catch (e: Exception) {}
+    }
+
     override fun onStop() {
         super.onStop()
         try {
@@ -242,11 +301,31 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            textToSpeech?.stop()
+            textToSpeech?.shutdown()
+        } catch (e: Exception) {}
         super.onDestroy()
         try {
             locationManager?.removeUpdates(locationListener)
         } catch (e: Exception) {
             // Safe fallback
+        }
+    }
+
+    private fun checkBatteryOptimization() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                    val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback
         }
     }
 
@@ -270,6 +349,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+        try {
+            textToSpeech = TextToSpeech(this) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    textToSpeech?.language = Locale.getDefault()
+                }
+            }
+        } catch (e: Exception) {}
+
+
         setContent {
             MyApplicationTheme {
                 val hasOnboarded by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
@@ -287,6 +375,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         MainScreen(
                             viewModel = viewModel,
+                            textToSpeech = textToSpeech,
                             modifier = Modifier.padding(innerPadding)
                         )
                     }
@@ -299,24 +388,38 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     viewModel: FamilyViewModel,
+    textToSpeech: TextToSpeech?,
     modifier: Modifier = Modifier
 ) {
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
     val locationTrails by viewModel.locationTrails.collectAsStateWithLifecycle()
     val logs by viewModel.activityLogs.collectAsStateWithLifecycle()
+    val shoppingItems by viewModel.shoppingItems.collectAsStateWithLifecycle()
     val isPaused by viewModel.isSimulationPaused.collectAsStateWithLifecycle()
+
     val selectedMemberId by viewModel.selectedMemberId.collectAsStateWithLifecycle()
     val homeLat by viewModel.homeLatFlow.collectAsStateWithLifecycle()
     val homeLng by viewModel.homeLngFlow.collectAsStateWithLifecycle()
+    val safeZones by viewModel.safeZones.collectAsStateWithLifecycle()
+    val memberWeatherDetailed by viewModel.memberWeatherDetailed.collectAsStateWithLifecycle()
+    val isCircleDigestReset by viewModel.isCircleDigestReset.collectAsStateWithLifecycle()
+    val isVoiceAnnouncementsEnabled by viewModel.isVoiceAnnouncementsEnabled.collectAsStateWithLifecycle()
+    val proximityAlertDistanceMeters by viewModel.proximityAlertDistanceMeters.collectAsStateWithLifecycle()
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsStateWithLifecycle()
     val groupSyncToken by viewModel.groupSyncToken.collectAsStateWithLifecycle()
     val myDeviceName by viewModel.myDeviceName.collectAsStateWithLifecycle()
     val myDeviceColor by viewModel.myDeviceColor.collectAsStateWithLifecycle()
     val myDeviceEmoji by viewModel.myDeviceEmoji.collectAsStateWithLifecycle()
+    val myDevicePhone by viewModel.myDevicePhone.collectAsStateWithLifecycle()
     val cloudStatusText by viewModel.cloudStatusText.collectAsStateWithLifecycle()
+    val ghostModeExpiryTime by viewModel.ghostModeExpiryTime.collectAsStateWithLifecycle()
 
     val isUserSignedIn by viewModel.isUserSignedIn.collectAsStateWithLifecycle()
+    val groupPinMappings by viewModel.groupPinMappings.collectAsStateWithLifecycle()
+    val activeGroupPinCode by viewModel.activeGroupPinCode.collectAsStateWithLifecycle()
+    val activeGroupCreatorId by viewModel.activeGroupCreatorId.collectAsStateWithLifecycle()
+    val myDeviceUUID by viewModel.myDeviceUUID.collectAsStateWithLifecycle()
     val userDisplayName by viewModel.userDisplayName.collectAsStateWithLifecycle()
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
 
@@ -325,6 +428,9 @@ fun MainScreen(
     val coroutineScope = rememberCoroutineScope()
     var isSettingsOpen by remember { mutableStateOf(false) }
     var isFamilyListExpanded by remember { mutableStateOf(false) }
+    var isFamilyPopupOpen by remember { mutableStateOf(false) }
+    var isShoppingListPopupOpen by remember { mutableStateOf(false) }
+
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
@@ -333,6 +439,16 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         viewModel.uiEvents.collect { message ->
+            val isProximityAlert = message.contains("Approaching Alert") || message.contains("getting close") || message.contains("close to your location") || message.contains("minutes away") || message.contains("close to Home")
+            if (isProximityAlert && isVoiceAnnouncementsEnabled) {
+                try {
+                    val toneG = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 100)
+                    toneG.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 350)
+                } catch (e: Exception) {}
+                try {
+                    textToSpeech?.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
+                } catch (e: Exception) {}
+            }
             if (message.contains("SOS ALERT") || message.contains("SOS BEACON")) {
                 // Show full-screen SOS overlay for 5 seconds
                 activeSosOverlay = message
@@ -351,6 +467,16 @@ fun MainScreen(
         }
     }
 
+    // Auto-deactivate location history trail & member selection after 20 seconds
+    LaunchedEffect(selectedMemberId) {
+        if (selectedMemberId != null) {
+            delay(20000)
+            if (viewModel.selectedMemberId.value == selectedMemberId) {
+                viewModel.selectedMemberId.value = null
+            }
+        }
+    }
+
     val sheetHeight by animateDpAsState(
         targetValue = if (isFamilyListExpanded) 520.dp else 105.dp,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
@@ -359,9 +485,11 @@ fun MainScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     // Handle system back gesture / back button to naturally close open panels
-    BackHandler(enabled = isSettingsOpen || isFamilyListExpanded) {
+    BackHandler(enabled = isSettingsOpen || isFamilyListExpanded || isFamilyPopupOpen) {
         if (isSettingsOpen) {
             isSettingsOpen = false
+        } else if (isFamilyPopupOpen) {
+            isFamilyPopupOpen = false
         } else if (isFamilyListExpanded) {
             isFamilyListExpanded = false
         }
@@ -372,6 +500,36 @@ fun MainScreen(
             .fillMaxSize()
             .background(CosmicBlack)
     ) {
+        // 1. Full Screen Radar Map occupying the background
+        val openWhatsApp = { member: FamilyMember ->
+            val phone = member.phoneNumber
+            if (phone.isBlank()) {
+                viewModel.triggerUIFeedback("No phone number set for ${member.name}. Set it in Settings.")
+            } else {
+                val cleanPhone = com.example.data.GeoUtils.sanitizePhoneNumber(phone).trimStart('+')
+                val url = "https://wa.me/$cleanPhone"
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    intent.setPackage("com.whatsapp")
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        try {
+                            intent.setPackage("com.whatsapp.w4b")
+                            context.startActivity(intent)
+                        } catch (e2: Exception) {
+                            intent.setPackage(null)
+                            context.startActivity(intent)
+                        }
+                    }
+                } catch (e: Exception) {
+                    viewModel.triggerUIFeedback("Could not open WhatsApp link.")
+                }
+            }
+        }
+
         // 1. Full Screen Radar Map occupying the background
         RadarMap(
             members = members,
@@ -384,195 +542,194 @@ fun MainScreen(
             onTriggerCheckIn = { viewModel.triggerCheckIn() },
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
             onSettingsClick = { isSettingsOpen = true },
-            onOpenWhatsApp = {
-                val selectedMember = members.firstOrNull { it.id == selectedMemberId }
-                val phone = selectedMember?.phoneNumber
-                if (phone.isNullOrBlank()) {
-                    val name = selectedMember?.name ?: "selected family member"
-                    viewModel.triggerUIFeedback("No phone number set for $name. Set it in Settings.")
-                } else {
-                    val cleanPhone = phone.replace("+", "").replace(" ", "").replace("-", "")
-                    val url = "https://wa.me/$cleanPhone"
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        // Try standard WhatsApp first
-                        intent.setPackage("com.whatsapp")
-                        try {
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            // Try WhatsApp Business next
-                            try {
-                                intent.setPackage("com.whatsapp.w4b")
-                                context.startActivity(intent)
-                            } catch (e2: Exception) {
-                                // Fallback: open generally (system browser/chooser)
-                                intent.setPackage(null)
-                                context.startActivity(intent)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        viewModel.triggerUIFeedback("Could not open WhatsApp link.")
-                    }
-                }
-            },
-            bottomPadding = sheetHeight,
+            onOpenWhatsApp = openWhatsApp,
+            onUpdateMember = { viewModel.updateFamilyMember(it) },
+            onDeleteMember = { viewModel.deleteFamilyMember(it) },
+            onTriggerAlarm = { viewModel.triggerFindMyPhone(it) },
+            activeGroupCreatorId = activeGroupCreatorId,
+            myDeviceUUID = myDeviceUUID,
+            onKickMember = { memberId -> viewModel.kickGroupMember(memberId) },
+            safeZones = safeZones,
+            onAddSafeZone = { viewModel.addSafeZone(it) },
+            onDeleteSafeZone = { viewModel.removeSafeZone(it) },
+            memberWeatherDetailed = memberWeatherDetailed,
+            isCircleDigestReset = isCircleDigestReset,
+            onResetCircleDigest = { viewModel.resetCircleDigest() },
+            groupPinMappings = groupPinMappings,
+            activeGroupPinCode = activeGroupPinCode,
+            onSwitchCircle = { pin -> viewModel.selectActiveCircle(pin) },
+            bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Expandable Family List Sits on top of the map floating elegantly at the bottom
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(sheetHeight)
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 12.dp)
-                .padding(horizontal = 12.dp)
-                .zIndex(10f),
-            color = CosmicBlack.copy(alpha = 0.95f),
-            shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.5.dp, SlateBorder),
-            shadowElevation = 12.dp
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // Drag handle bar which expands and collapses
-                Box(
+        // 2. TOP SHOPPING LIST MARQUEE TICKER
+        if (shoppingItems.isNotEmpty()) {
+            val activeItemsText = remember(shoppingItems) {
+                shoppingItems.filter { !it.isChecked }.joinToString("   •   ") { it.name }
+            }
+            if (activeItemsText.isNotBlank()) {
+                Surface(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { isFamilyListExpanded = !isFamilyListExpanded }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
+                        .align(Alignment.TopCenter)
+                        .padding(top = 90.dp) // Float below system notifications / SOS
+                        .fillMaxWidth(0.9f)
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .border(BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(18.dp))
+                        .clickable { isShoppingListPopupOpen = true }
+                        .zIndex(70f),
+                    color = CosmicSlateCard,
+                    shadowElevation = 4.dp
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .width(36.dp)
-                                .height(5.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.3f))
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = if (isFamilyListExpanded) "COLLAPSE FAMILY LIST" else "SWIPE UP FOR FAMILY LIST (${members.size})",
-                                color = RadarCyan,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.testTag("expand_family_handle")
-                            )
-                            Text(
-                                text = if (isFamilyListExpanded) "▼" else "▲",
-                                color = RadarCyan,
-                                fontSize = 8.sp
-                            )
-                        }
-                    }
-                }
-
-                if (isFamilyListExpanded) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = 14.dp, end = 14.dp, bottom = 12.dp)
-                    ) {
-                        TelemetryDashboard(
-                            members = members,
-                            selectedMemberId = selectedMemberId,
-                            onSelectMember = { viewModel.selectedMemberId.value = it },
-                            onCommuteHome = { viewModel.orderHeadingHome(it) },
-                            onSendAway = { id, dest -> viewModel.sendAway(id, dest) },
-                            onInstantCheckIn = { viewModel.instantCheckInAtHome(it) },
-                            onPing = { viewModel.pingMember(it) },
-                            onUpdateMember = { viewModel.updateFamilyMember(it) },
-                            onDeleteMember = { viewModel.deleteFamilyMember(it) },
-                            homeLat = homeLat,
-                            homeLng = homeLng,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                } else {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isFamilyListExpanded = true }
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            members.take(4).forEach { member ->
-                                val avatarCol = try {
-                                    Color(android.graphics.Color.parseColor(member.avatarColorHex))
-                                } catch (e: Exception) {
-                                    Color(0xFF26A69A)
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(avatarCol.copy(alpha = 0.2f))
-                                        .border(1.dp, avatarCol, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (member.photoPath.isNotEmpty() && java.io.File(member.photoPath).exists()) {
-                                        val bitmap = remember(member.photoPath) {
-                                            android.graphics.BitmapFactory.decodeFile(member.photoPath)
-                                        }
-                                        if (bitmap != null) {
-                                            Image(
-                                                bitmap = bitmap.asImageBitmap(),
-                                                contentDescription = "Profile Photo",
-                                                modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Text(text = member.avatarEmoji, fontSize = 15.sp)
-                                        }
-                                    } else {
-                                        Text(text = member.avatarEmoji, fontSize = 15.sp)
-                                    }
-                                }
-                            }
-                            if (members.size > 4) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.1f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("+${members.size - 4}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Column {
-                                Text(
-                                    text = "My Family Circle",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                val homeCount = members.count { it.statusText.contains("Home", ignoreCase = true) }
-                                Text(
-                                    text = "$homeCount at Home • ${members.size - homeCount} Commuting",
-                                    color = SecondarySlate,
-                                    fontSize = 9.sp
-                                )
-                            }
-                        }
+                        Text("🛒", fontSize = 14.sp)
+                        Text(
+                            text = "Need: $activeItemsText",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .weight(1f)
+                                .basicMarquee(iterations = Int.MAX_VALUE)
+                        )
                     }
                 }
             }
+        }
+
+        // 3. FLOATING OVERLAY QUICK ACTIONS BUBBLES (Bottom-Left)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, bottom = 80.dp)
+                .zIndex(75f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                // Notepad / Shopping List Bubble
+                FloatingActionButton(
+                    onClick = { isShoppingListPopupOpen = !isShoppingListPopupOpen },
+                    containerColor = CosmicSlateCard,
+                    contentColor = RadarCyan,
+                    shape = CircleShape,
+                    modifier = Modifier.size(50.dp).border(1.dp, SlateBorder, CircleShape),
+                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                ) {
+                    Text("📝", fontSize = 20.sp)
+                }
+
+                // Face / Family quick-focus bubble triggers
+                Column(
+                    horizontalAlignment = Alignment.Start,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AnimatedVisibility(
+                        visible = isFamilyPopupOpen,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 340.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+
+                            fun getMemberLabel(m: com.example.data.FamilyMember, isMe: Boolean): String {
+                                val cleanName = m.name.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+                                if (isMe) return "$cleanName (You)"
+                                val lower = cleanName.lowercase()
+                                return when {
+                                    lower.contains("louis") || lower.contains("dad") -> "$cleanName (Dad)"
+                                    lower.contains("annette") || lower.contains("wife") || lower.contains("mom") || lower.contains("mama") || lower.contains("mum") -> "$cleanName (Wife)"
+                                    lower.contains("isabel") || lower.contains("eloise") || lower.contains("daughter") -> "$cleanName (Daughter)"
+                                    else -> cleanName
+                                }
+                            }
+
+                            val meMember = members.firstOrNull { it.id == "me" }
+                            if (meMember != null) {
+                                SubFamilyBubble(
+                                    member = meMember,
+                                    labelText = getMemberLabel(meMember, isMe = true),
+                                    isSelected = selectedMemberId == meMember.id
+                                ) {
+                                    viewModel.selectedMemberId.value = meMember.id
+                                    isFamilyPopupOpen = false
+                                }
+                            }
+
+                            val otherMembers = members.filter { it.id != "me" }
+                            otherMembers.forEach { member ->
+                                SubFamilyBubble(
+                                    member = member,
+                                    labelText = getMemberLabel(member, isMe = false),
+                                    isSelected = selectedMemberId == member.id
+                                ) {
+                                    viewModel.selectedMemberId.value = member.id
+                                    isFamilyPopupOpen = false
+                                }
+                            }
+                        }
+                    }
+
+                    FloatingActionButton(
+                        onClick = { isFamilyPopupOpen = !isFamilyPopupOpen },
+                        containerColor = CosmicSlateCard,
+                        contentColor = RadarCyan,
+                        shape = CircleShape,
+                        modifier = Modifier.size(50.dp).border(1.dp, SlateBorder, CircleShape),
+                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                    ) {
+                        Text("👤", fontSize = 20.sp)
+                    }
+                }
+            }
+        }
+
+        // 4. INTERACTIVE SHOPPING LIST OVERLAY DIALOG
+        if (isShoppingListPopupOpen) {
+            AlertDialog(
+                onDismissRequest = { isShoppingListPopupOpen = false },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { isShoppingListPopupOpen = false }) {
+                        Text("Close", color = RadarCyan, fontWeight = FontWeight.Bold)
+                    }
+                },
+                title = null,
+                text = {
+                    Box(modifier = Modifier.fillMaxWidth().height(420.dp)) {
+                        val listState = rememberScrollState()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(listState)
+                        ) {
+                            ShoppingListControls(
+                                shoppingItems = shoppingItems,
+                                familyMembers = members,
+                                onAddItem = { name, memberId, memberName -> viewModel.addShoppingItem(name, memberId, memberName) },
+                                onToggleItem = { item -> viewModel.toggleShoppingItem(item) },
+                                onDeleteItem = { item -> viewModel.deleteShoppingItem(item) }
+                            )
+                        }
+                    }
+                },
+                containerColor = CosmicSlateCard,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.padding(16.dp)
+            )
         }
 
         // 3. SETTINGS & SIMULATION FULLSCREEN SLIDE OVERLAY SHEET
@@ -602,14 +759,16 @@ fun MainScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
                         ) {
-                            Text("⚙️", fontSize = 20.sp)
+                            Text("⚙️", fontSize = 18.sp)
                             Text(
-                                text = "KinTracker Circle Settings",
+                                text = "Circle Settings",
                                 color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                         Button(
@@ -618,15 +777,15 @@ fun MainScreen(
                                 containerColor = Color(0xFF5D2EE6),
                                 contentColor = Color.White
                             ),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                             shape = RoundedCornerShape(20.dp),
                             modifier = Modifier
-                                .height(44.dp)
+                                .height(36.dp)
                                 .testTag("close_settings_button")
                         ) {
                             Text(
-                                text = "◀  Back to Map",
-                                fontSize = 13.sp,
+                                text = "◀  Map",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -646,31 +805,55 @@ fun MainScreen(
                             myDeviceName = myDeviceName,
                             myDeviceColorHex = myDeviceColor,
                             myDeviceEmoji = myDeviceEmoji,
+                            myDevicePhone = myDevicePhone,
                             cloudStatusText = cloudStatusText,
-                            onToggleCloudSync = { enabled, token, name, color, emoji ->
-                                viewModel.toggleCloudSync(enabled, token, name, color, emoji)
+                            onToggleCloudSync = { enabled, token, name, color, emoji, phone ->
+                                viewModel.toggleCloudSync(enabled, token, name, color, emoji, phone)
                             },
                             onGenerateGroupKey = { viewModel.generateNewGroupKey() },
                             isUserSignedIn = isUserSignedIn,
                             userDisplayName = userDisplayName,
                             userEmail = userEmail,
                             onSignIn = { name, email -> viewModel.signInUser(name, email) },
-                            onSignOut = { viewModel.signOutUser() }
+                            onSignOut = { viewModel.signOutUser() },
+                            ghostModeExpiryTime = ghostModeExpiryTime,
+                            onToggleGhostMode = { enabled -> viewModel.toggleGhostMode(enabled) },
+                            groupPinMappings = groupPinMappings,
+                            activeGroupPinCode = activeGroupPinCode,
+                            onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
+                            onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+                            onDeleteGroupPinFromHistory = { mapping -> viewModel.deleteGroupPinFromHistory(mapping) },
+                            members = members,
+                            activeGroupCreatorId = activeGroupCreatorId,
+                            myDeviceUUID = myDeviceUUID,
+                            onKickMember = { memberId -> viewModel.kickGroupMember(memberId) },
+                            onUpdateActiveGroupSettings = { newName, newPin -> viewModel.updateActiveGroupSettings(newName, newPin) },
+                            onSelectActiveCircle = { pin -> viewModel.selectActiveCircle(pin) }
                         )
 
                         SettingsControls(
-                            isPaused = isPaused,
-                            onTogglePause = { viewModel.isSimulationPaused.value = !isPaused },
                             onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
-                            onSaveCustomHome = { lat, lng -> viewModel.saveCustomHome(lat, lng) },
                             homeLat = homeLat,
-                            homeLng = homeLng
+                            homeLng = homeLng,
+                            isVoiceAnnouncementsEnabled = isVoiceAnnouncementsEnabled,
+                            onToggleVoiceAnnouncements = { viewModel.toggleVoiceAnnouncements(it) },
+                            proximityAlertDistanceMeters = proximityAlertDistanceMeters,
+                            onUpdateProximityAlertDistance = { viewModel.updateProximityAlertDistance(it) }
+                        )
+
+                        ShoppingListControls(
+                            shoppingItems = shoppingItems,
+                            familyMembers = members,
+                            onAddItem = { name, memberId, memberName -> viewModel.addShoppingItem(name, memberId, memberName) },
+                            onToggleItem = { item -> viewModel.toggleShoppingItem(item) },
+                            onDeleteItem = { item -> viewModel.deleteShoppingItem(item) }
                         )
 
                         TimelineLogs(
                             logs = logs,
                             onClearLogs = { viewModel.clearLogHistory() }
                         )
+
 
                         Box(
                             modifier = Modifier
@@ -683,7 +866,7 @@ fun MainScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = "KinTracker Telemetry Version v1.1 - Secure Client-Side SQL Database",
+                                    text = "Pulse Tracker Telemetry Version v1.5 - Secure Client-Side SQL Database",
                                     color = SecondarySlate.copy(alpha = 0.5f),
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace
@@ -701,103 +884,64 @@ fun MainScreen(
         }
 
         // Floating Dynamic Alerts Toast HUD Overlay (drawn last = always on top in Box)
-        AnimatedVisibility(
-            visible = activeAlertMessage != null,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        FloatingAlertToast(
+            activeAlertMessage = activeAlertMessage,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 28.dp)
-        ) {
-            val message = activeAlertMessage ?: ""
-            Surface(
-                color = PrimaryCosmic,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .testTag("ui_floating_alert")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Alert Notify",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = message,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
+        )
 
         // Full-Screen SOS Emergency Overlay — covers everything, impossible to miss
-        AnimatedVisibility(
-            visible = activeSosOverlay != null,
-            enter = fadeIn(animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(400)),
+        SosEmergencyOverlay(
+            activeSosOverlay = activeSosOverlay,
+            onDismiss = { activeSosOverlay = null },
             modifier = Modifier.fillMaxSize()
-        ) {
-            val sosMsg = activeSosOverlay ?: ""
-            val infiniteTransition = rememberInfiniteTransition(label = "sos_pulse")
-            val alpha by infiniteTransition.animateFloat(
-                initialValue = 0.55f,
-                targetValue = 0.9f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(500, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "sos_alpha"
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFCC0000).copy(alpha = alpha))
-                    .clickable { activeSosOverlay = null },
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Text(
-                        text = "🚨",
-                        fontSize = 72.sp
-                    )
-                    Text(
-                        text = "EMERGENCY SOS",
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = sosMsg.removePrefix("🚨 "),
-                        color = Color.White.copy(alpha = 0.92f),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Tap anywhere to dismiss",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-        }
+        )
     }
 }
+
+
+
+@Composable
+fun SubFamilyBubble(
+    member: com.example.data.FamilyMember,
+    labelText: String,
+    isSelected: Boolean = false,
+    onClick: () -> Unit
+) {
+    val color = try {
+        androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(member.avatarColorHex))
+    } catch (e: Exception) {
+        androidx.compose.ui.graphics.Color(0xFF00E5FF) // RadarCyan equivalent
+    }
+
+    Row(
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .background(if (isSelected) PrimaryCosmic else CosmicSlateCard, CircleShape)
+            .border(1.5.dp, if (isSelected) RadarCyan else SlateBorder, CircleShape)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(color, CircleShape)
+                .border(1.dp, androidx.compose.ui.graphics.Color.White, CircleShape),
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            Text(
+                text = member.avatarEmoji.ifBlank { member.name.take(1).uppercase() },
+                fontSize = 14.sp
+            )
+        }
+        Text(
+            text = labelText,
+            color = TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+

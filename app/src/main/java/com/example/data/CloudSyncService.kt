@@ -27,8 +27,6 @@ interface CloudSyncService {
     suspend fun createNewGroup(@Body body: RequestBody): Response<ResponseBody>
 
     companion object {
-        private const val BASE_URL = "https://api.cosmowhisper.com/sync/"
-
         fun create(): CloudSyncService {
             val logging = HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
@@ -40,7 +38,7 @@ interface CloudSyncService {
                 .build()
 
             val retrofit = Retrofit.Builder()
-                .baseUrl(BASE_URL)
+                .baseUrl(AppConfig.BASE_URL)
                 .client(client)
                 .addConverterFactory(MoshiConverterFactory.create())
                 .build()
