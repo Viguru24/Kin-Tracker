@@ -340,6 +340,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             prefs.edit().putLong("my_location_since", savedLocationSince).apply()
 
             val current = repository.getFamilyMembersOnce()
+            val eloiseMember = current.firstOrNull { it.id == "eloise" || (it.name.contains("Eloise", ignoreCase = true) && !it.id.startsWith("device_")) }
+            if (eloiseMember != null && (eloiseMember.statusText.contains("Dance Class") || (eloiseMember.x != homeLng && eloiseMember.y != homeLat))) {
+                repository.updateMember(
+                    eloiseMember.copy(
+                        x = homeLng,
+                        y = homeLat,
+                        speedMph = 0.0,
+                        statusText = "At Home",
+                        etaMinutes = 0
+                    )
+                )
+            }
+
             if (current.none { it.id == "me" }) {
                 repository.insertFamilyMembers(listOf(FamilyMember("me", myDeviceName.value, myDeviceColor.value, homeLng, homeLat, 100, false, 0.0, "Syncing GPS...", false, 0, myDeviceEmoji.value, myDevicePhone.value, myDevicePhotoPath.value, locationSince = savedLocationSince)))
             } else {

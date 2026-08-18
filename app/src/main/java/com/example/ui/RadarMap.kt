@@ -282,29 +282,8 @@ fun RadarMap(
                 val atHomeNames = atHomeMembers.joinToString(", ") { it.name }
                 val atHomeEmojis = atHomeMembers.map { if (it.avatarEmoji.isNotBlank()) it.avatarEmoji else it.name.first().toString() }.joinToString(" ")
 
-                // 1c. GEOPROJECT SAFE ZONE RADAR BOUNDARY GEOFENCE RING (Improvement 6)
-                val safetyCirclePoints = ArrayList<GeoPoint>()
-                for (i in 0 until 360 step 8) {
-                    val angle = Math.toRadians(i.toDouble())
-                    // ~150 meters is roughly 0.00135 degrees latitude/longitude
-                    val latRadius = 0.00135
-                    val lngRadius = 0.00135 / kotlin.math.cos(Math.toRadians(homeLat))
-                    val pt = GeoPoint(homeLat + latRadius * kotlin.math.sin(angle), homeLng + lngRadius * kotlin.math.cos(angle))
-                    safetyCirclePoints.add(pt)
-                }
-                safetyCirclePoints.add(safetyCirclePoints[0]) // Seal circle loops
-
-                val geofenceBoundary = Polyline(mapView).apply {
-                    setPoints(safetyCirclePoints)
-                    outlinePaint.color = android.graphics.Color.parseColor("#00E676") // Neon green
-                    outlinePaint.strokeWidth = 2.2f * density
-                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f, 12f), 0f)
-                    outlinePaint.alpha = 110 // Semi-glowing glass look
-                }
-                mapView.overlays.add(geofenceBoundary)
-
-                // Draw custom Safe Zones geofences
-                safeZones.forEach { zone ->
+                // Draw custom Safe Zones geofences (excluding Home to keep map clean)
+                safeZones.filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }.forEach { zone ->
                     val zoneCircle = Polygon(mapView).apply {
                         points = Polygon.pointsAsCircle(GeoPoint(zone.latitude, zone.longitude), zone.radiusMeters)
                         fillPaint.color = android.graphics.Color.parseColor("#00E676") // Light green
@@ -315,21 +294,18 @@ fun RadarMap(
                     }
                     mapView.overlays.add(zoneCircle)
                     
-                    // Skip placing the icon marker for Home zones, keeping only the nice green circle.
-                    if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {
-                        val zoneMarker = object : Marker(mapView) {
-                            override fun showInfoWindow() {}
-                        }.apply {
-                            position = GeoPoint(zone.latitude, zone.longitude)
-                            icon = MapMarkerRenderer.getOrCreateZoneIcon(context, zone.name, zone.iconName)
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            setOnMarkerClickListener { _, _ ->
-                                zoneToDelete = zone
-                                true
-                            }
+                    val zoneMarker = object : Marker(mapView) {
+                        override fun showInfoWindow() {}
+                    }.apply {
+                        position = GeoPoint(zone.latitude, zone.longitude)
+                        icon = MapMarkerRenderer.getOrCreateZoneIcon(context, zone.name, zone.iconName)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        setOnMarkerClickListener { _, _ ->
+                            zoneToDelete = zone
+                            true
                         }
-                        mapView.overlays.add(zoneMarker)
                     }
+                    mapView.overlays.add(zoneMarker)
                 }
 
 
@@ -436,18 +412,6 @@ fun RadarMap(
                     }
                 }
                 // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
-
-                // Draw central Home Icon badge if members are at home
-                if (homeLat != 0.0 && homeLng != 0.0 && atHomeMembers.isNotEmpty()) {
-                    val homeMarker = object : Marker(mapView) {
-                        override fun showInfoWindow() {}
-                    }.apply {
-                        position = GeoPoint(homeLat, homeLng)
-                        icon = MapMarkerRenderer.getOrCreateHomeMarkerDrawable(context)
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    }
-                    mapView.overlays.add(homeMarker)
-                }
 
                 // Draw Life360 elegant dashed leader lines from cluster anchor to each fanned-out avatar
                 for (cluster in clusters) {
