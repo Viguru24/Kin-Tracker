@@ -334,80 +334,145 @@ fun RadarMap(
 
 
 
-                  // --- START OF MARKER DECONFLICTION LAYOUT ENGINE ---
-                 val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
-                 val clusters = mutableListOf<MutableList<String>>()
-                 val visited = mutableSetOf<String>()
- 
-                  val projection = mapView.projection
-                  val clusterThresholdPx = 35.0f * density // 35dp threshold to cluster only very close markers
-                  val spreadRadiusPx = 18.0f * density // 18dp radius to spread them slightly
- 
-                 for (i in members.indices) {
-                     val m1 = members[i]
-                     if (visited.contains(m1.id)) continue
-                     
-                     val currentCluster = mutableListOf(m1.id)
-                     visited.add(m1.id)
-                     
-                     val p1 = android.graphics.Point()
-                     projection.toPixels(GeoPoint(m1.y, m1.x), p1)
-                     
-                     for (j in i + 1 until members.size) {
-                         val m2 = members[j]
-                         if (visited.contains(m2.id)) continue
-                         
-                         val p2 = android.graphics.Point()
-                         projection.toPixels(GeoPoint(m2.y, m2.x), p2)
-                         
-                         val dx = p1.x - p2.x
-                         val dy = p1.y - p2.y
-                         val pixelDist = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
-                         if (pixelDist < clusterThresholdPx) { // overlap threshold check in pixels
-                             currentCluster.add(m2.id)
-                             visited.add(m2.id)
-                         }
-                     }
-                     clusters.add(currentCluster)
-                 }
- 
-                 for (cluster in clusters) {
-                     if (cluster.size == 1) {
-                         val mId = cluster[0]
-                         val member = members.first { it.id == mId }
-                         adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
-                     } else {
-                         // Find screen center of the cluster
-                         var sumX = 0.0
-                         var sumY = 0.0
-                         for (mId in cluster) {
-                             val member = members.first { it.id == mId }
-                             val p = android.graphics.Point()
-                             projection.toPixels(GeoPoint(member.y, member.x), p)
-                             sumX += p.x
-                             sumY += p.y
-                         }
-                         val centerX = sumX / cluster.size
-                         val centerY = sumY / cluster.size
-                         
-                         // Spread markers symmetrically in a circle of spreadRadiusPx in screen space
-                         val angleStep = 2.0 * Math.PI / cluster.size
-                         for (idx in cluster.indices) {
-                             val mId = cluster[idx]
-                             val angle = idx * angleStep
-                             val offsetX = spreadRadiusPx * kotlin.math.cos(angle)
-                             val offsetY = spreadRadiusPx * kotlin.math.sin(angle)
-                             
-                             val targetX = (centerX + offsetX).toInt()
-                             val targetY = (centerY + offsetY).toInt()
-                             
-                             // Project back to GeoPoint safely
-                             val geoPt = projection.fromPixels(targetX, targetY)
-                             adjustedCoordinates[mId] = GeoPoint(geoPt.latitude, geoPt.longitude)
-                         }
-                     }
-                 }
-                 // --- END OF MARKER DECONFLICTION LAYOUT ENGINE ---
+                // --- START OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
+                val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
+                val clusterAnchorPoints = mutableMapOf<String, GeoPoint>() // Maps memberId to cluster center anchor
+                val clusters = mutableListOf<MutableList<String>>()
+                val visited = mutableSetOf<String>()
+
+                val projection = mapView.projection
+                // Life360 markers are ~54dp wide. Threshold to detect co-location is 65dp in screen space (or within 45m)
+                val clusterThresholdPx = 65.0f * density
+
+                for (i in members.indices) {
+                    val m1 = members[i]
+                    if (visited.contains(m1.id)) continue
+
+                    val currentCluster = mutableListOf(m1.id)
+                    visited.add(m1.id)
+
+                    val p1 = android.graphics.Point()
+                    projection.toPixels(GeoPoint(m1.y, m1.x), p1)
+
+                    for (j in i + 1 until members.size) {
+                        val m2 = members[j]
+                        if (visited.contains(m2.id)) continue
+
+                        val p2 = android.graphics.Point()
+                        projection.toPixels(GeoPoint(m2.y, m2.x), p2)
+
+                        val dx = p1.x - p2.x
+                        val dy = p1.y - p2.y
+                        val pixelDist = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
+
+                        val distKm = kotlin.math.hypot((m1.x - m2.x) * 111.0 * Math.cos(Math.toRadians(m1.y)), (m1.y - m2.y) * 111.0)
+                        val isGeographicallyCoLocated = distKm < 0.045 // 45 meters
+
+                        if (pixelDist < clusterThresholdPx || isGeographicallyCoLocated) {
+                            currentCluster.add(m2.id)
+                            visited.add(m2.id)
+                        }
+                    }
+                    clusters.add(currentCluster)
+                }
+
+                for (cluster in clusters) {
+                    if (cluster.size == 1) {
+                        val mId = cluster[0]
+                        val member = members.first { it.id == mId }
+                        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+                    } else {
+                        val isHomeCluster = cluster.any { mId ->
+                            val member = members.first { it.id == mId }
+                            val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
+                            dist < 0.06 || member.statusText.contains("At Home")
+                        }
+
+                        val anchorGeo = if (isHomeCluster && homeLat != 0.0 && homeLng != 0.0) {
+                            GeoPoint(homeLat, homeLng)
+                        } else {
+                            var sumLat = 0.0
+                            var sumLng = 0.0
+                            for (mId in cluster) {
+                                val member = members.first { it.id == mId }
+                                sumLat += member.y
+                                sumLng += member.x
+                            }
+                            GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
+                        }
+
+                        val centerPt = android.graphics.Point()
+                        projection.toPixels(anchorGeo, centerPt)
+
+                        // Optimal non-overlapping radial orbit spread distance
+                        val spreadRadiusPx = when (cluster.size) {
+                            2 -> 38.0f * density // 76dp separation
+                            3 -> 46.0f * density
+                            4 -> 54.0f * density
+                            else -> maxOf(54.0f, (cluster.size * 24.0f) / Math.PI.toFloat()) * density
+                        }
+
+                        val startAngle = when (cluster.size) {
+                            2 -> -Math.PI / 2.0
+                            3 -> -Math.PI / 2.0
+                            4 -> -Math.PI / 4.0
+                            else -> -Math.PI / 2.0
+                        }
+
+                        val angleStep = (2.0 * Math.PI) / cluster.size
+                        for (idx in cluster.indices) {
+                            val mId = cluster[idx]
+                            val angle = startAngle + (idx * angleStep)
+                            val offsetX = spreadRadiusPx * kotlin.math.cos(angle)
+                            val offsetY = spreadRadiusPx * kotlin.math.sin(angle)
+
+                            val targetX = (centerPt.x + offsetX).toInt()
+                            val targetY = (centerPt.y + offsetY).toInt()
+
+                            val geoPt = projection.fromPixels(targetX, targetY)
+                            adjustedCoordinates[mId] = GeoPoint(geoPt.latitude, geoPt.longitude)
+                            clusterAnchorPoints[mId] = anchorGeo
+                        }
+                    }
+                }
+                // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
+
+                // Draw central Home Icon badge if members are at home
+                if (homeLat != 0.0 && homeLng != 0.0 && atHomeMembers.isNotEmpty()) {
+                    val homeMarker = object : Marker(mapView) {
+                        override fun showInfoWindow() {}
+                    }.apply {
+                        position = GeoPoint(homeLat, homeLng)
+                        icon = MapMarkerRenderer.getOrCreateHomeMarkerDrawable(context)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    }
+                    mapView.overlays.add(homeMarker)
+                }
+
+                // Draw Life360 elegant dashed leader lines from cluster anchor to each fanned-out avatar
+                for (cluster in clusters) {
+                    if (cluster.size > 1) {
+                        for (mId in cluster) {
+                            val anchor = clusterAnchorPoints[mId]
+                            val target = adjustedCoordinates[mId]
+                            val member = members.firstOrNull { it.id == mId }
+                            if (anchor != null && target != null && member != null) {
+                                val memberColor = try {
+                                    android.graphics.Color.parseColor(member.avatarColorHex)
+                                } catch (_: Exception) { android.graphics.Color.DKGRAY }
+
+                                val leaderLine = Polyline(mapView).apply {
+                                    setPoints(listOf(anchor, target))
+                                    outlinePaint.color = memberColor
+                                    outlinePaint.strokeWidth = 2.2f * density
+                                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(6f * density, 4f * density), 0f)
+                                    outlinePaint.alpha = 160
+                                }
+                                mapView.overlays.add(leaderLine)
+                            }
+                        }
+                    }
+                }
 
                 // Draw "me" first so other family members are drawn on top of "me" (z-order dominance)
                 val sortedMembers = members.sortedWith(Comparator { m1, m2 ->
@@ -429,7 +494,6 @@ fun RadarMap(
                     val memberColor = try {
                         android.graphics.Color.parseColor(member.avatarColorHex)
                     } catch (e: Exception) { android.graphics.Color.BLUE }
-
 
                     // Draw a transparent circle ring around the true location (Only for 'me' to avoid map clutter)
                     if (member.id == "me") {
