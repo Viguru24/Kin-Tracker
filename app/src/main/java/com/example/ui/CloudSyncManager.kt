@@ -297,7 +297,6 @@ class CloudSyncManager(
             }
 
             val incomingCloudMembers = newPayload.members.values
-            val defaultSimulatedIds = setOf("eloise", "isabel", "louis", "annette")
 
             for (cloudM in incomingCloudMembers) {
                 if (cloudM.id == myCloudId) continue
@@ -311,9 +310,11 @@ class CloudSyncManager(
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
 
                 val matchingByName = existingLocal.firstOrNull {
-                    it.id != "me" && !it.id.startsWith("device_") &&
-                    !defaultSimulatedIds.contains(it.id) &&
-                    it.name.trim().equals(cloudM.name.trim(), ignoreCase = true)
+                    it.id != "me" && it.id != cloudM.id &&
+                    (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
+                     (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
+                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")) ||
+                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")))
                 }
 
                 // Preserve local photoPath and phoneNumber from the matchingByName record, or fall back to persistent local contacts directory

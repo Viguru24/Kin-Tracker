@@ -642,7 +642,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val xDistKm = (lng - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat))
             val yDistKm = (lat - homeLat) * 111.0
             val distTotalKm = Math.hypot(xDistKm, yDistKm)
-            val isAtHome = distTotalKm < 0.10 // 100 meter home geofence
+            val isAtHome = distTotalKm < 0.035 // 35 meter tight home geofence
 
             val targetX = if (isAtHome) homeLng else lng
             val targetY = if (isAtHome) homeLat else lat
@@ -656,9 +656,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 Math.hypot((targetX - prevX) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - prevY) * 111.0)
             } else 0.0
 
-            val resolvedLocationSince = if (savedLocationSince > 0L && (isAtHome || movedKm < 0.10)) {
+            val resolvedLocationSince = if (savedLocationSince > 0L && (isAtHome || movedKm < 0.035)) {
                 savedLocationSince
-            } else if (me.locationSince > 0L && (isAtHome || movedKm < 0.10)) {
+            } else if (me.locationSince > 0L && (isAtHome || movedKm < 0.035)) {
                 prefs.edit().putLong("my_location_since", me.locationSince).apply()
                 me.locationSince
             } else {

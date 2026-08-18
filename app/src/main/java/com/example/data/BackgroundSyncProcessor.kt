@@ -57,7 +57,7 @@ object BackgroundSyncProcessor {
         val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(homeLat))
         val yDistanceKm = latDiff * 111.0
         val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
-        val isAtHome = distanceTotalKm < 0.05 // 50 meters
+        val isAtHome = distanceTotalKm < 0.035 // 35 meters threshold
 
         val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
 
@@ -150,7 +150,7 @@ object BackgroundSyncProcessor {
             val xDist = (location.longitude - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat))
             val yDist = (location.latitude - prefsHomeLat) * 111.0
             val distTotal = Math.hypot(xDist, yDist)
-            val isAtHome = distTotal < 0.05
+            val isAtHome = distTotal < 0.035 // 35 meters threshold
 
             val ghostExpiry = prefs.getLong("ghostModeExpiryTime", 0L)
             val isGhostMode = System.currentTimeMillis() < ghostExpiry
