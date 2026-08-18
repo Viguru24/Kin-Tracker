@@ -152,6 +152,29 @@ object BackgroundSyncProcessor {
             val distTotal = Math.hypot(xDist, yDist)
             val isAtHome = distTotal < 0.035 // 35 meters threshold
 
+            val targetX = if (isAtHome) prefsHomeLng else location.longitude
+            val targetY = if (isAtHome) prefsHomeLat else location.latitude
+
+            val savedLocationSince = prefs.getLong("my_location_since", 0L)
+            val anchorLat = prefs.getFloat("anchor_lat", 0f).toDouble()
+            val anchorLng = prefs.getFloat("anchor_lng", 0f).toDouble()
+            val distFromAnchorKm = if (anchorLat != 0.0 && anchorLng != 0.0) {
+                Math.hypot((targetX - anchorLng) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - anchorLat) * 111.0)
+            } else 0.0
+            val hasDeparted = distFromAnchorKm > 0.15 && speedMph > 2.5
+
+            val resolvedLocationSince = if (savedLocationSince > 0L && !hasDeparted) {
+                savedLocationSince
+            } else {
+                val now = System.currentTimeMillis()
+                prefs.edit()
+                    .putLong("my_location_since", now)
+                    .putFloat("anchor_lat", targetY.toFloat())
+                    .putFloat("anchor_lng", targetX.toFloat())
+                    .apply()
+                now
+            }
+
             val ghostExpiry = prefs.getLong("ghostModeExpiryTime", 0L)
             val isGhostMode = System.currentTimeMillis() < ghostExpiry
 
@@ -159,8 +182,8 @@ object BackgroundSyncProcessor {
                 id = myCloudId,
                 name = myName,
                 avatarColorHex = myColor,
-                x = if (isGhostMode) 0.0 else (if (isAtHome) prefsHomeLng else location.longitude),
-                y = if (isGhostMode) 0.0 else (if (isAtHome) prefsHomeLat else location.latitude),
+                x = if (isGhostMode) 0.0 else targetX,
+                y = if (isGhostMode) 0.0 else targetY,
                 batteryPercentage = batteryPct,
                 isCharging = isCharging,
                 speedMph = if (isGhostMode || isAtHome) 0.0 else speedMph,
@@ -168,7 +191,8 @@ object BackgroundSyncProcessor {
                 isComingHome = false,
                 etaMinutes = 0,
                 lastActive = lastActiveTimestamp,
-                avatarEmoji = myEmoji
+                avatarEmoji = myEmoji,
+                locationSince = resolvedLocationSince
             )
 
             // 3. Sync and Merge Shopping items in background

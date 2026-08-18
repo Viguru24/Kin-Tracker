@@ -649,21 +649,28 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
             val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
             val savedLocationSince = prefs.getLong("my_location_since", 0L)
+            val anchorLat = prefs.getFloat("anchor_lat", 0f).toDouble()
+            val anchorLng = prefs.getFloat("anchor_lng", 0f).toDouble()
 
-            val prevX = me.x
-            val prevY = me.y
-            val movedKm = if (prevX != 0.0 && prevY != 0.0) {
-                Math.hypot((targetX - prevX) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - prevY) * 111.0)
+            val distFromAnchorKm = if (anchorLat != 0.0 && anchorLng != 0.0) {
+                Math.hypot((targetX - anchorLng) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - anchorLat) * 111.0)
             } else 0.0
 
-            val resolvedLocationSince = if (savedLocationSince > 0L && (isAtHome || movedKm < 0.035)) {
+            val currentSpeedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
+            val hasDeparted = distFromAnchorKm > 0.15 && currentSpeedMph > 2.5
+
+            val resolvedLocationSince = if (savedLocationSince > 0L && !hasDeparted) {
                 savedLocationSince
-            } else if (me.locationSince > 0L && (isAtHome || movedKm < 0.035)) {
+            } else if (me.locationSince > 0L && !hasDeparted) {
                 prefs.edit().putLong("my_location_since", me.locationSince).apply()
                 me.locationSince
             } else {
                 val now = System.currentTimeMillis()
-                prefs.edit().putLong("my_location_since", now).apply()
+                prefs.edit()
+                    .putLong("my_location_since", now)
+                    .putFloat("anchor_lat", targetY.toFloat())
+                    .putFloat("anchor_lng", targetX.toFloat())
+                    .apply()
                 now
             }
 

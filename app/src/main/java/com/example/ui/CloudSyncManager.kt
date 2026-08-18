@@ -381,11 +381,11 @@ class CloudSyncManager(
                     Math.hypot((matchingLocal.x - cloudM.x) * 111.0 * Math.cos(Math.toRadians(cloudM.y)), (matchingLocal.y - cloudM.y) * 111.0)
                 } else 0.0
 
-                val coordsMoved = matchingLocal == null || (movedDistanceKm > 0.12 && cloudM.speedMph > 1.5)
+                val coordsMoved = matchingLocal == null || (movedDistanceKm > 0.15 && cloudM.speedMph > 2.5)
 
                 val locationSince = when {
                     !coordsMoved && matchingLocal != null && matchingLocal.locationSince > 0L -> {
-                        // Person hasn't moved — preserve steady continuous timer
+                        // Person hasn't departed — preserve steady continuous timer
                         matchingLocal.locationSince
                     }
                     remoteSince > 0L && cloudM.lastActive >= remoteSince -> {
@@ -394,6 +394,7 @@ class CloudSyncManager(
                         (System.currentTimeMillis() - remoteElapsedMs).coerceAtMost(System.currentTimeMillis())
                     }
                     remoteSince > 0L -> remoteSince
+                    matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
                     else -> System.currentTimeMillis()
                 }
 
