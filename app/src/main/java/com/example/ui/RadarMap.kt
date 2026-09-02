@@ -722,6 +722,7 @@ fun RadarMap(
 
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
         var showCircleSwitcher by remember { mutableStateOf(false) }
+        var showAddDeviceDialog by remember { mutableStateOf(false) }
 
         Column(
             modifier = Modifier
@@ -900,52 +901,91 @@ fun RadarMap(
                         }
                     }
 
-                    // Dropdown list of circles (Floats on top of all layers with zIndex 150f)
-                    if (showCircleSwitcher && groupPinMappings.isNotEmpty()) {
+                    // Dropdown list of circles + Add Device action (Floats on top of all layers with zIndex 150f)
+                    if (showCircleSwitcher) {
                         Surface(
                             modifier = Modifier
                                 .padding(top = 44.dp)
-                                .widthIn(min = 190.dp, max = 250.dp)
+                                .widthIn(min = 210.dp, max = 270.dp)
                                 .zIndex(150f),
-                            color = Color(0xF5121218),
+                            color = Color(0xF8121218),
                             shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f)),
+                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
                             shadowElevation = 20.dp
                         ) {
                             Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                                groupPinMappings.forEach { circle ->
-                                    val isActive = circle.pinCode == activeGroupPinCode
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                onSwitchCircle(circle.pinCode)
-                                                showCircleSwitcher = false
+                                if (groupPinMappings.isNotEmpty()) {
+                                    groupPinMappings.forEach { circle ->
+                                        val isActive = circle.pinCode == activeGroupPinCode
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    onSwitchCircle(circle.pinCode)
+                                                    showCircleSwitcher = false
+                                                }
+                                                .background(
+                                                    if (isActive) RadarCyan.copy(alpha = 0.12f)
+                                                    else Color.Transparent
+                                                )
+                                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
+                                                    color = if (isActive) RadarCyan else Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                                Text(
+                                                    text = "PIN ${circle.pinCode}",
+                                                    color = com.example.ui.theme.TextSecondary,
+                                                    fontSize = 10.sp
+                                                )
                                             }
-                                            .background(
-                                                if (isActive) RadarCyan.copy(alpha = 0.12f)
-                                                else Color.Transparent
-                                            )
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                            if (isActive) {
+                                                Text("●", color = RadarCyan, fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                                }
+
+                                // ➕ Add Device / Member to Circle Button
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showCircleSwitcher = false
+                                            showAddDeviceDialog = true
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(RadarCyan.copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
-                                                color = if (isActive) RadarCyan else Color.White,
-                                                fontSize = 13.sp,
-                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                            Text(
-                                                text = "PIN ${circle.pinCode}",
-                                                color = com.example.ui.theme.TextSecondary,
-                                                fontSize = 10.sp
-                                            )
-                                        }
-                                        if (isActive) {
-                                            Text("●", color = RadarCyan, fontSize = 10.sp)
-                                        }
+                                        Text("➕", fontSize = 11.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Add Device to Circle",
+                                            color = RadarCyan,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "PIN ${activeGroupPinCode.ifBlank { "8156" }}",
+                                            color = com.example.ui.theme.TextSecondary,
+                                            fontSize = 9.sp
+                                        )
                                     }
                                 }
                             }
@@ -1452,6 +1492,17 @@ fun RadarMap(
             isReset = isCircleDigestReset,
             onReset = onResetCircleDigest,
             onDismiss = { isDigestOpen = false }
+        )
+    }
+
+    // Add New Device Dialog
+    if (showAddDeviceDialog) {
+        val activeCircle = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+        val activeCircleName = activeCircle?.groupName?.ifBlank { "Family Circle" } ?: "Family Circle"
+        AddDeviceDialog(
+            activeGroupPinCode = activeGroupPinCode,
+            activeGroupName = activeCircleName,
+            onDismiss = { showAddDeviceDialog = false }
         )
     }
 

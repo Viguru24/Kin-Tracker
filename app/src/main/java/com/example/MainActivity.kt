@@ -450,6 +450,7 @@ fun MainScreen(
     var isFamilyPopupOpen by remember { mutableStateOf(false) }
     var isShoppingListPopupOpen by remember { mutableStateOf(false) }
     var isFeedbackOpen by remember { mutableStateOf(false) }
+    var showAddDeviceDialog by remember { mutableStateOf(false) }
 
 
     // Top toast alert notification channel overlay
@@ -733,6 +734,28 @@ fun MainScreen(
                                     isFamilyPopupOpen = false
                                 }
                             }
+
+                            // Add New Device button right in the family popup
+                            Surface(
+                                modifier = Modifier
+                                    .clickable {
+                                        isFamilyPopupOpen = false
+                                        showAddDeviceDialog = true
+                                    }
+                                    .padding(vertical = 2.dp),
+                                shape = RoundedCornerShape(20.dp),
+                                color = PrimaryCosmic,
+                                border = BorderStroke(1.dp, RadarCyan)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("➕", fontSize = 11.sp)
+                                    Text("Add Device", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
 
@@ -991,6 +1014,16 @@ fun MainScreen(
                 onFeedbackSubmitted = {
                     viewModel.triggerUIFeedback("Thank you for your feedback! 🚀")
                 }
+            )
+        }
+
+        if (showAddDeviceDialog) {
+            val activeCircle = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+            val activeCircleName = activeCircle?.groupName?.ifBlank { "Family Circle" } ?: "Family Circle"
+            com.example.ui.AddDeviceDialog(
+                activeGroupPinCode = activeGroupPinCode,
+                activeGroupName = activeCircleName,
+                onDismiss = { showAddDeviceDialog = false }
             )
         }
 

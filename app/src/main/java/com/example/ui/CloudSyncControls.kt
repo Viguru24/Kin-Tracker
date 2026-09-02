@@ -69,6 +69,7 @@ fun CloudSyncControls(
     var selectedColorHex by remember { mutableStateOf(myDeviceColorHex) }
     var selectedEmoji by remember(myDeviceEmoji) { mutableStateOf(myDeviceEmoji) }
     var expandedSetup by remember { mutableStateOf(false) }
+    var showAddDeviceDialog by remember { mutableStateOf(false) }
 
     val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime
     var timeLeftString by remember { mutableStateOf("") }
@@ -480,6 +481,24 @@ fun CloudSyncControls(
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
+                            }
+                        }
+
+                        // Prominent Add Device Guide Button
+                        Button(
+                            onClick = { showAddDeviceDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
+                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("📱", fontSize = 13.sp)
+                                Text("How to Connect a New Phone or Tablet", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1030,5 +1049,15 @@ fun CloudSyncControls(
                     }
             }
         }
+    }
+
+    if (showAddDeviceDialog) {
+        val activeCircle = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+        val activeCircleName = activeCircle?.groupName?.ifBlank { "Family Circle" } ?: "Family Circle"
+        AddDeviceDialog(
+            activeGroupPinCode = activeGroupPinCode,
+            activeGroupName = activeCircleName,
+            onDismiss = { showAddDeviceDialog = false }
+        )
     }
 }
