@@ -1021,6 +1021,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun triggerFindMyPhone(memberId: String) = viewModelScope.launch {
         val token = groupSyncToken.value
+        activeRingingMembers.value = activeRingingMembers.value + memberId
+        val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+        val targetName = localTarget?.name ?: memberId
+        _uiEvents.emit("🚨 Ringing $targetName's phone loudly...")
+
         cloudSyncManager.getGroupData(token)?.let { payload ->
             val updatedMembers = payload.members.toMutableMap()
             val targetEntry = updatedMembers.entries.firstOrNull {
@@ -1031,27 +1036,15 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 val target = targetEntry.value
                 updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM")
                 cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
-                activeRingingMembers.value = activeRingingMembers.value + memberId + target.id + target.name
-                _uiEvents.emit("🚨 Ringing ${target.name}'s phone loudly...")
+                activeRingingMembers.value = activeRingingMembers.value + target.id + target.name
+            }
+        }
 
-                // Automatically timeout/reset after 14 seconds
-                launch {
-                    kotlinx.coroutines.delay(14000L)
-                    if (activeRingingMembers.value.contains(memberId) || activeRingingMembers.value.contains(target.id)) {
-                        stopFindMyPhone(memberId, isAutoTimeout = true)
-                    }
-                }
-            } else {
-                // If local member match
-                val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
-                if (localTarget != null) {
-                    activeRingingMembers.value = activeRingingMembers.value + memberId + localTarget.id + localTarget.name
-                    _uiEvents.emit("🚨 Ringing ${localTarget.name}'s phone loudly...")
-                    launch {
-                        kotlinx.coroutines.delay(14000L)
-                        activeRingingMembers.value = activeRingingMembers.value - memberId - localTarget.id - localTarget.name
-                    }
-                }
+        // Automatically timeout/reset after 14 seconds
+        launch {
+            kotlinx.coroutines.delay(14000L)
+            if (activeRingingMembers.value.contains(memberId)) {
+                stopFindMyPhone(memberId, isAutoTimeout = true)
             }
         }
     }
