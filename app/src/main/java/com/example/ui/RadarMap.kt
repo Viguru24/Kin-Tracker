@@ -727,6 +727,7 @@ fun RadarMap(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(top = 10.dp, start = 10.dp, end = 10.dp)
                 .align(Alignment.TopCenter)
                 .zIndex(95f),

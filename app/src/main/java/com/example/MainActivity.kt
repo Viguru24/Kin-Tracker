@@ -374,8 +374,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("main_scaffold"),
-                    containerColor = CosmicBlack
-                ) { innerPadding ->
+                    containerColor = CosmicBlack,
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0)
+                ) { _ ->
                     if (!hasOnboarded) {
                         OnboardingScreen(
                             viewModel = viewModel,
@@ -385,7 +386,7 @@ class MainActivity : ComponentActivity() {
                         MainScreen(
                             viewModel = viewModel,
                             textToSpeech = textToSpeech,
-                            modifier = Modifier.padding(innerPadding)
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                 }
@@ -555,6 +556,16 @@ fun MainScreen(
             .fillMaxSize()
             .background(CosmicBlack)
     ) {
+        // Android System Status Bar Protection Scrim (Ensures Clock, Battery, 5G & Notifications are 100% visible)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsTopHeight(WindowInsets.statusBars)
+                .background(Color(0xE60A0D14))
+                .align(Alignment.TopCenter)
+                .zIndex(98f)
+        )
+
         // 1. Full Screen Radar Map occupying the background
         val openWhatsApp = { member: FamilyMember ->
             val phone = member.phoneNumber
@@ -635,7 +646,8 @@ fun MainScreen(
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 58.dp, start = 16.dp, end = 16.dp)
+                    .statusBarsPadding()
+                    .padding(top = 54.dp, start = 16.dp, end = 16.dp)
                     .zIndex(99f),
                 shape = RoundedCornerShape(20.dp),
                 color = Color(0xF0E53935),
@@ -1032,7 +1044,9 @@ fun MainScreen(
             activeAlertMessage = activeAlertMessage,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 28.dp)
+                .statusBarsPadding()
+                .padding(top = 10.dp)
+                .zIndex(100f)
         )
 
         // Full-Screen SOS Emergency Overlay — covers everything, impossible to miss
