@@ -57,7 +57,7 @@ object BackgroundSyncProcessor {
         val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(homeLat))
         val yDistanceKm = latDiff * 111.0
         val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
-        val isAtHome = distanceTotalKm < 0.035 // 35 meters threshold
+        val isAtHome = distanceTotalKm <= 0.12 // 120 meters realistic residential geofence
 
         val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
 
@@ -78,6 +78,12 @@ object BackgroundSyncProcessor {
             statusText = status
         )
         repository.updateMember(updatedMe)
+        repository.recordBreadcrumbThrottled(
+            memberId = "me",
+            latitude = if (isAtHome) homeLat else location.latitude,
+            longitude = if (isAtHome) homeLng else location.longitude,
+            speedMph = if (isAtHome) 0.0 else speedMph
+        )
 
         // 3. Sync and merge in background
         backgroundCloudSync(context, repository, prefs, location, batteryPct, isCharging, speedMph, status)
@@ -150,7 +156,7 @@ object BackgroundSyncProcessor {
             val xDist = (location.longitude - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat))
             val yDist = (location.latitude - prefsHomeLat) * 111.0
             val distTotal = Math.hypot(xDist, yDist)
-            val isAtHome = distTotal < 0.035 // 35 meters threshold
+            val isAtHome = distTotal <= 0.12 // 120 meters realistic residential geofence
 
             val targetX = if (isAtHome) prefsHomeLng else location.longitude
             val targetY = if (isAtHome) prefsHomeLat else location.latitude
@@ -161,18 +167,40 @@ object BackgroundSyncProcessor {
             val distFromAnchorKm = if (anchorLat != 0.0 && anchorLng != 0.0) {
                 Math.hypot((targetX - anchorLng) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - anchorLat) * 111.0)
             } else 0.0
-            val hasDeparted = distFromAnchorKm > 0.15 && speedMph > 2.5
+            val isMoving = if (isAtHome) false else (speedMph >= 1.2 || distFromAnchorKm > 0.15)
+            val now = System.currentTimeMillis()
 
-            val resolvedLocationSince = if (savedLocationSince > 0L && !hasDeparted) {
-                savedLocationSince
-            } else {
-                val now = System.currentTimeMillis()
+            val resolvedLocationSince = if (isMoving) {
                 prefs.edit()
-                    .putLong("my_location_since", now)
+                    .putLong("my_location_since", 0L)
                     .putFloat("anchor_lat", targetY.toFloat())
                     .putFloat("anchor_lng", targetX.toFloat())
                     .apply()
-                now
+                0L
+            } else {
+                if (isAtHome) {
+                    if (savedLocationSince > 0L) {
+                        savedLocationSince
+                    } else {
+                        prefs.edit()
+                            .putLong("my_location_since", now)
+                            .putFloat("anchor_lat", prefsHomeLat.toFloat())
+                            .putFloat("anchor_lng", prefsHomeLng.toFloat())
+                            .apply()
+                        now
+                    }
+                } else {
+                    if (distFromAnchorKm > 0.10 || savedLocationSince == 0L || anchorLat == 0.0) {
+                        prefs.edit()
+                            .putLong("my_location_since", now)
+                            .putFloat("anchor_lat", targetY.toFloat())
+                            .putFloat("anchor_lng", targetX.toFloat())
+                            .apply()
+                        now
+                    } else {
+                        savedLocationSince
+                    }
+                }
             }
 
             val ghostExpiry = prefs.getLong("ghostModeExpiryTime", 0L)
@@ -195,49 +223,94 @@ object BackgroundSyncProcessor {
                 locationSince = resolvedLocationSince
             )
 
-            // 3. Sync and Merge Shopping items in background
+            // 3. Sync and Merge Shopping items in background with cloud tombstones
             val localShoppingItems = repository.getShoppingItemsOnce()
             val deletionPrefs = context.getSharedPreferences("shopping_deletions", Context.MODE_PRIVATE)
             val incomingShoppingItems = payload?.shoppingItems ?: emptyList()
+            val incomingDeletions = payload?.deletedShoppingItems ?: emptyMap()
 
-            val mergedShoppingMap = mutableMapOf<String, CloudShoppingItem>()
+            val mergedDeletions = mutableMapOf<String, Long>()
+            val nowMs = System.currentTimeMillis()
+            val cutoff = nowMs - (30L * 24 * 60 * 60 * 1000L) // 30 days retention
+
+            for ((k, v) in deletionPrefs.all) {
+                if (v is Long && v > cutoff) {
+                    mergedDeletions[k] = v
+                }
+            }
+            for ((k, v) in incomingDeletions) {
+                if (v > cutoff) {
+                    val existing = mergedDeletions[k] ?: 0L
+                    if (v > existing) {
+                        mergedDeletions[k] = v
+                    }
+                }
+            }
+            val delEditor = deletionPrefs.edit()
+            for ((k, v) in mergedDeletions) {
+                delEditor.putLong(k, v)
+            }
+            delEditor.apply()
+
+            fun getDeletionTimestamp(name: String): Long {
+                val normKey = name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                val rawKey = name.lowercase().trim()
+                return maxOf(mergedDeletions[normKey] ?: 0L, mergedDeletions[rawKey] ?: 0L)
+            }
+
+            val mergedShoppingMap = LinkedHashMap<String, CloudShoppingItem>()
 
             for (localItem in localShoppingItems) {
-                val key = localItem.name.lowercase().trim()
-                mergedShoppingMap[key] = CloudShoppingItem(
-                    name = localItem.name,
-                    isChecked = localItem.isChecked,
-                    addedByMemberId = localItem.addedByMemberId,
-                    addedByMemberName = localItem.addedByMemberName,
-                    timestamp = localItem.timestamp
-                )
+                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (normKey.isBlank()) continue
+                val delTime = getDeletionTimestamp(localItem.name)
+                if (delTime == 0L || localItem.timestamp > delTime) {
+                    val existing = mergedShoppingMap[normKey]
+                    if (existing == null || localItem.timestamp > existing.timestamp) {
+                        mergedShoppingMap[normKey] = CloudShoppingItem(
+                            name = localItem.name,
+                            isChecked = localItem.isChecked,
+                            addedByMemberId = localItem.addedByMemberId,
+                            addedByMemberName = localItem.addedByMemberName,
+                            timestamp = localItem.timestamp
+                        )
+                    }
+                }
             }
 
             for (cloudItem in incomingShoppingItems) {
-                val key = cloudItem.name.lowercase().trim()
-                val localDeletionTime = deletionPrefs.getLong(key, 0L)
-
-                if (localDeletionTime > cloudItem.timestamp) {
-                    mergedShoppingMap.remove(key)
-                } else {
-                    val localMatch = mergedShoppingMap[key]
-                    if (localMatch != null) {
-                        if (cloudItem.timestamp > localMatch.timestamp) {
-                            mergedShoppingMap[key] = cloudItem
-                        }
-                    } else {
-                        if (localDeletionTime == 0L || cloudItem.timestamp > localDeletionTime) {
-                            mergedShoppingMap[key] = cloudItem
-                        }
+                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (normKey.isBlank()) continue
+                val delTime = getDeletionTimestamp(cloudItem.name)
+                if (delTime > 0L && cloudItem.timestamp <= delTime) {
+                    mergedShoppingMap.remove(normKey)
+                } else if (delTime == 0L || cloudItem.timestamp > delTime) {
+                    val localMatch = mergedShoppingMap[normKey]
+                    if (localMatch == null || cloudItem.timestamp > localMatch.timestamp) {
+                        mergedShoppingMap[normKey] = cloudItem
                     }
                 }
             }
 
             val finalShoppingList = mergedShoppingMap.values.toList()
+            val seenKeys = mutableSetOf<String>()
+
+            for (localItem in localShoppingItems) {
+                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                val matchedCloud = mergedShoppingMap[normKey]
+                if (matchedCloud == null || seenKeys.contains(normKey)) {
+                    repository.deleteShoppingItem(localItem)
+                } else {
+                    seenKeys.add(normKey)
+                    if (localItem.isChecked != matchedCloud.isChecked && matchedCloud.timestamp > localItem.timestamp) {
+                        repository.updateShoppingItem(localItem.copy(isChecked = matchedCloud.isChecked, timestamp = matchedCloud.timestamp))
+                    }
+                }
+            }
+
             for (cloudItem in finalShoppingList) {
-                val key = cloudItem.name.lowercase().trim()
-                val localMatch = localShoppingItems.firstOrNull { it.name.lowercase().trim() == key }
-                if (localMatch == null) {
+                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (!seenKeys.contains(normKey)) {
                     repository.insertShoppingItem(
                         ShoppingItem(
                             name = cloudItem.name,
@@ -247,24 +320,6 @@ object BackgroundSyncProcessor {
                             timestamp = cloudItem.timestamp
                         )
                     )
-                } else {
-                    if (localMatch.isChecked != cloudItem.isChecked && cloudItem.timestamp > localMatch.timestamp) {
-                        repository.updateShoppingItem(
-                            localMatch.copy(
-                                isChecked = cloudItem.isChecked,
-                                timestamp = cloudItem.timestamp
-                            )
-                        )
-                    }
-                }
-            }
-
-            for (localItem in localShoppingItems) {
-                val key = localItem.name.lowercase().trim()
-                val inIncoming = incomingShoppingItems.any { it.name.lowercase().trim() == key }
-                val inMerged = mergedShoppingMap.containsKey(key)
-                if (inIncoming && !inMerged) {
-                    repository.deleteShoppingItem(localItem)
                 }
             }
 
@@ -299,7 +354,8 @@ object BackgroundSyncProcessor {
                 payload.copy(
                     lastUpdated = lastActiveTimestamp,
                     members = updatedMembers,
-                    shoppingItems = finalShoppingList
+                    shoppingItems = finalShoppingList,
+                    deletedShoppingItems = mergedDeletions
                 )
             } else {
                 CloudGroupPayload(
@@ -308,7 +364,8 @@ object BackgroundSyncProcessor {
                     isHomeCalibrated = true,
                     lastUpdated = lastActiveTimestamp,
                     members = mapOf(myCloudId to myCloudMember),
-                    shoppingItems = finalShoppingList
+                    shoppingItems = finalShoppingList,
+                    deletedShoppingItems = mergedDeletions
                 )
             }
 

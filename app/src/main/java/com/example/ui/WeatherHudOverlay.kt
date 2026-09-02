@@ -29,7 +29,6 @@ fun WeatherHudOverlay(
     members: List<FamilyMember>,
     selectedMemberId: String?,
     memberWeatherDetailed: Map<String, FamilyViewModel.WeatherInfo>,
-    bottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
     val selectedWeather = memberWeatherDetailed[selectedMemberId ?: "me"] ?: memberWeatherDetailed["me"]
@@ -37,30 +36,27 @@ fun WeatherHudOverlay(
         var isWeatherExpanded by remember { mutableStateOf(false) }
         val selectedName = members.firstOrNull { it.id == (selectedMemberId ?: "me") }?.name ?: "My Device"
 
-        Box(
+        Surface(
             modifier = modifier
-                .padding(bottom = bottomPadding + 20.dp)
-                .zIndex(80f)
+                .clip(RoundedCornerShape(20.dp))
+                .border(BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(20.dp))
+                .clickable { isWeatherExpanded = !isWeatherExpanded },
+            color = Color(0xF2121218),
+            shadowElevation = 8.dp
         ) {
-            Surface(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.White.copy(alpha = 0.95f))
-                    .border(BorderStroke(1.dp, SlateBorder), RoundedCornerShape(20.dp))
-                    .clickable { isWeatherExpanded = !isWeatherExpanded }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                color = Color.White.copy(alpha = 0.95f),
-                shadowElevation = 6.dp
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(text = weather.emoji, fontSize = 16.sp)
-                    Text(text = "${weather.temp.toInt()}°C", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "•", color = TextSecondary, fontSize = 12.sp)
-                    Text(text = weather.description, color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    Text(text = if (isWeatherExpanded) "▲" else "▼", color = TextSecondary, fontSize = 8.sp)
+                    Text(text = weather.emoji, fontSize = 14.sp)
+                    Text(text = "${weather.temp.toInt()}°C", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (weather.minTempNight != 0.0) {
+                        Text(text = "🌙 Min ${weather.minTempNight.toInt()}°C", color = Color(0xFF64B5F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(text = "•", color = RadarCyan, fontSize = 10.sp)
+                    Text(text = weather.description, color = Color(0xFFCFD8DC), fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Text(text = if (isWeatherExpanded) "▲" else "▼", color = RadarCyan, fontSize = 8.sp)
                 }
             }
 
@@ -90,10 +86,25 @@ fun WeatherHudOverlay(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Temperature: ${weather.temp}°C / ${String.format(java.util.Locale.US, "%.1f", weather.temp * 1.8 + 32)}°F",
+                                text = "Current Temperature: ${weather.temp}°C / ${String.format(java.util.Locale.US, "%.1f", weather.temp * 1.8 + 32)}°F",
                                 color = TextSecondary,
                                 fontSize = 12.sp
                             )
+                            if (weather.minTempNight != 0.0) {
+                                Text(
+                                    text = "🌙 Tonight's Minimum Low: ${weather.minTempNight}°C / ${String.format(java.util.Locale.US, "%.1f", weather.minTempNight * 1.8 + 32)}°F",
+                                    color = Color(0xFF1565C0),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (weather.maxTempDay != 0.0) {
+                                Text(
+                                    text = "☀️ Today's Maximum High: ${weather.maxTempDay}°C / ${String.format(java.util.Locale.US, "%.1f", weather.maxTempDay * 1.8 + 32)}°F",
+                                    color = Color(0xFFE65100),
+                                    fontSize = 12.sp
+                                )
+                            }
                             Text(
                                 text = "Wind Speed: ${weather.windSpeed} mph",
                                 color = TextSecondary,
@@ -122,6 +133,5 @@ fun WeatherHudOverlay(
                     tonalElevation = 6.dp
                 )
             }
-        }
     }
 }

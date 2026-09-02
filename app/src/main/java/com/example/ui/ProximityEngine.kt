@@ -22,8 +22,9 @@ class ProximityEngine(
         var prevX: Double = 0.0,
         var prevY: Double = 0.0,
         var lastAlertTimestamp: Long = 0L,
-        var isApproachingMeAlerted: Boolean = false,
-        var isApproachingHomeAlerted: Boolean = false
+        var hasAlertedApproachingHomeThisTrip: Boolean = false,
+        var hasAlertedApproachingMeThisTrip: Boolean = false,
+        var wasConfirmedAtHome: Boolean = false
     )
 
     private val memberStates = ConcurrentHashMap<String, MemberProximityState>()
@@ -32,24 +33,30 @@ class ProximityEngine(
         membersList: List<FamilyMember>,
         homeLat: Double,
         homeLng: Double,
-        proximityThresholdMeters: Int
+        proximityThresholdMeters: Int,
+        myDeviceUUID: String = "",
+        myDeviceName: String = ""
     ) {
         if (membersList.isEmpty()) return
 
-        val me = membersList.firstOrNull { it.id == "me" }
+        val me = membersList.firstOrNull { it.id == "me" || (myDeviceUUID.isNotBlank() && it.id == myDeviceUUID) || (myDeviceName.isNotBlank() && it.name.equals(myDeviceName, ignoreCase = true)) }
         val myLat = me?.y ?: 0.0
         val myLng = me?.x ?: 0.0
         val hasMyGps = myLat != 0.0 && myLng != 0.0
 
         val isMeAtHome = if (hasMyGps) {
-            GeoUtils.isInsideGeofence(myLat, myLng, homeLat, homeLng, 100.0)
+            GeoUtils.isInsideGeofence(myLat, myLng, homeLat, homeLng, 120.0)
         } else true
 
-        val thresholdKm = proximityThresholdMeters / 1000.0
+        val thresholdKm = (proximityThresholdMeters / 1000.0).coerceAtLeast(0.3)
         val now = System.currentTimeMillis()
 
         membersList.forEach { m ->
-            if (m.id == "me" || (m.x == 0.0 && m.y == 0.0)) return@forEach
+            val isSelf = m.id == "me" ||
+                    (myDeviceUUID.isNotBlank() && m.id == myDeviceUUID) ||
+                    (myDeviceName.isNotBlank() && m.name.equals(myDeviceName, ignoreCase = true)) ||
+                    m.name.contains("(You)", ignoreCase = true)
+            if (isSelf || (m.x == 0.0 && m.y == 0.0)) return@forEach
 
             val state = memberStates.getOrPut(m.id) { MemberProximityState() }
 
@@ -66,77 +73,112 @@ class ProximityEngine(
                 ""
             ).trim()
 
-            // ── Case 1: Member Approaching Home Base ──
+            // ── Case 1: Member Approaching Home Base (Trigger ONLY ONCE per journey) ──
             if (state.prevDistToHomeKm > 0.0) {
                 val deltaHome = distToHomeKm - state.prevDistToHomeKm
-                val isGettingCloserToHome = deltaHome < -0.02
-                val isAtHome = distToHomeKm < 0.06
+                val isGettingCloserToHome = deltaHome < -0.015
+                val isAtHome = distToHomeKm <= 0.12
 
                 if (isAtHome) {
-                    if (state.isApproachingHomeAlerted) {
-                        repository.insertLog(
-                            ActivityLog(memberId = m.id, memberName = m.name, actionText = "has arrived Home safely", iconName = "home")
-                        )
-                        uiEvents.emit("🏠 $cleanName has arrived Home!")
-                    }
-                    state.isApproachingHomeAlerted = false
-                } else if (distToHomeKm <= thresholdKm && !state.isApproachingHomeAlerted && distToHomeKm > 0.08 && isMemberMoving && isGettingCloserToHome) {
-                    if (now - state.lastAlertTimestamp > 120_000L) {
-                        state.isApproachingHomeAlerted = true
+                    state.wasConfirmedAtHome = true
+                    state.hasAlertedApproachingHomeThisTrip = false
+                } else if (distToHomeKm <= thresholdKm && !state.hasAlertedApproachingHomeThisTrip && distToHomeKm > 0.12 && isMemberMoving && isGettingCloserToHome) {
+                    // Trigger ONCE per journey with a minimum 20-minute safety latch
+                    if (now - state.lastAlertTimestamp > 20 * 60 * 1000L) {
+                        state.hasAlertedApproachingHomeThisTrip = true
+                        state.wasConfirmedAtHome = false
                         state.lastAlertTimestamp = now
-                        val metersAway = (distToHomeKm * 1000.0).roundToInt()
-                        val estMinutes = if (m.etaMinutes > 0) m.etaMinutes else maxOf(1, (metersAway / 90.0).roundToInt())
-                        val timeStr = if (estMinutes == 1) "1 min" else "$estMinutes mins"
+
+                        // Calculate speed-based ETA to Home
+                        val speedMph = m.speedMph
+                        val estMinutes = when {
+                            m.etaMinutes > 0 -> m.etaMinutes
+                            speedMph >= 1.0 -> {
+                                val speedKmH = speedMph * 1.60934
+                                val hours = distToHomeKm / speedKmH
+                                val mins = (hours * 60.0).roundToInt()
+                                mins.coerceIn(1, 120)
+                            }
+                            else -> {
+                                // Default walking pace: ~3 mph = ~4.8 km/h -> 12.5 mins per km
+                                val mins = (distToHomeKm * 12.5).roundToInt()
+                                mins.coerceIn(1, 60)
+                            }
+                        }
+
+                        val timePhrase = when (estMinutes) {
+                            1 -> "about 1 minute"
+                            else -> "about $estMinutes minutes"
+                        }
 
                         repository.insertLog(
                             ActivityLog(
                                 memberId = m.id,
                                 memberName = m.name,
-                                actionText = "is approaching Home (~${metersAway}m away, ETA $timeStr)",
+                                actionText = "will be home in $timePhrase",
                                 iconName = "home"
                             )
                         )
-                        uiEvents.emit("Approaching Alert: $cleanName is approaching Home (~${metersAway}m away)")
+                        uiEvents.emit("Approaching Alert: $cleanName will be home in $timePhrase")
                     }
-                } else if (distToHomeKm > (thresholdKm + 0.15)) {
-                    state.isApproachingHomeAlerted = false
+                } else if (distToHomeKm > 0.80 && state.wasConfirmedAtHome) {
+                    // Reset trip latch ONLY once the member has departed far from home on a new trip
+                    state.hasAlertedApproachingHomeThisTrip = false
+                    state.wasConfirmedAtHome = false
                 }
             }
 
             // ── Case 2: Member Approaching Current Device (away from Home) ──
             if (!isMeAtHome && distToMeKm > 0.0 && state.prevDistToMeKm > 0.0) {
                 val deltaMe = distToMeKm - state.prevDistToMeKm
-                val isGettingCloserToMe = deltaMe < -0.02
-                val isMetUp = distToMeKm < 0.05
+                val isGettingCloserToMe = deltaMe < -0.015
+                val isMetUp = distToMeKm <= 0.08
 
                 if (isMetUp) {
-                    if (state.isApproachingMeAlerted) {
+                    if (state.hasAlertedApproachingMeThisTrip) {
                         repository.insertLog(
                             ActivityLog(memberId = m.id, memberName = m.name, actionText = "has met up with you", iconName = "check_in")
                         )
                         uiEvents.emit("👋 $cleanName has met up with you!")
                     }
-                    state.isApproachingMeAlerted = false
-                } else if (distToMeKm <= thresholdKm && !state.isApproachingMeAlerted && distToMeKm > 0.08 && isMemberMoving && isGettingCloserToMe) {
-                    if (now - state.lastAlertTimestamp > 120_000L) {
-                        state.isApproachingMeAlerted = true
+                    state.hasAlertedApproachingMeThisTrip = false
+                } else if (distToMeKm <= thresholdKm && !state.hasAlertedApproachingMeThisTrip && distToMeKm > 0.08 && isMemberMoving && isGettingCloserToMe) {
+                    if (now - state.lastAlertTimestamp > 20 * 60 * 1000L) {
+                        state.hasAlertedApproachingMeThisTrip = true
                         state.lastAlertTimestamp = now
-                        val metersAway = (distToMeKm * 1000.0).roundToInt()
-                        val estMinutes = if (m.etaMinutes > 0) m.etaMinutes else maxOf(1, (metersAway / 90.0).roundToInt())
-                        val timeStr = if (estMinutes == 1) "1 min" else "$estMinutes mins"
+
+                        val speedMph = m.speedMph
+                        val estMinutes = when {
+                            m.etaMinutes > 0 -> m.etaMinutes
+                            speedMph >= 1.0 -> {
+                                val speedKmH = speedMph * 1.60934
+                                val hours = distToMeKm / speedKmH
+                                val mins = (hours * 60.0).roundToInt()
+                                mins.coerceIn(1, 120)
+                            }
+                            else -> {
+                                val mins = (distToMeKm * 12.5).roundToInt()
+                                mins.coerceIn(1, 60)
+                            }
+                        }
+
+                        val timePhrase = when (estMinutes) {
+                            1 -> "about 1 minute"
+                            else -> "about $estMinutes minutes"
+                        }
 
                         repository.insertLog(
                             ActivityLog(
                                 memberId = m.id,
                                 memberName = m.name,
-                                actionText = "is on their way towards you (~${metersAway}m away, ETA $timeStr)",
+                                actionText = "will be with you in $timePhrase",
                                 iconName = "home"
                             )
                         )
-                        uiEvents.emit("Approaching Alert: $cleanName is on their way towards you (~${metersAway}m away)")
+                        uiEvents.emit("Approaching Alert: $cleanName will be with you in $timePhrase")
                     }
-                } else if (distToMeKm > (thresholdKm + 0.15)) {
-                    state.isApproachingMeAlerted = false
+                } else if (distToMeKm > 0.80) {
+                    state.hasAlertedApproachingMeThisTrip = false
                 }
             }
 

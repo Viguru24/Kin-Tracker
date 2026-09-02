@@ -43,3 +43,78 @@ fun formatExactTime(timestampMs: Long): String {
     val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
     return sdf.format(java.util.Date(timestampMs))
 }
+
+/**
+ * Activity / Transit mode classification
+ */
+enum class TransitMode(val icon: String, val label: String) {
+    STATIONARY("📍", "Stationary"),
+    WALKING("👣", "Walking"),
+    CYCLING("🚲", "Cycling"),
+    DRIVING("🚗", "Driving"),
+    TRAIN("🚆", "Train")
+}
+
+/**
+ * Accurately determines the transit mode based on speed and explicit status text.
+ */
+fun classifyTransitMode(speedMph: Double, statusText: String = ""): TransitMode {
+    val statusLower = statusText.lowercase()
+    return when {
+        statusLower.contains("train") || statusLower.contains("transit") || statusLower.contains("rail") || statusLower.contains("metro") || statusLower.contains("subway") || statusLower.contains("tube") -> {
+            TransitMode.TRAIN
+        }
+        statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycling") || statusLower.contains("cycle") -> {
+            TransitMode.CYCLING
+        }
+        statusLower.contains("walk") || statusLower.contains("foot") || statusLower.contains("hiking") || statusLower.contains("steps") || statusLower.contains("run") || statusLower.contains("jog") -> {
+            TransitMode.WALKING
+        }
+        statusLower.contains("drive") || statusLower.contains("driving") || statusLower.contains("car") || statusLower.contains("motorway") || statusLower.contains("highway") -> {
+            TransitMode.DRIVING
+        }
+        speedMph < 0.6 -> {
+            TransitMode.STATIONARY
+        }
+        speedMph in 0.6..4.5 -> {
+            TransitMode.WALKING
+        }
+        speedMph in 4.51..16.0 -> {
+            TransitMode.CYCLING
+        }
+        speedMph in 16.01..80.0 -> {
+            TransitMode.DRIVING
+        }
+        else -> {
+            TransitMode.TRAIN
+        }
+    }
+}
+
+/**
+ * Formats a live badge string for map markers and member cards.
+ * Shows activity emoji & speed when moving, or stationary location duration when stopped.
+ */
+fun formatTransitBadge(speedMph: Double, statusText: String, locationSince: Long): String {
+    val mode = classifyTransitMode(speedMph, statusText)
+    return when (mode) {
+        TransitMode.WALKING -> {
+            if (speedMph >= 0.6) "👣 ${String.format(java.util.Locale.US, "%.1f", speedMph)} mph" else "👣 Walking"
+        }
+        TransitMode.CYCLING -> {
+            if (speedMph >= 1.0) "🚲 ${String.format(java.util.Locale.US, "%.1f", speedMph)} mph" else "🚲 Cycling"
+        }
+        TransitMode.DRIVING -> {
+            if (speedMph >= 1.0) "🚗 ${String.format(java.util.Locale.US, "%.0f", speedMph)} mph" else "🚗 Driving"
+        }
+        TransitMode.TRAIN -> {
+            if (speedMph >= 1.0) "🚆 ${String.format(java.util.Locale.US, "%.0f", speedMph)} mph" else "🚆 Train"
+        }
+        TransitMode.STATIONARY -> {
+            if (locationSince > 0L) {
+                val dur = formatDuration(locationSince)
+                if (dur.isNotBlank()) "📍 here $dur" else ""
+            } else ""
+        }
+    }
+}

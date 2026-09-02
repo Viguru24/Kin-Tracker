@@ -79,4 +79,23 @@ interface FamilyDao {
 
     @Delete
     suspend fun deleteShoppingItem(item: ShoppingItem)
+
+    // Location Breadcrumbs queries for persistent driving/route history
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBreadcrumb(breadcrumb: LocationBreadcrumb)
+
+    @Query("SELECT * FROM location_breadcrumbs WHERE memberId = :memberId AND timestamp >= :fromTimestamp ORDER BY timestamp ASC")
+    fun getBreadcrumbsForMemberSince(memberId: String, fromTimestamp: Long): Flow<List<LocationBreadcrumb>>
+
+    @Query("SELECT * FROM location_breadcrumbs WHERE memberId = :memberId AND timestamp >= :fromTimestamp ORDER BY timestamp ASC")
+    suspend fun getBreadcrumbsForMemberSinceOnce(memberId: String, fromTimestamp: Long): List<LocationBreadcrumb>
+
+    @Query("SELECT * FROM location_breadcrumbs WHERE memberId = :memberId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLastBreadcrumbForMember(memberId: String): LocationBreadcrumb?
+
+    @Query("DELETE FROM location_breadcrumbs WHERE timestamp < :cutoffTimestamp")
+    suspend fun deleteBreadcrumbsOlderThan(cutoffTimestamp: Long)
+
+    @Query("DELETE FROM location_breadcrumbs WHERE memberId = :memberId")
+    suspend fun clearBreadcrumbsForMember(memberId: String)
 }

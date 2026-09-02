@@ -36,103 +36,60 @@ class FamilyRepository(private val familyDao: FamilyDao) {
     suspend fun ensureDefaultDataInserted(homeLat: Double, homeLng: Double) = withContext(Dispatchers.IO) {
         // Query current list of members
         val currentMembers = familyDao.getFamilyMembersOnce()
-        // If they contain any of the old IDs, clear database to initialize correctly
-        val hasOldData = currentMembers.any { it.id in listOf("sarah", "mom", "dad", "alex") }
-        if (hasOldData) {
-            for (m in currentMembers) {
+        
+        // Clean up legacy test IDs if any exist
+        for (m in currentMembers) {
+            val mClean = m.name.lowercase().trim()
+            if (m.id in listOf("sarah", "mom", "dad", "alex", "louis", "eloise") || mClean.contains("eloise")) {
                 familyDao.deleteFamilyMember(m)
+                familyDao.clearBreadcrumbsForMember(m.id)
             }
         }
 
-        val currentRefreshed = familyDao.getFamilyMembersOnce()
-        for (m in currentRefreshed) {
-            if (m.id == "louis") {
-                familyDao.deleteFamilyMember(m)
-            }
+        // If the database already has members (even just "me" or custom members), NEVER re-insert deleted demo members!
+        if (currentMembers.isNotEmpty()) {
+            return@withContext
         }
 
-        val updatedMembers = familyDao.getFamilyMembersOnce()
-        val hasIsabel = updatedMembers.any { it.id == "isabel" || it.name.contains("Isabel", ignoreCase = true) }
-        val hasAnnette = updatedMembers.any { it.id == "annette" || it.name.contains("Annette", ignoreCase = true) }
-        val hasEloise = updatedMembers.any { it.id == "eloise" || it.name.contains("Eloise", ignoreCase = true) }
-
-        val membersToRestore = mutableListOf<FamilyMember>()
-        if (!hasIsabel) {
-            membersToRestore.add(
-                FamilyMember(
-                    id = "isabel",
-                    name = "Isabel (Older Daughter)",
-                    avatarColorHex = "#26A69A",
-                    x = homeLng + 0.004,
-                    y = homeLat + 0.003,
-                    batteryPercentage = 78,
-                    isCharging = false,
-                    speedMph = 0.0,
-                    statusText = "At School",
-                    isComingHome = false,
-                    etaMinutes = 20,
-                    avatarEmoji = "👩‍🎓",
-                    phoneNumber = "+447760477416",
-                    photoPath = ""
-                )
+        // Only on a completely clean, empty initial app launch:
+        val initialMembers = listOf(
+            FamilyMember(
+                id = "isabel",
+                name = "Isabel (Older Daughter)",
+                avatarColorHex = "#26A69A",
+                x = homeLng,
+                y = homeLat,
+                batteryPercentage = 78,
+                isCharging = false,
+                speedMph = 0.0,
+                statusText = "At Home",
+                isComingHome = false,
+                etaMinutes = 0,
+                avatarEmoji = "👩‍🎓",
+                phoneNumber = "+447760477416",
+                photoPath = ""
+            ),
+            FamilyMember(
+                id = "annette",
+                name = "Annette (Mama)",
+                avatarColorHex = "#EC407A",
+                x = homeLng,
+                y = homeLat,
+                batteryPercentage = 84,
+                isCharging = true,
+                speedMph = 0.0,
+                statusText = "At Home",
+                isComingHome = false,
+                etaMinutes = 0,
+                avatarEmoji = "👩",
+                phoneNumber = "+447803171262",
+                photoPath = ""
             )
-        }
-        if (!hasAnnette) {
-            membersToRestore.add(
-                FamilyMember(
-                    id = "annette",
-                    name = "Annette (Mama)",
-                    avatarColorHex = "#EC407A",
-                    x = homeLng - 0.003,
-                    y = homeLat + 0.005,
-                    batteryPercentage = 84,
-                    isCharging = true,
-                    speedMph = 0.0,
-                    statusText = "Grocery Store",
-                    isComingHome = false,
-                    etaMinutes = 12,
-                    avatarEmoji = "👩",
-                    phoneNumber = "+447803171262",
-                    photoPath = ""
-                )
-            )
-        }
-        if (!hasEloise) {
-            membersToRestore.add(
-                FamilyMember(
-                    id = "eloise",
-                    name = "Eloise (Younger Daughter)",
-                    avatarColorHex = "#FF9800",
-                    x = homeLng,
-                    y = homeLat,
-                    batteryPercentage = 85,
-                    isCharging = false,
-                    speedMph = 0.0,
-                    statusText = "At Home",
-                    isComingHome = false,
-                    etaMinutes = 0,
-                    avatarEmoji = "👧",
-                    phoneNumber = "",
-                    photoPath = ""
-                )
-            )
-        }
-        if (membersToRestore.isNotEmpty()) {
-            familyDao.insertFamilyMembers(membersToRestore)
-        }
+        )
+        familyDao.insertFamilyMembers(initialMembers)
 
-            // Insert initial logs
-            familyDao.insertActivityLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active", iconName = "check_in"))
-            familyDao.insertActivityLog(ActivityLog(memberId = "isabel", memberName = "Isabel (Older Daughter)", actionText = "entered High School Zone", iconName = "away"))
-            familyDao.insertActivityLog(ActivityLog(memberId = "annette", memberName = "Annette (Mama)", actionText = "arrived at Supermarket", iconName = "away"))
-            familyDao.insertActivityLog(ActivityLog(memberId = "eloise", memberName = "Eloise (Younger Daughter)", actionText = "checked in of Dance Studio", iconName = "away"))
-
-        val currentShopping = familyDao.getShoppingItemsOnce()
-        if (currentShopping.isEmpty()) {
-            familyDao.insertShoppingItem(ShoppingItem(name = "Fresh Milk 🥛", isChecked = false, addedByMemberId = "annette", addedByMemberName = "Annette (Mama)"))
-            familyDao.insertShoppingItem(ShoppingItem(name = "Sourdough Bread 🍞", isChecked = false, addedByMemberId = "me", addedByMemberName = "Louis"))
-            familyDao.insertShoppingItem(ShoppingItem(name = "Ice Cream 🍦", isChecked = false, addedByMemberId = "eloise", addedByMemberName = "Eloise (Younger Daughter)"))
-        }
+        // Insert initial activity logs
+        familyDao.insertActivityLog(ActivityLog(memberId = "system", memberName = "System", actionText = "Family Radar active", iconName = "check_in"))
     }
 
 
@@ -193,5 +150,62 @@ class FamilyRepository(private val familyDao: FamilyDao) {
 
     suspend fun deleteShoppingItem(item: ShoppingItem) = withContext(Dispatchers.IO) {
         familyDao.deleteShoppingItem(item)
+    }
+
+    fun getBreadcrumbsForMemberSince(memberId: String, fromTimestamp: Long): Flow<List<LocationBreadcrumb>> {
+        return familyDao.getBreadcrumbsForMemberSince(memberId, fromTimestamp)
+    }
+
+    suspend fun getBreadcrumbsForMemberSinceOnce(memberId: String, fromTimestamp: Long): List<LocationBreadcrumb> = withContext(Dispatchers.IO) {
+        familyDao.getBreadcrumbsForMemberSinceOnce(memberId, fromTimestamp)
+    }
+
+    suspend fun recordBreadcrumbThrottled(
+        memberId: String,
+        latitude: Double,
+        longitude: Double,
+        speedMph: Double = 0.0
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (latitude == 0.0 && longitude == 0.0) return@withContext false
+        val now = System.currentTimeMillis()
+        val lastPoint = familyDao.getLastBreadcrumbForMember(memberId)
+        
+        if (lastPoint != null) {
+            val latDiff = latitude - lastPoint.latitude
+            val lngDiff = longitude - lastPoint.longitude
+            val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(lastPoint.latitude))
+            val yDistanceKm = latDiff * 111.0
+            val distanceMeters = Math.hypot(xDistanceKm, yDistanceKm) * 1000.0
+            val timeDiffMs = now - lastPoint.timestamp
+
+            // If moved less than 20 meters and less than 5 minutes passed, skip
+            if (distanceMeters < 20.0 && timeDiffMs < 300_000L) {
+                return@withContext false
+            }
+            // Suppress stationary jitter (under 8m)
+            if (distanceMeters < 8.0) {
+                return@withContext false
+            }
+        }
+
+        familyDao.insertBreadcrumb(
+            LocationBreadcrumb(
+                memberId = memberId,
+                latitude = latitude,
+                longitude = longitude,
+                speedMph = speedMph,
+                timestamp = now
+            )
+        )
+        true
+    }
+
+    suspend fun pruneOldBreadcrumbs(days: Int = 30) = withContext(Dispatchers.IO) {
+        val cutoff = System.currentTimeMillis() - (days * 24L * 60 * 60 * 1000)
+        familyDao.deleteBreadcrumbsOlderThan(cutoff)
+    }
+
+    suspend fun clearBreadcrumbsForMember(memberId: String) = withContext(Dispatchers.IO) {
+        familyDao.clearBreadcrumbsForMember(memberId)
     }
 }

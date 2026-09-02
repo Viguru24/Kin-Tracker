@@ -39,13 +39,32 @@ fun FloatingAlertToast(
         modifier = modifier
     ) {
         val message = activeAlertMessage ?: ""
+        val isDeparture = message.contains("Departure Warning") || message.contains("has left")
+        val isArrival = message.contains("Arrival Notice") || message.contains("has arrived")
+
+        val bgColor = when {
+            isDeparture -> Color(0xFF3E1F00)
+            isArrival -> Color(0xFF0D2E1C)
+            else -> PrimaryCosmic
+        }
+        val borderColor = when {
+            isDeparture -> Color(0xFFFF9100)
+            isArrival -> Color(0xFF00E676)
+            else -> Color.White.copy(alpha = 0.25f)
+        }
+        val iconEmoji = when {
+            isDeparture -> "🚪"
+            isArrival -> "📍"
+            else -> "ℹ️"
+        }
+
         Surface(
-            color = PrimaryCosmic,
+            color = bgColor,
             shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-            shadowElevation = 8.dp,
+            border = BorderStroke(1.5.dp, borderColor),
+            shadowElevation = 10.dp,
             modifier = Modifier
-                .fillMaxWidth(0.9f)
+                .fillMaxWidth(0.92f)
                 .testTag("ui_floating_alert")
         ) {
             Row(
@@ -53,16 +72,14 @@ fun FloatingAlertToast(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Alert Notify",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
+                Text(
+                    text = iconEmoji,
+                    fontSize = 18.sp
                 )
                 Text(
                     text = message,
                     color = Color.White,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )

@@ -39,10 +39,42 @@ class BackgroundLocationService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var isAppInForeground = false
+    private var isUserMoving = false
+    private var lastMovementTime = 0L
+    private var lastObservedLat = 0.0
+    private var lastObservedLng = 0.0
 
     private val directLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             acquireWakeLock()
+            
+            // Smart Adaptive movement detection: boost tracking rate when on the move
+            val speedMph = (location.speed * 2.23694f).toDouble()
+            val distM = if (lastObservedLat != 0.0 && lastObservedLng != 0.0) {
+                val x = (location.longitude - lastObservedLng) * 111000.0 * Math.cos(Math.toRadians(location.latitude))
+                val y = (location.latitude - lastObservedLat) * 111000.0
+                Math.hypot(x, y)
+            } else 0.0
+
+            val now = System.currentTimeMillis()
+            if (speedMph >= 0.6 || distM > 15.0) {
+                lastMovementTime = now
+                lastObservedLat = location.latitude
+                lastObservedLng = location.longitude
+                if (!isUserMoving && !isAppInForeground) {
+                    isUserMoving = true
+                    restartLocationUpdates()
+                }
+            } else if (isUserMoving && (now - lastMovementTime) > 120_000L) {
+                // 2 minutes of stillness: switch back to power saving
+                isUserMoving = false
+                lastObservedLat = location.latitude
+                lastObservedLng = location.longitude
+                if (!isAppInForeground) {
+                    restartLocationUpdates()
+                }
+            }
+
             serviceScope.launch {
                 BackgroundSyncProcessor.processLocationUpdate(applicationContext, location)
             }
@@ -113,12 +145,17 @@ class BackgroundLocationService : Service() {
                             if (gps.time > net.time) gps else net
                         } else gps ?: net
 
-                        best?.let { loc ->
+                    best?.let { loc ->
                             BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
                         }
                     }
                 } catch (e: Exception) {}
-                delay(20000L)
+                val loopDelay = when {
+                    isAppInForeground -> 4000L
+                    isUserMoving -> 5000L // 5-second polling when actively moving (Smart High Precision)
+                    else -> 25000L // 25-second relaxed polling when stationary (battery saver)
+                }
+                delay(loopDelay)
             }
         }
     }
@@ -156,6 +193,7 @@ class BackgroundLocationService : Service() {
     private fun restartLocationUpdates() {
         try {
             locationManager?.removeUpdates(getReceiverPendingIntent())
+            locationManager?.removeUpdates(directLocationListener)
         } catch (e: Exception) {}
         startLocationUpdates()
     }
@@ -197,8 +235,17 @@ class BackgroundLocationService : Service() {
                 false
             }
 
-            val interval = if (isAppInForeground) 3000L else 60000L
-            val minDistance = if (isAppInForeground) 1.0f else 10.0f
+            // Adaptive intervals: Highest real-time precision (5s, 0m) when moving or in foreground, 45s when stationary
+            val interval = when {
+                isAppInForeground -> 1000L
+                isUserMoving -> 5000L
+                else -> 45000L
+            }
+            val minDistance = when {
+                isAppInForeground -> 0.0f
+                isUserMoving -> 0.0f
+                else -> 5.0f
+            }
             val pendingIntent = getReceiverPendingIntent()
 
             if (hasFine && isGpsEnabled) {

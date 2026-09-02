@@ -445,15 +445,15 @@ private fun saveUriToInternalStorage(context: android.content.Context, uri: Uri)
         // 1. Get EXIF orientation from original stream
         val orientation = try {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                val exif = android.media.ExifInterface(stream)
+                val exif = androidx.exifinterface.media.ExifInterface(stream)
                 val ori = exif.getAttributeInt(
-                    android.media.ExifInterface.TAG_ORIENTATION,
-                    android.media.ExifInterface.ORIENTATION_NORMAL
+                    androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
                 )
                 when (ori) {
-                    android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
-                    android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
-                    android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
                     else -> 0
                 }
             } ?: 0

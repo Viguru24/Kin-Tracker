@@ -36,18 +36,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.FamilyMember
 import com.example.data.SafeZone
+import com.example.data.ShoppingItem
 import com.example.data.formatTimeAgo
 import com.example.data.formatDuration
 import com.example.data.formatExactTime
+import com.example.data.formatTransitBadge
+import com.example.data.classifyTransitMode
+import com.example.data.TransitMode
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.views.CustomZoomButtonsController
@@ -56,7 +62,6 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.Polygon
 import java.io.File
-
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
@@ -67,6 +72,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import java.io.FileOutputStream
+
+
 
 @Composable
 fun RadarMap(
@@ -87,6 +94,11 @@ fun RadarMap(
     activeGroupCreatorId: String = "",
     myDeviceUUID: String = "",
     onKickMember: (String) -> Unit = {},
+    homeRadiusMeters: Double = 65.0,
+    workLat: Double = 0.0,
+    workLng: Double = 0.0,
+    isWorkCalibrated: Boolean = false,
+    workRadiusMeters: Double = 75.0,
     safeZones: List<SafeZone> = emptyList(),
     onAddSafeZone: (SafeZone) -> Unit = {},
     onDeleteSafeZone: (SafeZone) -> Unit = {},
@@ -96,11 +108,17 @@ fun RadarMap(
     groupPinMappings: List<com.example.data.GroupPinMapping> = emptyList(),
     activeGroupPinCode: String = "",
     onSwitchCircle: (String) -> Unit = {},
+    routeTimeFilter: String = "today",
+    onSelectRouteTimeFilter: (String) -> Unit = {},
+    shoppingItems: List<ShoppingItem> = emptyList(),
+    onOpenShoppingList: () -> Unit = {},
     bottomPadding: Dp = 120.dp,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var mapTypeMode by remember { mutableStateOf("streets") } // streets, hybrid (midnight), radar (neon)
+    val prefs = remember { context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE) }
+    var mapTypeMode by remember { mutableStateOf(prefs.getString("mapTypeMode", "streets").let { if (it == "satellite" || it.isNullOrBlank()) "streets" else it }) }
+    var showMapStyleMenu by remember { mutableStateOf(false) }
     
     // Popup state for face tapping options
     var memberForContextMenu by remember { mutableStateOf<FamilyMember?>(null) }
@@ -130,8 +148,22 @@ fun RadarMap(
     // Remember the MapView reference to trigger zoom & camera animations from Compose UI blocks
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var isCameraFollowingMe by remember { mutableStateOf(false) }
+    var isFollowingSelectedMember by remember { mutableStateOf(true) }
     var mapZoomLevel by remember { mutableStateOf(15.5) }
     var isRouteTrailEnabled by remember { mutableStateOf(false) }
+
+    var animTick by remember { mutableStateOf(0) }
+    val hasMovingMembers = remember(members) {
+        members.any { it.speedMph >= 0.6 || classifyTransitMode(it.speedMph, it.statusText) != TransitMode.STATIONARY }
+    }
+    LaunchedEffect(hasMovingMembers) {
+        if (hasMovingMembers) {
+            while (true) {
+                kotlinx.coroutines.delay(400)
+                animTick = (animTick + 1) % 4
+            }
+        }
+    }
 
     // Synchronize OSMDroid Global configurations safely
     LaunchedEffect(Unit) {
@@ -149,18 +181,83 @@ fun RadarMap(
         }
     }
 
-    // Target zoom and center only when selection changes
-    LaunchedEffect(selectedMemberId) {
-        isRouteTrailEnabled = false
-        if (selectedMemberId != null) {
-            val member = members.firstOrNull { it.id == selectedMemberId }
-            if (member != null) {
-                mapViewRef?.let { map ->
-                    map.controller.animateTo(GeoPoint(member.y, member.x))
-                    map.controller.setZoom(15.5)
+    val visualCoordinates = remember { mutableStateMapOf<String, GeoPoint>() }
+    val activeAnimators = remember { mutableMapOf<String, android.animation.ValueAnimator>() }
+
+    // Smooth coordinate & camera interpolation engine (Dead Reckoning & ValueAnimator)
+    LaunchedEffect(members) {
+        members.forEach { m ->
+            if (m.x != 0.0 && m.y != 0.0) {
+                val targetLat = m.y
+                val targetLng = m.x
+                val start = visualCoordinates[m.id]
+
+                if (start == null) {
+                    visualCoordinates[m.id] = GeoPoint(targetLat, targetLng)
+                } else {
+                    val dLat = targetLat - start.latitude
+                    val dLng = targetLng - start.longitude
+                    val distKm = kotlin.math.hypot(dLng * 111.0 * Math.cos(Math.toRadians(targetLat)), dLat * 111.0)
+                    if (distKm > 0.0002) { // Movement > 0.2 meters
+                        activeAnimators[m.id]?.cancel()
+                        val startLat = start.latitude
+                        val startLng = start.longitude
+                        val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
+                            duration = 2000L
+                            interpolator = android.view.animation.LinearInterpolator()
+                            addUpdateListener { anim ->
+                                val frac = anim.animatedFraction
+                                val currentLat = startLat + dLat * frac
+                                val currentLng = startLng + dLng * frac
+                                val interpGeo = GeoPoint(currentLat, currentLng)
+                                visualCoordinates[m.id] = interpGeo
+
+                                if (m.id == selectedMemberId && isFollowingSelectedMember && !isRouteTrailEnabled) {
+                                    mapViewRef?.let { map ->
+                                        map.controller.setCenter(interpGeo)
+                                    }
+                                }
+                            }
+                        }
+                        activeAnimators[m.id] = animator
+                        animator.start()
+                    }
                 }
             }
-        } else {
+        }
+    }
+
+    val selectedMember = members.firstOrNull { it.id == selectedMemberId }
+    val selectedMemberCoord = selectedMember?.let { if (it.x != 0.0 && it.y != 0.0) Pair(it.y, it.x) else null }
+
+    // Reset follow state whenever a new member is selected
+    LaunchedEffect(selectedMemberId) {
+        isFollowingSelectedMember = true
+        isRouteTrailEnabled = false
+        selectedMember?.let { m ->
+            if (m.x != 0.0 && m.y != 0.0) {
+                mapViewRef?.let { map ->
+                    val targetGeo = visualCoordinates[m.id] ?: GeoPoint(m.y, m.x)
+                    map.controller.animateTo(targetGeo)
+                    if (map.zoomLevelDouble < 14.5) {
+                        map.controller.setZoom(16.0)
+                    }
+                }
+            }
+        }
+    }
+
+    // Continuous Live Camera Follow Mode: initial centering when selected or fitting all members
+    LaunchedEffect(selectedMemberId, selectedMemberCoord, isFollowingSelectedMember) {
+        if (selectedMember != null && selectedMemberCoord != null && isFollowingSelectedMember && !isRouteTrailEnabled) {
+            mapViewRef?.let { map ->
+                val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                if (map.zoomLevelDouble < 14.5) {
+                    map.controller.animateTo(targetGeo)
+                    map.controller.setZoom(16.0)
+                }
+            }
+        } else if (selectedMemberId == null) {
             // Show All Members on Map: fit all active members in view
             val validMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
             if (validMembers.isNotEmpty()) {
@@ -186,24 +283,26 @@ fun RadarMap(
     }
 
     // Auto-fit route between Start/Home and Current Location when Route Trail is toggled ON!
-    LaunchedEffect(isRouteTrailEnabled) {
-        if (isRouteTrailEnabled && selectedMemberId != null) {
-            val member = members.firstOrNull { it.id == selectedMemberId }
-            if (member != null) {
-                val recordedPoints = locationTrails[member.id] ?: emptyList()
-                val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
-                val points = if (recordedPoints.size >= 2) recordedPoints else if (isAway) listOf(Pair(homeLat, homeLng), Pair(member.y, member.x)) else emptyList()
+    LaunchedEffect(isRouteTrailEnabled, selectedMemberId) {
+        if (isRouteTrailEnabled) {
+            val targetMember = selectedMember ?: members.firstOrNull { it.id != "me" && (kotlin.math.hypot(it.y - homeLat, it.x - homeLng) * 111.0 > 0.06) }
+            if (targetMember != null) {
+                val recordedPoints = locationTrails[targetMember.id]
+                    ?: locationTrails.entries.firstOrNull { it.key.contains(targetMember.name.lowercase().take(4)) || targetMember.id.contains(it.key) }?.value
+                    ?: emptyList()
+                val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(targetMember.y - homeLat, targetMember.x - homeLng) * 111.0 > 0.06)
+                val points = if (recordedPoints.size >= 2) recordedPoints else if (isAway) listOf(Pair(homeLat, homeLng), Pair(targetMember.y, targetMember.x)) else emptyList()
                 if (points.size >= 2) {
                     mapViewRef?.let { map ->
                         val minLat = points.minOf { it.first }
                         val maxLat = points.maxOf { it.first }
                         val minLng = points.minOf { it.second }
                         val maxLng = points.maxOf { it.second }
-                        val latMargin = maxOf((maxLat - minLat) * 0.25, 0.006)
-                        val lngMargin = maxOf((maxLng - minLng) * 0.25, 0.006)
+                        val latMargin = maxOf((maxLat - minLat) * 0.35, 0.008)
+                        val lngMargin = maxOf((maxLng - minLng) * 0.35, 0.008)
                         try {
                             val box = BoundingBox(maxLat + latMargin, maxLng + lngMargin, minLat - latMargin, minLng - lngMargin)
-                            map.zoomToBoundingBox(box, true, 100)
+                            map.zoomToBoundingBox(box, true, 120)
                         } catch (e: Exception) {
                             val centerLat = (minLat + maxLat) / 2.0
                             val centerLng = (minLng + maxLng) / 2.0
@@ -306,6 +405,28 @@ fun RadarMap(
                         }
                     }
                     mapView.overlays.add(zoneMarker)
+                }
+
+                // Draw Work Area geofence & marker if calibrated
+                if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
+                    val workCircle = Polygon(mapView).apply {
+                        points = Polygon.pointsAsCircle(GeoPoint(workLat, workLng), workRadiusMeters)
+                        fillPaint.color = android.graphics.Color.parseColor("#3D5AFE") // Indigo blue
+                        fillPaint.alpha = 25
+                        outlinePaint.color = android.graphics.Color.parseColor("#536DFE")
+                        outlinePaint.strokeWidth = 2.0f * density
+                        outlinePaint.alpha = 130
+                    }
+                    mapView.overlays.add(workCircle)
+
+                    val workMarker = object : Marker(mapView) {
+                        override fun showInfoWindow() {}
+                    }.apply {
+                        position = GeoPoint(workLat, workLng)
+                        icon = MapMarkerRenderer.getOrCreateZoneIcon(context, "Work", "work")
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    }
+                    mapView.overlays.add(workMarker)
                 }
 
 
@@ -451,9 +572,9 @@ fun RadarMap(
                 sortedMembers.forEach { member ->
                     val displayGeo = adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
                     val trueGeo = GeoPoint(member.y, member.x)
-                    val isSelected = member.id == selectedMemberId
-                    val distToHome = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                    val atHome = distToHome < 0.05 || member.statusText.contains("At Home")
+                    val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
+                    val isSelected = member.id == selectedMemberId ||
+                            (selectedMemberId != null && (member.id.contains(selectedMemberId) || selectedMemberId.contains(member.id) || member.name.equals(selectedMember?.name, ignoreCase = true)))
 
                     val memberColor = try {
                         android.graphics.Color.parseColor(member.avatarColorHex)
@@ -471,10 +592,11 @@ fun RadarMap(
                         mapView.overlays.add(ring)
                     }
 
-                    // Draw visual breadcrumb trails showing previous location history ONLY when enabled & member is selected!
-                    if (isSelected && isRouteTrailEnabled) {
-                        val recordedPoints = locationTrails[member.id] ?: emptyList()
-                        val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
+                    // Draw visual breadcrumb trails showing previous location history ONLY when enabled & member is selected or away!
+                    if (isRouteTrailEnabled && (isSelected || (selectedMemberId == null && isAway))) {
+                        val recordedPoints = locationTrails[member.id]
+                            ?: locationTrails.entries.firstOrNull { it.key.contains(member.name.lowercase().take(4)) || member.id.contains(it.key) }?.value
+                            ?: emptyList()
                         val trailPoints = if (recordedPoints.size >= 2) {
                             recordedPoints
                         } else if (isAway) {
@@ -484,28 +606,26 @@ fun RadarMap(
                         }
 
                         if (trailPoints.size >= 2) {
+                            val glowPolyline = Polyline(mapView).apply {
+                                val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
+                                setPoints(geoPoints)
+                                outlinePaint.color = android.graphics.Color.WHITE
+                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                outlinePaint.strokeWidth = 9.0f * density
+                                outlinePaint.alpha = 180
+                            }
+                            mapView.overlays.add(glowPolyline)
+
                             val trailPolyline = Polyline(mapView).apply {
                                 val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
                                 setPoints(geoPoints)
                                 outlinePaint.color = memberColor
                                 outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                outlinePaint.strokeWidth = 5.5f * density
-                                outlinePaint.alpha = 235
+                                outlinePaint.strokeWidth = 6.0f * density
+                                outlinePaint.alpha = 255
                             }
                             mapView.overlays.add(trailPolyline)
                         }
-                    }
-
-                    // 4. LOW BATTERY CRITICAL SAFETY BEACONS
-                    if (member.batteryPercentage <= 15 && !member.isCharging) {
-                        val hazardMarker = object : Marker(mapView) {
-                            override fun showInfoWindow() {}
-                        }.apply {
-                            position = GeoPoint(member.y - 0.0003, member.x + 0.0003) // offset slightly to be visible next to avatar
-                            icon = MapMarkerRenderer.getOrCreateMarkerDrawable(context, "#FF1744", "⚠️", false, "", "", false)
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        }
-                        mapView.overlays.add(hazardMarker)
                     }
 
                     // Draw the face bubble markers on the very top layer (at displayGeo)
@@ -519,9 +639,8 @@ fun RadarMap(
                                     else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
                                     else "now"
 
-                    // Location duration badge (how long at this spot)
-                    val locationDurationLabel = if (member.locationSince > 0L)
-                        "📍 here ${formatDuration(member.locationSince)}" else ""
+                    // Location duration badge or live movement activity badge (walking feet 👣, driving 🚗, bicycle 🚲, train 🚆)
+                    val locationDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince)
 
                     val memberMarker = object : Marker(mapView) {
                         override fun showInfoWindow() {
@@ -540,7 +659,8 @@ fun RadarMap(
                             relativeTime = timeLabel,
                             locationDuration = locationDurationLabel,
                             batteryPercentage = if (member.id != "me") member.batteryPercentage else -1,
-                            isCharging = member.isCharging
+                            isCharging = member.isCharging,
+                            animFrame = animTick
                         )
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         setOnMarkerClickListener { m, _ ->
@@ -552,13 +672,19 @@ fun RadarMap(
                     mapView.overlays.add(memberMarker)
                 }
 
-                // Apply OpenStreetMap customizable styling options using matrices
+                // Apply OpenStreetMap customizable styling options using tile sources and matrices
                 when (mapTypeMode) {
                     "streets" -> {
+                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
+                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        }
                         // Standard crisp full-color streets
                         mapView.overlayManager.tilesOverlay.setColorFilter(null)
                     }
                     "hybrid" -> {
+                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
+                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        }
                         // Cyberpunk Midnight Dark matrix filter
                         val matrix = floatArrayOf(
                             -0.85f, 0f, 0f, 0f, 255f,
@@ -569,6 +695,9 @@ fun RadarMap(
                         mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
                     }
                     "radar" -> {
+                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
+                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        }
                         // High-tech Retro Sonar green matrix filter
                         val matrix = floatArrayOf(
                             0f, 0f, 0f, 0f, 0f,
@@ -578,6 +707,12 @@ fun RadarMap(
                         )
                         mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
                     }
+                    else -> {
+                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
+                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        }
+                        mapView.overlayManager.tilesOverlay.setColorFilter(null)
+                    }
                 }
 
                 mapView.invalidate()
@@ -585,23 +720,30 @@ fun RadarMap(
         )
 
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
-
-        // 1. FLOATING TOP HUD ACTION BAR — settings & digest (left) + circle switcher (centre) + offline badge (right)
         var showCircleSwitcher by remember { mutableStateOf(false) }
-        Row(
+
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp, start = 12.dp, end = 12.dp)
-                .align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 10.dp, start = 10.dp, end = 10.dp)
+                .align(Alignment.TopCenter)
+                .zIndex(95f),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Settings trigger button with integrated version badge
-                Box {
+            // 1. FLOATING TOP HUD ACTION BAR — Settings, Digest, Map Theme, Circle Switcher, Offline Badge (All on the same horizontal level!)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Settings trigger button
                     Surface(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(38.dp)
                             .clickable { onSettingsClick() },
                         color = Color.White,
                         shape = CircleShape,
@@ -609,329 +751,450 @@ fun RadarMap(
                         shadowElevation = 6.dp
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("⚙️", fontSize = 18.sp)
+                            Text("⚙️", fontSize = 16.sp)
                         }
                     }
-                    
-                    // Small version badge circle overlapping the settings button at bottom-end
+
+                    // Circle Digest trigger button
                     Surface(
                         modifier = Modifier
-                            .size(18.dp)
-                            .align(Alignment.BottomEnd)
-                            .offset(x = 4.dp, y = 4.dp),
-                        color = Color(0xFF1E1E24),
+                            .size(38.dp)
+                            .clickable { isDigestOpen = true }
+                            .testTag("weekly_digest_button"),
+                        color = Color.White,
                         shape = CircleShape,
-                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.9f)),
-                        shadowElevation = 4.dp
+                        border = BorderStroke(1.dp, SlateBorder),
+                        shadowElevation = 6.dp
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text(
-                                text = "1.6",
-                                color = Color.White,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.SansSerif
-                            )
+                            Text("📊", fontSize = 16.sp)
+                        }
+                    }
+
+                    // Dedicated Map Layer / Theme Trigger Button
+                    Box {
+                        Surface(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clickable { showMapStyleMenu = !showMapStyleMenu },
+                            color = Color.White,
+                            shape = CircleShape,
+                            border = BorderStroke(1.dp, SlateBorder),
+                            shadowElevation = 6.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Text(
+                                    text = when (mapTypeMode) {
+                                        "hybrid" -> "🌙"
+                                        "radar" -> "🟢"
+                                        else -> "🗺️"
+                                    },
+                                    fontSize = 16.sp
+                                )
+                            }
+                        }
+
+                        // Floating Map Theme Menu Dropdown
+                        if (showMapStyleMenu) {
+                            Surface(
+                                modifier = Modifier
+                                    .padding(top = 44.dp)
+                                    .widthIn(min = 180.dp, max = 220.dp)
+                                    .zIndex(150f),
+                                color = Color(0xF5121218),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
+                                shadowElevation = 20.dp
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                    Text(
+                                        text = "MAP THEME",
+                                        color = RadarCyan,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                                    )
+                                    listOf(
+                                        Triple("streets", "🗺️ Real Map", "Standard crisp streets"),
+                                        Triple("hybrid", "🌙 Midnight Dark", "Dark contrast mode"),
+                                        Triple("radar", "🟢 Retro Sonar", "Tactical radar HUD")
+                                    ).forEach { (mode, label, desc) ->
+                                        val isSelected = mapTypeMode == mode
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    mapTypeMode = mode
+                                                    prefs.edit().putString("mapTypeMode", mode).apply()
+                                                    showMapStyleMenu = false
+                                                }
+                                                .background(
+                                                    if (isSelected) RadarCyan.copy(alpha = 0.18f)
+                                                    else Color.Transparent
+                                                )
+                                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) RadarCyan else Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = desc,
+                                                    color = Color(0xFFB0BEC5),
+                                                    fontSize = 9.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                // Circle Digest trigger button
+                // ---- CENTRE: Circle Switcher Pill (Height 38dp, same level as other buttons!) ----
+                Box(contentAlignment = Alignment.TopCenter) {
+                    Surface(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .widthIn(min = 120.dp, max = 200.dp)
+                            .clickable { showCircleSwitcher = !showCircleSwitcher },
+                        color = Color(0xF0121218),
+                        shape = RoundedCornerShape(19.dp),
+                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "👥",
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (activeGroupPinCode.isNotBlank()) "PIN $activeGroupPinCode"
+                                       else if (groupPinMappings.isNotEmpty()) groupPinMappings.first().groupName.ifBlank { "Family Circle" }
+                                       else "Family Circle",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (showCircleSwitcher) "▲" else "▼",
+                                color = RadarCyan,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+
+                    // Dropdown list of circles (Floats on top of all layers with zIndex 150f)
+                    if (showCircleSwitcher && groupPinMappings.isNotEmpty()) {
+                        Surface(
+                            modifier = Modifier
+                                .padding(top = 44.dp)
+                                .widthIn(min = 190.dp, max = 250.dp)
+                                .zIndex(150f),
+                            color = Color(0xF5121218),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f)),
+                            shadowElevation = 20.dp
+                        ) {
+                            Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                groupPinMappings.forEach { circle ->
+                                    val isActive = circle.pinCode == activeGroupPinCode
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onSwitchCircle(circle.pinCode)
+                                                showCircleSwitcher = false
+                                            }
+                                            .background(
+                                                if (isActive) RadarCyan.copy(alpha = 0.12f)
+                                                else Color.Transparent
+                                            )
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
+                                                color = if (isActive) RadarCyan else Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            Text(
+                                                text = "PIN ${circle.pinCode}",
+                                                color = com.example.ui.theme.TextSecondary,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                        if (isActive) {
+                                            Text("●", color = RadarCyan, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 1b. OFFLINE MAP CACHE STATUS — compact circle (38dp, same level!)
+                var showOfflineInfoDialog by remember { mutableStateOf(false) }
                 Surface(
                     modifier = Modifier
-                        .size(42.dp)
-                        .clickable { isDigestOpen = true }
-                        .testTag("weekly_digest_button"),
-                    color = Color.White,
+                        .size(38.dp)
+                        .clickable { showOfflineInfoDialog = true }
+                        .testTag("offline_cache_badge"),
+                    color = Color(0xE81A2F1D),
                     shape = CircleShape,
-                    border = BorderStroke(1.dp, SlateBorder),
+                    border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
                     shadowElevation = 6.dp
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("📊", fontSize = 18.sp)
-                    }
-                }
-            }
-
-            // ---- CENTRE: Circle Switcher Pill ----
-            Box(contentAlignment = Alignment.TopCenter) {
-                Surface(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .widthIn(min = 120.dp, max = 200.dp)
-                        .clickable { showCircleSwitcher = !showCircleSwitcher },
-                    color = Color(0xF0121218),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
-                    shadowElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "👥",
-                            fontSize = 13.sp
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = if (activeGroupPinCode.isNotBlank()) "PIN $activeGroupPinCode"
-                                   else if (groupPinMappings.isNotEmpty()) groupPinMappings.first().groupName.ifBlank { "My Circle" }
-                                   else "My Circle",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (showCircleSwitcher) "▲" else "▼",
-                            color = RadarCyan,
-                            fontSize = 9.sp
-                        )
-                    }
-                }
-
-                // Dropdown list of circles
-                if (showCircleSwitcher && groupPinMappings.isNotEmpty()) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(top = 40.dp)
-                            .widthIn(min = 180.dp, max = 240.dp),
-                        color = Color(0xF5121218),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.3f)),
-                        shadowElevation = 16.dp
-                    ) {
-                        Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                            groupPinMappings.forEach { circle ->
-                                val isActive = circle.pinCode == activeGroupPinCode
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            onSwitchCircle(circle.pinCode)
-                                            showCircleSwitcher = false
-                                        }
-                                        .background(
-                                            if (isActive) RadarCyan.copy(alpha = 0.12f)
-                                            else Color.Transparent
-                                        )
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
-                                            color = if (isActive) RadarCyan else Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                        Text(
-                                            text = "PIN ${circle.pinCode}",
-                                            color = com.example.ui.theme.TextSecondary,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                    if (isActive) {
-                                        Text("●", color = RadarCyan, fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 1b. OFFLINE MAP CACHE STATUS — compact circle (tap for full info)
-            var showOfflineInfoDialog by remember { mutableStateOf(false) }
-            Surface(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clickable { showOfflineInfoDialog = true }
-                    .testTag("offline_cache_badge"),
-                color = Color(0xE81A2F1D),
-                shape = CircleShape,
-                border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
-                shadowElevation = 6.dp
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .background(Color(0xFF00FF87), CircleShape)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("✅", fontSize = 11.sp, lineHeight = 12.sp)
-                    }
-                }
-            }
-
-            if (showOfflineInfoDialog) {
-                AlertDialog(
-                    onDismissRequest = { showOfflineInfoDialog = false },
-                    title = {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            Text("🗺️", fontSize = 18.sp)
-                            Text(
-                                text = "Offline Map Storage Active",
-                                color = TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(Color(0xFF00FF87), CircleShape)
                             )
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text("✅", fontSize = 10.sp, lineHeight = 11.sp)
                         }
-                    },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
-                                color = TextSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Surface(
-                                color = SlateBorder.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    }
+                }
+
+                if (showOfflineInfoDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showOfflineInfoDialog = false },
+                        title = {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("📁 Cache Dir: /data/user/0/.../cache/osmdroid", fontSize = 9.sp, color = SecondarySlate, fontFamily = FontFamily.Monospace)
-                                    Text("⚡ Status: Active / Fully Synced around Home", fontSize = 9.sp, color = Color(0xFF00FF87), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-                                }
+                                Text("🗺️", fontSize = 18.sp)
+                                Text(
+                                    text = "Offline Map Storage Active",
+                                    color = TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
-                        }
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = { showOfflineInfoDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Awesome", color = Color.White, fontSize = 12.sp)
-                        }
-                    },
-                    containerColor = CosmicSlateCard,
-                    shape = RoundedCornerShape(16.dp),
-                    tonalElevation = 6.dp
-                )
-            }
-
-        }
-
-        // 1c. FLOATING ROUTE TRAIL TOGGLE PILL (Visible when a member is selected)
-        val selectedMember = members.firstOrNull { it.id == selectedMemberId }
-        if (selectedMember != null) {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 64.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable { isRouteTrailEnabled = !isRouteTrailEnabled },
-                color = if (isRouteTrailEnabled) PrimaryCosmic else Color(0xF01E1E28),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, if (isRouteTrailEnabled) RadarCyan else SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("🛤️", fontSize = 13.sp)
-                    Text(
-                        text = if (isRouteTrailEnabled) "Route Trail: ON (Tap to hide)" else "Route Trail: OFF (Tap to show)",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
+                                    color = Color(0xFF00FF87),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showOfflineInfoDialog = false }) {
+                                Text("OK", color = RadarCyan)
+                            }
+                        },
+                        containerColor = CosmicSlateCard,
+                        shape = RoundedCornerShape(16.dp)
                     )
                 }
             }
-        }
 
-        // 3. MAP STYLE SELECTION HUD (Round button style with premium popup)
-        if (bottomPadding < 200.dp) {
-            var showMapStyleMenu by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .padding(start = 14.dp, bottom = bottomPadding + 20.dp)
-                    .align(Alignment.BottomStart)
-            ) {
+            // 2. LIVE WEATHER STATUS PILL (Floats cleanly at the top of the map below action bar)
+            WeatherHudOverlay(
+                members = members,
+                selectedMemberId = selectedMemberId,
+                memberWeatherDetailed = memberWeatherDetailed,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            // 3. SLIM SHOPPING LIST MARQUEE TICKER (Positioned cleanly below top action bar)
+            val activeItemsText = remember(shoppingItems) {
+                shoppingItems.filter { !it.isChecked }.joinToString("   •   ") { it.name }
+            }
+            if (activeItemsText.isNotBlank()) {
                 Surface(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clickable { showMapStyleMenu = !showMapStyleMenu },
-                    color = Color.White,
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, SlateBorder),
-                    shadowElevation = 6.dp
+                        .padding(top = 8.dp)
+                        .fillMaxWidth(0.94f)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(17.dp))
+                        .border(BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(17.dp))
+                        .clickable { onOpenShoppingList() }
+                        .zIndex(40f),
+                    color = CosmicSlateCard,
+                    shadowElevation = 4.dp
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("🗺️", fontSize = 18.sp)
+                        Text("🛒", fontSize = 13.sp)
+                        Text(
+                            text = "Need: $activeItemsText",
+                            color = TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .weight(1f)
+                                .basicMarquee(iterations = Int.MAX_VALUE)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 1c. FLOATING FOLLOW STATUS & ROUTE TRAIL HUD (Visible when a member is selected)
+        if (selectedMember != null) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 58.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Live Follow Pill
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable {
+                            isFollowingSelectedMember = true
+                            if (selectedMember.x != 0.0 && selectedMember.y != 0.0) {
+                                mapViewRef?.let { map ->
+                                    map.controller.animateTo(GeoPoint(selectedMember.y, selectedMember.x))
+                                    map.controller.setZoom(16.0)
+                                }
+                            }
+                        },
+                    color = Color(0xF012121A),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.2.dp, if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300)),
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300), CircleShape)
+                        )
+                        val transitMode = classifyTransitMode(selectedMember.speedMph, selectedMember.statusText)
+                        val transitBadge = formatTransitBadge(selectedMember.speedMph, selectedMember.statusText, selectedMember.locationSince)
+                        if (transitMode != TransitMode.STATIONARY) {
+                            AnimatedTransitIcon(mode = transitMode, size = 12.dp)
+                        }
+                        val detailsText = if (transitBadge.isNotBlank()) {
+                            if (transitMode != TransitMode.STATIONARY) " • ${transitBadge.drop(2).trim()}" else " • $transitBadge"
+                        } else ""
+                        Text(
+                            text = if (isFollowingSelectedMember) "🎯 Following ${selectedMember.name}$detailsText" else "🎯 Re-center on ${selectedMember.name}",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Surface(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .clickable { onSelectMember(null) },
+                            color = Color(0x33FFFFFF),
+                            shape = CircleShape
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Text("✕", color = Color(0xFFECEFF1), fontSize = 10.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
                     }
                 }
 
-                // Popup themes list floating above the button
-                if (showMapStyleMenu) {
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(bottom = 50.dp) // Float above the round button
-                            .width(150.dp),
-                        color = Color(0xF5121218),
-                        shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f)),
-                        shadowElevation = 12.dp
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { isRouteTrailEnabled = !isRouteTrailEnabled },
+                    color = if (isRouteTrailEnabled) PrimaryCosmic else Color(0xF01E1E28),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, if (isRouteTrailEnabled) RadarCyan else SlateBorder),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                        Text("🛤️", fontSize = 12.sp)
+                        Text(
+                            text = if (isRouteTrailEnabled) "Route Trail: ON" else "Route Trail: OFF",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Time window filter chips: Today, 7 Days, 30 Days
+                if (isRouteTrailEnabled) {
+                    Surface(
+                        color = Color(0xF0161622),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.6f)),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             listOf(
-                                Triple("streets", "Real Map", "Standard style"),
-                                Triple("hybrid", "Midnight", "Dark theme"),
-                                Triple("radar", "Retro Green", "Radar HUD Style")
-                            ).forEach { (mode, label, desc) ->
-                                val isSelected = mapTypeMode == mode
-                                Row(
+                                Pair("today", "Today"),
+                                Pair("7days", "7 Days"),
+                                Pair("30days", "30 Days")
+                            ).forEach { (filterKey, label) ->
+                                val isSelectedFilter = routeTimeFilter == filterKey
+                                Surface(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            mapTypeMode = mode
-                                            showMapStyleMenu = false
-                                        }
-                                        .background(
-                                            if (isSelected) RadarCyan.copy(alpha = 0.12f)
-                                            else Color.Transparent
-                                        )
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { onSelectRouteTimeFilter(filterKey) },
+                                    color = if (isSelectedFilter) RadarCyan.copy(alpha = 0.25f) else Color.Transparent,
+                                    border = if (isSelectedFilter) BorderStroke(1.dp, RadarCyan) else null,
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Column {
-                                        Text(
-                                            text = label,
-                                            color = if (isSelected) RadarCyan else Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = desc,
-                                            color = com.example.ui.theme.TextSecondary,
-                                            fontSize = 9.sp
-                                        )
-                                    }
+                                    Text(
+                                        text = label,
+                                        color = if (isSelectedFilter) RadarCyan else TextSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSelectedFilter) FontWeight.Bold else FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
                                 }
                             }
                         }
@@ -942,38 +1205,21 @@ fun RadarMap(
 
 
 
-        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom & Compass Recenter)
+
+
+        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Recenter GPS & Safe Zones)
         Column(
             modifier = Modifier
-                .padding(end = 14.dp, bottom = bottomPadding + 20.dp)
-                .align(Alignment.BottomEnd),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(end = 16.dp, bottom = 24.dp)
+                .align(Alignment.BottomEnd)
+                .zIndex(75f),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.End
         ) {
-            // ADD SAFE ZONE FAB
+            // 1. WHERE AM I NOW (FIND ME ON MAP) FAB
             Surface(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clickable {
-                        showAddZoneDialog = true
-                    },
-                color = Color.White,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Text("🛡️", fontSize = 18.sp)
-                }
-            }
-
-            // WHERE AM I NOW (FIND ME ON MAP) FAB
-            Surface(
-                modifier = Modifier
-                    .size(44.dp)
+                    .size(46.dp)
                     .clickable {
                         val meLoc = members.firstOrNull { it.id == "me" }
                         if (meLoc != null && meLoc.y != 0.0 && meLoc.x != 0.0) {
@@ -985,8 +1231,8 @@ fun RadarMap(
                             }
                         }
                     },
-                color = if (isCameraFollowingMe) Color(0xFF1B5E20) else Color.White,
-                shape = RoundedCornerShape(14.dp),
+                color = if (isCameraFollowingMe) Color(0xFF1B5E20) else CosmicSlateCard,
+                shape = CircleShape,
                 border = BorderStroke(1.dp, if (isCameraFollowingMe) Color(0xFF00FF87) else SlateBorder),
                 shadowElevation = 6.dp
             ) {
@@ -1000,6 +1246,26 @@ fun RadarMap(
                         tint = if (isCameraFollowingMe) Color.White else RadarCyan,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+
+            // 2. ADD SAFE ZONE FAB
+            Surface(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clickable {
+                        showAddZoneDialog = true
+                    },
+                color = CosmicSlateCard,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Text("🛡️", fontSize = 18.sp)
                 }
             }
         }
@@ -1186,15 +1452,6 @@ fun RadarMap(
             onDismiss = { isDigestOpen = false }
         )
     }
-
-    // ----------------- LIFE360 PREMIUM BOTTOM WEATHER HUD -----------------
-    WeatherHudOverlay(
-        members = members,
-        selectedMemberId = selectedMemberId,
-        memberWeatherDetailed = memberWeatherDetailed,
-        bottomPadding = bottomPadding,
-        modifier = Modifier.align(Alignment.BottomCenter)
-    )
 
     }
 }

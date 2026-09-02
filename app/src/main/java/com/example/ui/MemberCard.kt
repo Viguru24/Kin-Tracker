@@ -1,6 +1,7 @@
 package com.example.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -17,17 +18,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.FamilyMember
 import com.example.data.formatTimeAgo
 import com.example.data.formatDuration
 import com.example.data.formatExactTime
+import com.example.data.formatTransitBadge
+import com.example.data.classifyTransitMode
+import com.example.data.TransitMode
+import com.example.data.RoomAudioStreamManager
 import com.example.ui.theme.*
 import java.io.File
 
@@ -53,10 +60,15 @@ fun MemberCard(
     val avatarColor = try {
         Color(android.graphics.Color.parseColor(member.avatarColorHex))
     } catch (e: Exception) {
-        Color(0xFF26A69A)
+        RadarCyan
     }
     var showContextMenu by remember { mutableStateOf(false) }
     var showBatteryDialog by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isListening by RoomAudioStreamManager.isListening.collectAsState()
+    val activeListeningId by RoomAudioStreamManager.activeListeningMemberId.collectAsState()
+    val decibels by RoomAudioStreamManager.currentDecibels.collectAsState()
+    val isListeningToThisMember = isListening && activeListeningId == member.id
 
     if (showBatteryDialog) {
         BatteryStatusDialog(
@@ -92,57 +104,66 @@ fun MemberCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Avatar circle with floating relative time badge above it
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        // Live relative time badge: how long ago was the last update
-                        val isOfflineMember = member.id != "me" &&
-                            member.lastActive > 0L &&
-                            (System.currentTimeMillis() - member.lastActive) > 60_000L
-                        val timeLabel = if (member.id == "me") "now"
-                                        else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
-                                        else "now"
-                        val isStale = isOfflineMember
-
-                        // Location duration: how long they've been at this spot
-                        val locDuration = if (member.locationSince > 0L)
-                            formatDuration(member.locationSince) else ""
-
-                        Text(
-                            text = timeLabel,
-                            color = if (isStale) Color(0xFFE53935) else RadarCyan,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
-                        if (locDuration.isNotEmpty()) {
-                            Text(
-                                text = "📍 here ${locDuration}",
-                                color = Color(0xFFB0BEC5),
-                                fontSize = 7.sp,
-                                modifier = Modifier.padding(bottom = 1.dp)
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(avatarColor, CircleShape)
-                                .clickable { showBatteryDialog = true },
-                            contentAlignment = Alignment.Center
+                    Box {
+                        // Avatar circle with floating relative time badge above it
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            if (member.photoPath.isNotEmpty() && File(member.photoPath).exists()) {
-                                val bitmap = remember(member.photoPath) {
-                                    android.graphics.BitmapFactory.decodeFile(member.photoPath)
-                                }
-                                if (bitmap != null) {
-                                    Image(
-                                        bitmap = bitmap.asImageBitmap(),
-                                        contentDescription = "Profile Photo",
-                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
+                            // Live relative time badge: how long ago was the last update
+                            val isOfflineMember = member.id != "me" &&
+                                member.lastActive > 0L &&
+                                (System.currentTimeMillis() - member.lastActive) > 60_000L
+                            val timeLabel = if (member.id == "me") "now"
+                                            else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
+                                            else "now"
+                            val isStale = isOfflineMember
+
+                            // Activity / Movement badge or Location duration (👣, 🚗, 🚲, 🚆, 📍)
+                            val activityLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince)
+
+                            Text(
+                                text = timeLabel,
+                                color = if (isStale) Color(0xFFE53935) else RadarCyan,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            )
+                            if (activityLabel.isNotEmpty()) {
+                                Text(
+                                    text = activityLabel,
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 7.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(bottom = 1.dp)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(avatarColor, CircleShape)
+                                    .clickable { showBatteryDialog = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (member.photoPath.isNotEmpty() && File(member.photoPath).exists()) {
+                                    val bitmap = remember(member.photoPath) {
+                                        android.graphics.BitmapFactory.decodeFile(member.photoPath)
+                                    }
+                                    if (bitmap != null) {
+                                        Image(
+                                            bitmap = bitmap.asImageBitmap(),
+                                            contentDescription = "Profile Photo",
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text(
+                                            text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
+                                            color = Color.White,
+                                            fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 } else {
                                     Text(
                                         text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
@@ -151,13 +172,6 @@ fun MemberCard(
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
-                            } else {
-                                Text(
-                                    text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else member.name.first().uppercase(),
-                                    color = Color.White,
-                                    fontSize = if (member.avatarEmoji.isNotBlank()) 18.sp else 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
                             }
                         }
                     }
@@ -180,44 +194,108 @@ fun MemberCard(
                         )
                     }
 
-                    // High-fidelity physical battery gauge
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(8.dp))
-                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        if (member.isCharging) {
-                            Text("⚡", fontSize = 11.sp, color = Color(0xFF00FF87))
+                        if (member.id != "me") {
+                            Surface(
+                                onClick = {
+                                    if (isListeningToThisMember) {
+                                        RoomAudioStreamManager.stopListening()
+                                    } else {
+                                        RoomAudioStreamManager.startListeningToMember(context, member.id, member.name)
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isListeningToThisMember) Color(0xFFE53935) else Color(0xFF202534),
+                                border = BorderStroke(1.dp, if (isListeningToThisMember) Color(0xFFFF5252) else SlateBorder),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(if (isListeningToThisMember) "⏹️" else "🎧", fontSize = 10.sp)
+                                    Text(
+                                        text = if (isListeningToThisMember) "Stop" else "Audio",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
-                        Box(
+
+                        // High-fidelity physical battery gauge
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier
-                                .width(28.dp)
-                                .height(13.dp)
-                                .border(1.dp, if (member.batteryPercentage <= 20) Color(0xFFE53935) else Color.White.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
-                                .padding(1.5.dp)
+                                .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(8.dp))
+                                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
                         ) {
-                            val barColor = when {
-                                member.isCharging -> Color(0xFF00FF87)
-                                member.batteryPercentage <= 20 -> Color(0xFFE53935)
-                                member.batteryPercentage <= 50 -> Color(0xFFFFB300)
-                                else -> Color(0xFF00FF87)
+                            if (member.isCharging) {
+                                Text("⚡", fontSize = 11.sp, color = Color(0xFF00FF87))
                             }
                             Box(
                                 modifier = Modifier
-                                    .fillMaxHeight()
-                                    .fillMaxWidth((member.batteryPercentage / 100f).coerceIn(0f, 1f))
-                                    .background(barColor, RoundedCornerShape(1.dp))
+                                    .width(28.dp)
+                                    .height(13.dp)
+                                    .border(1.dp, if (member.batteryPercentage <= 20) Color(0xFFE53935) else Color.White.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+                                    .padding(1.5.dp)
+                            ) {
+                                val barColor = when {
+                                    member.isCharging -> Color(0xFF00FF87)
+                                    member.batteryPercentage <= 20 -> Color(0xFFE53935)
+                                    member.batteryPercentage <= 50 -> Color(0xFFFFB300)
+                                    else -> Color(0xFF00FF87)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .fillMaxWidth((member.batteryPercentage / 100f).coerceIn(0f, 1f))
+                                        .background(barColor, RoundedCornerShape(1.dp))
+                                )
+                            }
+                            Text(
+                                text = "${member.batteryPercentage}%",
+                                color = if (member.isCharging) Color(0xFF00FF87) else if (member.batteryPercentage <= 20) Color(0xFFE53935) else TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+
+                if (isListeningToThisMember) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0F121C), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(modifier = Modifier.size(6.dp).background(if (decibels > 65f) ActiveAmber else GlowingEmerald, CircleShape))
+                            Text(
+                                text = "Live Audio (${member.name.substringBefore(" ")})",
+                                color = TextPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
-                            text = "${member.batteryPercentage}%",
-                            color = if (member.isCharging) Color(0xFF00FF87) else if (member.batteryPercentage <= 20) Color(0xFFE53935) else TextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            text = "${decibels.toInt()} dB",
+                            color = RadarCyan,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -246,30 +324,26 @@ fun MemberCard(
                         )
                     }
 
+                    val transitMode = classifyTransitMode(member.speedMph, member.statusText)
                     val transportInfo = getTransportInfo(member.speedMph, member.statusText)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
-                            .background(transportInfo.third.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                            .background(transportInfo.color.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Icon(
-                            imageVector = transportInfo.second,
-                            contentDescription = transportInfo.first,
-                            tint = transportInfo.third,
-                            modifier = Modifier.size(13.dp)
-                        )
+                        AnimatedTransitIcon(mode = transitMode, size = 13.dp)
                         Text(
-                            text = if (member.speedMph > 0.0) "${member.speedMph} mph (${transportInfo.first})" else "Stationary",
-                            color = transportInfo.third,
+                            text = if (member.speedMph >= 0.6) "${String.format(java.util.Locale.US, "%.1f", member.speedMph)} mph (${transportInfo.label})" else "Stationary",
+                            color = transportInfo.color,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
                     val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                    val isAtHome = dist < 0.05 || member.statusText.contains("At Home")
+                    val isAtHome = dist <= 0.12 || member.statusText.contains("At Home", ignoreCase = true) || member.statusText.contains("at Home")
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -323,7 +397,7 @@ fun MemberCard(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                            val isAtHome = dist < 0.05 || member.statusText.contains("At Home")
+                            val isAtHome = dist <= 0.12 || member.statusText.contains("At Home", ignoreCase = true) || member.statusText.contains("at Home")
 
                             Button(
                                 onClick = { onPing(member.id) },
@@ -598,24 +672,153 @@ fun MemberCard(
     }
 }
 
+data class TransportDisplayInfo(
+    val label: String,
+    val iconEmoji: String,
+    val iconVector: ImageVector,
+    val color: Color
+)
+
 @Composable
-fun getTransportInfo(speedMph: Double, statusText: String): Triple<String, ImageVector, Color> {
-    val statusLower = statusText.lowercase()
-    return when {
-        speedMph <= 0.15 -> {
-            Triple("Stationary", Icons.Filled.Person, SecondarySlate)
+fun getTransportInfo(speedMph: Double, statusText: String): TransportDisplayInfo {
+    val mode = classifyTransitMode(speedMph, statusText)
+    return when (mode) {
+        TransitMode.WALKING -> TransportDisplayInfo("Walking", "👣", Icons.AutoMirrored.Filled.DirectionsWalk, GlowingEmerald)
+        TransitMode.CYCLING -> TransportDisplayInfo("Cycling", "🚲", Icons.AutoMirrored.Filled.DirectionsBike, RadarCyan)
+        TransitMode.DRIVING -> TransportDisplayInfo("Driving", "🚗", Icons.Filled.DirectionsCar, ActiveAmber)
+        TransitMode.TRAIN -> TransportDisplayInfo("Train", "🚆", Icons.Filled.DirectionsTransit, Color(0xFFAB47BC))
+        TransitMode.STATIONARY -> TransportDisplayInfo("Stationary", "📍", Icons.Filled.Person, SecondarySlate)
+    }
+}
+
+@Composable
+fun AnimatedTransitIcon(
+    mode: TransitMode,
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "transit_anim")
+
+    when (mode) {
+        TransitMode.WALKING -> {
+            val rotation by infiniteTransition.animateFloat(
+                initialValue = -12f,
+                targetValue = 12f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(450, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "walk_rot"
+            )
+            val translateY by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = -3.5f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(225, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "walk_bounce"
+            )
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .graphicsLayer {
+                        rotationZ = rotation
+                        translationY = translateY
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("👣", fontSize = (size.value * 0.9f).sp)
+            }
         }
-        statusLower.contains("train") || statusLower.contains("transit") || statusLower.contains("rail") || speedMph > 45.0 -> {
-            Triple("Train", Icons.Filled.DirectionsTransit, Color(0xFFAB47BC))
+        TransitMode.CYCLING -> {
+            val rotation by infiniteTransition.animateFloat(
+                initialValue = -14f,
+                targetValue = 14f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(380, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "bike_rot"
+            )
+            val translateY by infiniteTransition.animateFloat(
+                initialValue = -1.5f,
+                targetValue = 1.5f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(190, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "bike_bounce"
+            )
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .graphicsLayer {
+                        rotationZ = rotation
+                        translationY = translateY
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🚲", fontSize = (size.value * 0.9f).sp)
+            }
         }
-        statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycle") || (speedMph > 4.5 && speedMph <= 15.0) -> {
-            Triple("Biking", Icons.AutoMirrored.Filled.DirectionsBike, RadarCyan)
+        TransitMode.DRIVING -> {
+            val translateX by infiniteTransition.animateFloat(
+                initialValue = -2.5f,
+                targetValue = 2.5f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(280, easing = FastOutLinearInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "car_glide"
+            )
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 0.96f,
+                targetValue = 1.04f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(140, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "car_pulse"
+            )
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .graphicsLayer {
+                        translationX = translateX
+                        scaleX = scale
+                        scaleY = scale
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🚗", fontSize = (size.value * 0.9f).sp)
+            }
         }
-        statusLower.contains("walk") || statusLower.contains("foot") || statusLower.contains("hiking") || statusLower.contains("run") || (speedMph > 0.15 && speedMph <= 4.5) -> {
-            Triple("Walking", Icons.AutoMirrored.Filled.DirectionsWalk, GlowingEmerald)
+        TransitMode.TRAIN -> {
+            val translateX by infiniteTransition.animateFloat(
+                initialValue = -3.5f,
+                targetValue = 3.5f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(450, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "train_glide"
+            )
+            Box(
+                modifier = modifier
+                    .size(size)
+                    .graphicsLayer {
+                        translationX = translateX
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🚆", fontSize = (size.value * 0.9f).sp)
+            }
         }
-        else -> {
-            Triple("Driving", Icons.Filled.DirectionsCar, ActiveAmber)
+        TransitMode.STATIONARY -> {
+            Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
+                Text("📍", fontSize = (size.value * 0.9f).sp)
+            }
         }
     }
 }

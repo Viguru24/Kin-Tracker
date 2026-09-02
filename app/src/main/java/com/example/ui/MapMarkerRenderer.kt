@@ -4,7 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
-import android.media.ExifInterface
+import androidx.exifinterface.media.ExifInterface
 import android.util.LruCache
 import androidx.core.graphics.drawable.toDrawable
 import java.io.File
@@ -29,9 +29,10 @@ object MapMarkerRenderer {
         relativeTime: String = "",
         locationDuration: String = "",
         batteryPercentage: Int = -1,
-        isCharging: Boolean = false
+        isCharging: Boolean = false,
+        animFrame: Int = 0
     ): Drawable {
-        val cacheKey = "$colorHex|$emoji|$isSelected|$photoPath|$weatherEmoji|$isOffline|$relativeTime|$locationDuration|$batteryPercentage|$isCharging"
+        val cacheKey = "$colorHex|$emoji|$isSelected|$photoPath|$weatherEmoji|$isOffline|$relativeTime|$locationDuration|$batteryPercentage|$isCharging|$animFrame"
         markerDrawableCache.get(cacheKey)?.let { return it }
 
         val drawable = createColoredMarkerDrawable(
@@ -45,7 +46,8 @@ object MapMarkerRenderer {
             relativeTime = relativeTime,
             locationDuration = locationDuration,
             batteryPercentage = batteryPercentage,
-            isCharging = isCharging
+            isCharging = isCharging,
+            animFrame = animFrame
         )
         markerDrawableCache.put(cacheKey, drawable)
         return drawable
@@ -178,7 +180,8 @@ object MapMarkerRenderer {
         relativeTime: String,
         locationDuration: String,
         batteryPercentage: Int,
-        isCharging: Boolean
+        isCharging: Boolean,
+        animFrame: Int = 0
     ): Drawable {
         val density = context.resources.displayMetrics.density
 
@@ -192,7 +195,7 @@ object MapMarkerRenderer {
 
         val timePillHeight = if (relativeTime.isNotEmpty()) (16 * density).toInt() else 0
         val timePillMargin = if (relativeTime.isNotEmpty()) (4 * density).toInt() else 0
-        val locPillHeight = if (locationDuration.isNotEmpty()) (13 * density).toInt() else 0
+        val locPillHeight = if (locationDuration.isNotEmpty()) (15 * density).toInt() else 0
         val locPillMargin = if (locationDuration.isNotEmpty()) (3 * density).toInt() else 0
 
         val bmpW = bubblePx + shadowPad * 2
@@ -287,6 +290,22 @@ object MapMarkerRenderer {
             drawBatteryBadge(canvas, cx, bubbleCy, bubbleR, batteryPercentage, isCharging, density)
         }
 
+        // ── 10. Transit Mode Activity Badge (Top-Right of avatar) ──
+        val isWalking = locationDuration.startsWith("👣") || weatherEmoji == "👣"
+        val isDriving = locationDuration.startsWith("🚗") || weatherEmoji == "🚗"
+        val isCycling = locationDuration.startsWith("🚲") || weatherEmoji == "🚲"
+        val isTrain = locationDuration.startsWith("🚆") || weatherEmoji == "🚆"
+        val activityEmojiToDraw = when {
+            isWalking -> "👣"
+            isDriving -> "🚗"
+            isCycling -> "🚲"
+            isTrain -> "🚆"
+            else -> ""
+        }
+        if (activityEmojiToDraw.isNotEmpty()) {
+            drawActivityBadge(canvas, cx, bubbleCy, bubbleR, activityEmojiToDraw, density, animFrame)
+        }
+
         return BitmapDrawable(context.resources, bitmap)
     }
 
@@ -316,19 +335,43 @@ object MapMarkerRenderer {
 
     private fun drawLocationDurationPill(canvas: Canvas, cx: Float, stemTipY: Float, density: Float, text: String, isOffline: Boolean) {
         val locPillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isOffline) Color.parseColor("#1C1917") else Color.parseColor("#0F172A")
+            color = if (isOffline) {
+                Color.parseColor("#1C1917")
+            } else if (text.startsWith("👣")) {
+                Color.parseColor("#064E3B") // Emerald dark
+            } else if (text.startsWith("🚗")) {
+                Color.parseColor("#78350F") // Amber dark
+            } else if (text.startsWith("🚲")) {
+                Color.parseColor("#0C4A6E") // Cyan dark
+            } else if (text.startsWith("🚆")) {
+                Color.parseColor("#4A044E") // Violet dark
+            } else {
+                Color.parseColor("#0F172A")
+            }
             style = Paint.Style.FILL
-            alpha = 220
+            alpha = 230
         }
         val locTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isOffline) Color.parseColor("#A8A29E") else Color.parseColor("#E2E8F0")
-            textSize = 6.5f * density
+            color = if (isOffline) {
+                Color.parseColor("#A8A29E")
+            } else if (text.startsWith("👣")) {
+                Color.parseColor("#6EE7B7")
+            } else if (text.startsWith("🚗")) {
+                Color.parseColor("#FDE68A")
+            } else if (text.startsWith("🚲")) {
+                Color.parseColor("#7DD3FC")
+            } else if (text.startsWith("🚆")) {
+                Color.parseColor("#F0ABFC")
+            } else {
+                Color.parseColor("#E2E8F0")
+            }
+            textSize = 7.5f * density
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         val textWidth = locTextPaint.measureText(text)
-        val pillW = textWidth + 10f * density
-        val pillH = 12f * density
+        val pillW = textWidth + 12f * density
+        val pillH = 14f * density
         val pillLeft = cx - pillW / 2f
         val pillTop = stemTipY + 2f * density
         val pillRect = RectF(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH)
@@ -430,6 +473,73 @@ object MapMarkerRenderer {
         val bfm = battText.fontMetrics
         val battTextY = by - (bfm.ascent + bfm.descent) / 2f
         canvas.drawText(label, bx, battTextY, battText)
+    }
+
+    private fun drawActivityBadge(
+        canvas: Canvas,
+        cx: Float,
+        bubbleCy: Float,
+        bubbleR: Float,
+        emoji: String,
+        density: Float,
+        animFrame: Int
+    ) {
+        val badgeRadius = 9.5f * density
+        val ax = cx + bubbleR * 0.72f
+        val ay = bubbleCy - bubbleR * 0.72f
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#0F172A")
+            style = Paint.Style.FILL
+            alpha = 240
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = when (emoji) {
+                "👣" -> Color.parseColor("#10B981") // Emerald
+                "🚗" -> Color.parseColor("#F59E0B") // Amber
+                "🚲" -> Color.parseColor("#06B6D4") // Cyan
+                "🚆" -> Color.parseColor("#A855F7") // Purple
+                else -> Color.WHITE
+            }
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f * density
+        }
+        canvas.drawCircle(ax, ay, badgeRadius, bgPaint)
+        canvas.drawCircle(ax, ay, badgeRadius, borderPaint)
+
+        val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f * density
+            textAlign = Paint.Align.CENTER
+        }
+        val efm = emojiPaint.fontMetrics
+        val textY = ay - (efm.ascent + efm.descent) / 2f
+
+        // Apply animated stepping / riding / driving transforms
+        canvas.save()
+        when (emoji) {
+            "👣" -> {
+                val angle = if (animFrame % 2 == 0) -9f else 9f
+                val dy = if (animFrame % 2 == 0) -1.2f * density else 1.2f * density
+                canvas.rotate(angle, ax, ay)
+                canvas.translate(0f, dy)
+            }
+            "🚲" -> {
+                val angle = if (animFrame % 2 == 0) -10f else 10f
+                val dy = if (animFrame % 2 == 0) -0.8f * density else 0.8f * density
+                canvas.rotate(angle, ax, ay)
+                canvas.translate(0f, dy)
+            }
+            "🚗" -> {
+                val dx = if (animFrame % 2 == 0) -1.2f * density else 1.2f * density
+                canvas.translate(dx, 0f)
+            }
+            "🚆" -> {
+                val dx = if (animFrame % 2 == 0) -1.8f * density else 1.8f * density
+                canvas.translate(dx, 0f)
+            }
+        }
+        canvas.drawText(emoji, ax, textY, emojiPaint)
+        canvas.restore()
     }
 
     private fun loadUprightMarkerBitmap(photoPath: String, targetSize: Int): Bitmap? {

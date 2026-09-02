@@ -11,7 +11,13 @@ data class CloudGroupPayload(
     val members: Map<String, CloudMember> = emptyMap(),
     val creatorId: String = "",
     val pinCode: String = "",
-    val shoppingItems: List<CloudShoppingItem> = emptyList()
+    val shoppingItems: List<CloudShoppingItem> = emptyList(),
+    val deletedShoppingItems: Map<String, Long> = emptyMap(),
+    val workLat: Double = 0.0,
+    val workLng: Double = 0.0,
+    val isWorkCalibrated: Boolean = false,
+    val homeRadiusMeters: Double = AppConfig.DEFAULT_HOME_RADIUS_METERS,
+    val workRadiusMeters: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS
 )
 
 @JsonClass(generateAdapter = true)
@@ -38,5 +44,7 @@ data class CloudMember(
     val etaMinutes: Int,
     val lastActive: Long,
     val avatarEmoji: String = "", // Profile picture emoji representation!
-    val locationSince: Long = 0L  // Timestamp of arrival at current location
+    val locationSince: Long = 0L, // Timestamp of arrival at current location
+    val localIp: String = "",
+    val isAudioTransmitter: Boolean = false
 )

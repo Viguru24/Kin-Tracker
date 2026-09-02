@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.familytracker.lnvwe"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.5"
+    versionCode = 12
+    versionName = "2.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -84,6 +84,7 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(libs.osmdroid.android)
+  implementation(libs.androidx.exifinterface)
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

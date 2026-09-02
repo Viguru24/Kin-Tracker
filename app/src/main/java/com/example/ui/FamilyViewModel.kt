@@ -27,6 +27,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     val selectedMemberId = MutableStateFlow<String?>(null)
     val isSimulationPaused = MutableStateFlow(false)
+    val routeTimeFilter = MutableStateFlow("today") // "today", "7days", "30days"
     private val _locationTrails = MutableStateFlow<Map<String, List<Pair<Double, Double>>>>(emptyMap())
     val locationTrails: StateFlow<Map<String, List<Pair<Double, Double>>>> = _locationTrails
 
@@ -61,9 +62,22 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     val homeLatFlow = MutableStateFlow(AppConfig.DEFAULT_HOME_LAT)
     val homeLngFlow = MutableStateFlow(AppConfig.DEFAULT_HOME_LNG)
+    val homeRadiusFlow = MutableStateFlow(AppConfig.DEFAULT_HOME_RADIUS_METERS)
     var homeLat: Double get() = homeLatFlow.value; set(value) { homeLatFlow.value = value }
     var homeLng: Double get() = homeLngFlow.value; set(value) { homeLngFlow.value = value }
+    var homeRadiusMeters: Double get() = homeRadiusFlow.value; set(value) { homeRadiusFlow.value = value }
     var isHomeCalibrated = true
+
+    val workLatFlow = MutableStateFlow(0.0)
+    val workLngFlow = MutableStateFlow(0.0)
+    val isWorkCalibratedFlow = MutableStateFlow(false)
+    val workRadiusFlow = MutableStateFlow(AppConfig.DEFAULT_WORK_RADIUS_METERS)
+    var workLat: Double get() = workLatFlow.value; set(value) { workLatFlow.value = value }
+    var workLng: Double get() = workLngFlow.value; set(value) { workLngFlow.value = value }
+    var isWorkCalibrated: Boolean get() = isWorkCalibratedFlow.value; set(value) { isWorkCalibratedFlow.value = value }
+    var workRadiusMeters: Double get() = workRadiusFlow.value; set(value) { workRadiusFlow.value = value }
+
+    val isDepartureAlertsEnabled = MutableStateFlow(true)
 
     private val simulationEngine: SimulationEngine
     private val cloudSyncManager: CloudSyncManager
@@ -85,7 +99,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             repository, viewModelScope, application, _uiEvents, isCloudSyncEnabled, groupSyncToken, cloudStatusText,
             familyMembers, myDeviceName, myDeviceColor, myDeviceUUID, ghostModeExpiryTime, activeGroupCreatorId, activeGroupPinCode,
             { homeLat }, { homeLng }, { isHomeCalibrated }, { lat, lng -> homeLat = lat; homeLng = lng; isHomeCalibrated = true; savePreferences() },
-            isSimulationModeEnabled, { getMyActiveStatusText(it) }, { savePreferences() }
+            isSimulationModeEnabled, { getMyActiveStatusText(it) }, { savePreferences() },
+            { workLat }, { workLng }, { isWorkCalibrated }, { lat, lng -> workLat = lat; workLng = lng; isWorkCalibrated = true; savePreferences() },
+            { homeRadiusMeters }, { workRadiusMeters }
         )
 
         simulationEngine = SimulationEngine(
@@ -111,59 +127,123 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         initializeData()
     }
 
+    fun setRouteTimeFilter(filter: String) {
+        routeTimeFilter.value = filter
+        viewModelScope.launch {
+            refreshLocationTrails()
+        }
+    }
+
+    private fun getCutoffTimestamp(filter: String): Long {
+        val now = System.currentTimeMillis()
+        return when (filter) {
+            "today" -> {
+                val calendar = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                calendar.timeInMillis
+            }
+            "7days" -> now - (7L * 24 * 60 * 60 * 1000)
+            "30days" -> now - (30L * 24 * 60 * 60 * 1000)
+            else -> now - (24L * 60 * 60 * 1000)
+        }
+    }
+
+    private val roadRouteCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<Double, Double>>>()
+
+    private suspend fun refreshLocationTrails() {
+        val membersList = familyMembers.value
+        if (membersList.isEmpty()) return
+        val cutoff = getCutoffTimestamp(routeTimeFilter.value)
+        val loadedTrails = mutableMapOf<String, List<Pair<Double, Double>>>()
+
+        membersList.forEach { m ->
+            val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+            val dbBreadcrumbs = (repository.getBreadcrumbsForMemberSinceOnce(m.id, cutoff) + repository.getBreadcrumbsForMemberSinceOnce(cleanKey, cutoff))
+                .distinctBy { "${it.latitude}_${it.longitude}" }
+                .sortedBy { it.timestamp }
+
+            val points = if (m.x != 0.0 && m.y != 0.0) {
+                val currentPoint = Pair(m.y, m.x)
+                val isAwayFromHome = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(m.y - homeLat, m.x - homeLng) * 111.0 > 0.06)
+
+                if (dbBreadcrumbs.size >= 3) {
+                    dbBreadcrumbs.map { Pair(it.latitude, it.longitude) } + currentPoint
+                } else if (isAwayFromHome) {
+                    val cacheKey = "${m.id}_${homeLat}_${homeLng}_${m.y}_${m.x}"
+                    roadRouteCache[cacheKey] ?: run {
+                        val route = fetchRoadRoute(Pair(homeLat, homeLng), currentPoint)
+                        roadRouteCache[cacheKey] = route
+                        route
+                    }
+                } else {
+                    listOf(currentPoint)
+                }
+            } else {
+                dbBreadcrumbs.map { Pair(it.latitude, it.longitude) }
+            }
+
+            if (points.isNotEmpty()) {
+                loadedTrails[m.id] = points.takeLast(400)
+                loadedTrails[cleanKey] = points.takeLast(400)
+            }
+        }
+        _locationTrails.value = loadedTrails
+    }
+
     private fun setupLocationTrails() {
         viewModelScope.launch {
-            familyMembers.collect { membersList ->
+            // Prune breadcrumbs older than 30 days automatically
+            repository.pruneOldBreadcrumbs(30)
+            refreshLocationTrails()
+        }
+
+        viewModelScope.launch {
+            combine(familyMembers, routeTimeFilter) { membersList, filter ->
+                Pair(membersList, filter)
+            }.collect { (membersList, filter) ->
                 if (membersList.isEmpty()) return@collect
-                val currentTrails = _locationTrails.value.toMutableMap()
-                var updated = false
+                val cutoff = getCutoffTimestamp(filter)
+                val activeTrails = _locationTrails.value.toMutableMap()
+                var hasUpdates = false
+
                 membersList.forEach { m ->
                     if (m.x == 0.0 && m.y == 0.0) return@forEach
-                    val coords = currentTrails[m.id] ?: emptyList()
+                    // Persist throttled breadcrumb to DB
+                    repository.recordBreadcrumbThrottled(m.id, m.y, m.x, m.speedMph)
+                    
+                    val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+                    val existingCoords = activeTrails[m.id] ?: emptyList()
                     val newPoint = Pair(m.y, m.x)
-                    if (coords.isEmpty()) {
+
+                    if (existingCoords.isEmpty() || existingCoords.size < 2) {
                         val isAwayFromHome = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(m.y - homeLat, m.x - homeLng) * 111.0 > 0.06)
-                        if (isAwayFromHome) {
-                            val homePoint = Pair(homeLat, homeLng)
-                            currentTrails[m.id] = listOf(homePoint, newPoint)
-                            updated = true
-                            viewModelScope.launch {
-                                val roadSegments = fetchRoadRoute(homePoint, newPoint)
-                                if (roadSegments.size >= 2) {
-                                    val activeTrails = _locationTrails.value.toMutableMap()
-                                    activeTrails[m.id] = roadSegments.takeLast(300)
-                                    _locationTrails.value = activeTrails
-                                }
+                        val trail = if (isAwayFromHome) {
+                            val cacheKey = "${m.id}_${homeLat}_${homeLng}_${m.y}_${m.x}"
+                            roadRouteCache[cacheKey] ?: run {
+                                val route = fetchRoadRoute(Pair(homeLat, homeLng), newPoint)
+                                roadRouteCache[cacheKey] = route
+                                route
                             }
                         } else {
-                            currentTrails[m.id] = listOf(newPoint)
-                            updated = true
+                            listOf(newPoint)
                         }
-                    } else if (coords.last() != newPoint) {
-                        val oldPoint = coords.last()
-                        // Immediately draw a direct line for fast visual feedback, then refine with OSRM
-                        currentTrails[m.id] = (coords + newPoint).takeLast(300)
-                        updated = true
-                        
-                        viewModelScope.launch {
-                            val roadSegments = fetchRoadRoute(oldPoint, newPoint)
-                            val activeTrails = _locationTrails.value.toMutableMap()
-                            val currentTrail = activeTrails[m.id] ?: emptyList()
-                            if (currentTrail.isNotEmpty() && currentTrail.last() == newPoint) {
-                                // Swap out the straight line and insert detailed road points
-                                val baseTrail = currentTrail.dropLast(1)
-                                val cleanSegments = if (roadSegments.size >= 2 && roadSegments.first() == oldPoint) {
-                                    roadSegments.drop(1)
-                                } else {
-                                    roadSegments
-                                }
-                                activeTrails[m.id] = (baseTrail + cleanSegments).takeLast(300)
-                                _locationTrails.value = activeTrails
-                            }
-                        }
+                        activeTrails[m.id] = trail.takeLast(400)
+                        activeTrails[cleanKey] = trail.takeLast(400)
+                        hasUpdates = true
+                    } else if (existingCoords.last() != newPoint) {
+                        val updated = (existingCoords + newPoint).takeLast(400)
+                        activeTrails[m.id] = updated
+                        activeTrails[cleanKey] = updated
+                        hasUpdates = true
                     }
                 }
-                if (updated) _locationTrails.value = currentTrails
+                if (hasUpdates) {
+                    _locationTrails.value = activeTrails
+                }
             }
         }
     }
@@ -175,7 +255,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     membersList = membersList,
                     homeLat = homeLat,
                     homeLng = homeLng,
-                    proximityThresholdMeters = proximityAlertDistanceMeters.value
+                    proximityThresholdMeters = proximityAlertDistanceMeters.value,
+                    myDeviceUUID = myDeviceUUID.value,
+                    myDeviceName = myDeviceName.value
                 )
             }
         }
@@ -188,24 +270,34 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 val dist = hypot(from.second - to.second, from.first - to.first) * 111000.0
                 if (dist < 15.0) return@withContext listOf(from, to)
 
-                val url = java.net.URL("https://router.project-osrm.org/route/v1/driving/${from.second},${from.first};${to.second},${to.first}?overview=full&geometries=geojson")
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 4000
-                conn.readTimeout = 4000
-                conn.requestMethod = "GET"
-                
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
-                    val coordinatesList = mutableListOf<Pair<Double, Double>>()
-                    val matcher = java.util.regex.Pattern.compile("\\[\\s*(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)\\s*\\]").matcher(text)
-                    while (matcher.find()) {
-                        val lng = matcher.group(1)?.toDouble() ?: 0.0
-                        val lat = matcher.group(2)?.toDouble() ?: 0.0
-                        coordinatesList.add(Pair(lat, lng))
-                    }
-                    if (coordinatesList.isNotEmpty()) {
-                        return@withContext coordinatesList
-                    }
+                // Try walking route first, fallback to driving route
+                val urls = listOf(
+                    "https://router.project-osrm.org/route/v1/walking/${from.second},${from.first};${to.second},${to.first}?overview=full&geometries=geojson",
+                    "https://router.project-osrm.org/route/v1/driving/${from.second},${from.first};${to.second},${to.first}?overview=full&geometries=geojson"
+                )
+
+                for (urlStr in urls) {
+                    try {
+                        val url = java.net.URL(urlStr)
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 4000
+                        conn.readTimeout = 4000
+                        conn.requestMethod = "GET"
+                        
+                        if (conn.responseCode == 200) {
+                            val text = conn.inputStream.bufferedReader().use { it.readText() }
+                            val coordinatesList = mutableListOf<Pair<Double, Double>>()
+                            val matcher = java.util.regex.Pattern.compile("\\[\\s*(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)\\s*\\]").matcher(text)
+                            while (matcher.find()) {
+                                val lng = matcher.group(1)?.toDouble() ?: 0.0
+                                val lat = matcher.group(2)?.toDouble() ?: 0.0
+                                coordinatesList.add(Pair(lat, lng))
+                            }
+                            if (coordinatesList.size >= 2) {
+                                return@withContext coordinatesList
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
                 listOf(from, to)
             } catch (e: Exception) {
@@ -214,68 +306,159 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private data class MonitoredPlace(
+        val id: String,
+        val name: String,
+        val latitude: Double,
+        val longitude: Double,
+        val radiusMeters: Double,
+        val iconName: String,
+        val isHome: Boolean = false,
+        val isWork: Boolean = false
+    )
+
     private val lastMemberZoneStatus = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val outsideConfirmCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val insideConfirmCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val lastZoneAlertTime = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun setupSafeZoneGeofences() {
         viewModelScope.launch {
-            combine(repository.safeZones, familyMembers) { zones, members ->
-                Pair(zones, members)
-            }.collect { (zones, members) ->
-                if (zones.isEmpty() || members.isEmpty()) return@collect
+            combine(
+                repository.safeZones,
+                familyMembers,
+                homeLatFlow,
+                homeLngFlow,
+                homeRadiusFlow,
+                workLatFlow,
+                workLngFlow,
+                isWorkCalibratedFlow,
+                workRadiusFlow
+            ) { args: Array<Any> ->
+                @Suppress("UNCHECKED_CAST")
+                val customZones = args[0] as List<SafeZone>
+                @Suppress("UNCHECKED_CAST")
+                val members = args[1] as List<FamilyMember>
+                val hLat = args[2] as Double
+                val hLng = args[3] as Double
+                val hRadius = args[4] as Double
+                val wLat = args[5] as Double
+                val wLng = args[6] as Double
+                val isWCal = args[7] as Boolean
+                val wRadius = args[8] as Double
+
+                val allPlaces = mutableListOf<MonitoredPlace>()
+                if (hLat != 0.0 && hLng != 0.0) {
+                    allPlaces.add(MonitoredPlace("place_home", "Home", hLat, hLng, hRadius, "home", isHome = true))
+                }
+                if (isWCal && wLat != 0.0 && wLng != 0.0) {
+                    allPlaces.add(MonitoredPlace("place_work", "Work", wLat, wLng, wRadius, "work", isWork = true))
+                }
+                customZones.forEach { zone ->
+                    if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {
+                        allPlaces.add(MonitoredPlace(zone.id, zone.name, zone.latitude, zone.longitude, zone.radiusMeters, zone.iconName))
+                    }
+                }
+                Pair(allPlaces, members)
+            }.collect { (places, members) ->
+                if (places.isEmpty() || members.isEmpty()) return@collect
+                val now = System.currentTimeMillis()
+
                 members.forEach { member ->
                     if (member.x == 0.0 && member.y == 0.0) return@forEach
-                    zones.forEach { zone ->
-                        val xDist = (member.x - zone.longitude) * 111.0 * Math.cos(Math.toRadians(zone.latitude))
-                        val yDist = (member.y - zone.latitude) * 111.0
+
+                    // Never notify or announce the device owner ("me") about their own arrival/departure
+                    val isSelf = member.id == "me" ||
+                            member.id == myDeviceUUID.value ||
+                            member.name.equals(myDeviceName.value, ignoreCase = true) ||
+                            member.name.contains("(You)", ignoreCase = true)
+                    if (isSelf) return@forEach
+
+                    places.forEach { place ->
+                        val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
+                        val yDist = (member.y - place.latitude) * 111.0
                         val distMeters = Math.hypot(xDist, yDist) * 1000.0
-                        
-                        val key = "${member.id}_${zone.id}"
+
+                        val cleanMemberName = member.name.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+                        val key = "${cleanMemberName.lowercase()}_${place.id}"
                         val lastStatus = lastMemberZoneStatus[key]
-                        
-                        // Apply a 20-meter hysteresis buffer to prevent boundary jitter
-                        val isInside = if (lastStatus == "inside") {
-                            distMeters <= (zone.radiusMeters + 20.0)
-                        } else {
-                            distMeters <= zone.radiusMeters
-                        }
-                        
-                        if (isInside && lastStatus != "inside") {
-                            lastMemberZoneStatus[key] = "inside"
-                            if (lastStatus != null) {
-                                val now = System.currentTimeMillis()
-                                val lastAlert = lastZoneAlertTime[key] ?: 0L
-                                if (now - lastAlert > 300_000L) {
-                                    lastZoneAlertTime[key] = now
-                                    repository.insertLog(
-                                        ActivityLog(
-                                            memberId = member.id,
-                                            memberName = member.name,
-                                            actionText = "arrived at ${zone.name}",
-                                            iconName = "check_in"
+
+                        val effectiveRadius = if (place.isHome) maxOf(place.radiusMeters, 160.0) else place.radiusMeters
+                        val exitHysteresis = if (place.isHome) 70.0 else AppConfig.EXIT_HYSTERESIS_METERS
+
+                        // 1. INSIDE BOUNDARY CHECK: Within defined place radius (160m for Home)
+                        if (distMeters <= effectiveRadius) {
+                            outsideConfirmCount[key] = 0
+                            val inCount = (insideConfirmCount[key] ?: 0) + 1
+                            insideConfirmCount[key] = inCount
+
+                            if (lastStatus == null) {
+                                // Initial startup state: member was already inside this zone — no false arrival alert
+                                lastMemberZoneStatus[key] = "inside"
+                                insideConfirmCount[key] = AppConfig.ARRIVAL_CONFIRMATION_CHECKS
+                            } else if (lastStatus == "outside") {
+                                // Confirm arrival only after consecutive verified stable readings inside boundary
+                                if (inCount >= AppConfig.ARRIVAL_CONFIRMATION_CHECKS) {
+                                    lastMemberZoneStatus[key] = "inside"
+                                    insideConfirmCount[key] = 0
+                                    val lastAlert = lastZoneAlertTime["arr_$key"] ?: 0L
+                                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
+                                        lastZoneAlertTime["arr_$key"] = now
+                                        val placeDisplayName = if (place.isHome) "Home" else place.name
+                                        repository.insertLog(
+                                            ActivityLog(
+                                                memberId = member.id,
+                                                memberName = member.name,
+                                                actionText = "arrived at $placeDisplayName",
+                                                iconName = "check_in"
+                                            )
                                         )
-                                    )
-                                    _uiEvents.emit("${member.name} has arrived at ${zone.name}!")
+                                        _uiEvents.emit("📍 Arrival Notice: $cleanMemberName has arrived at $placeDisplayName!")
+                                    }
                                 }
                             }
-                        } else if (!isInside && lastStatus == "inside") {
-                            lastMemberZoneStatus[key] = "outside"
-                            val now = System.currentTimeMillis()
-                            val lastAlert = lastZoneAlertTime[key] ?: 0L
-                            if (now - lastAlert > 300_000L) {
-                                lastZoneAlertTime[key] = now
-                                repository.insertLog(
-                                    ActivityLog(
-                                        memberId = member.id,
-                                        memberName = member.name,
-                                        actionText = "left ${zone.name}",
-                                        iconName = "away"
-                                    )
-                                    )
-                                _uiEvents.emit("${member.name} has left ${zone.name}!")
+                        }
+                        // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home)
+                        else if (distMeters > (effectiveRadius + exitHysteresis)) {
+                            insideConfirmCount[key] = 0
+                            if (lastStatus == "inside") {
+                                val count = (outsideConfirmCount[key] ?: 0) + 1
+                                outsideConfirmCount[key] = count
+                                
+                                // Intentional departure confirmed ONLY after consecutive verified checks outside 230m buffer
+                                val isConfirmedDeparture = count >= AppConfig.DEPARTURE_CONFIRMATION_CHECKS && (member.speedMph >= AppConfig.MIN_EXIT_SPEED_MPH || distMeters > (effectiveRadius + 100.0))
+                                if (isConfirmedDeparture) {
+                                    lastMemberZoneStatus[key] = "outside"
+                                    outsideConfirmCount[key] = 0
+                                    
+                                    val lastAlert = lastZoneAlertTime["dep_$key"] ?: 0L
+                                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
+                                        lastZoneAlertTime["dep_$key"] = now
+                                        val placeDisplayName = if (place.isHome) "the house" else place.name
+                                        val warningMsg = "🚪 Departure Warning: $cleanMemberName has left $placeDisplayName!"
+                                        
+                                        repository.insertLog(
+                                            ActivityLog(
+                                                memberId = member.id,
+                                                memberName = member.name,
+                                                actionText = "left ${place.name} (departed building)",
+                                                iconName = "away"
+                                            )
+                                        )
+                                        if (isDepartureAlertsEnabled.value) {
+                                            _uiEvents.emit(warningMsg)
+                                        }
+                                    }
+                                }
+                            } else if (lastStatus == null) {
+                                // Initial startup state: member was already outside
+                                lastMemberZoneStatus[key] = "outside"
+                                outsideConfirmCount[key] = 0
                             }
-                        } else if (lastStatus == null) {
-                            lastMemberZoneStatus[key] = if (isInside) "inside" else "outside"
+                        } else {
+                            // In hysteresis buffer zone: retain current state, reset confirmation counts
+                            insideConfirmCount[key] = 0
+                            outsideConfirmCount[key] = 0
                         }
                     }
                 }
@@ -334,23 +517,91 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
-            val savedLocationSince = prefs.getLong("my_location_since", System.currentTimeMillis()).let {
-                if (it == 0L) System.currentTimeMillis() else it
+            val savedLocationSince = prefs.getLong("my_location_since", 0L)
+            if (savedLocationSince == 0L) {
+                prefs.edit().putLong("my_location_since", System.currentTimeMillis()).apply()
             }
-            prefs.edit().putLong("my_location_since", savedLocationSince).apply()
 
             val current = repository.getFamilyMembersOnce()
-            val eloiseMember = current.firstOrNull { it.id == "eloise" || (it.name.contains("Eloise", ignoreCase = true) && !it.id.startsWith("device_")) }
-            if (eloiseMember != null && (eloiseMember.statusText.contains("Dance Class") || (eloiseMember.x != homeLng && eloiseMember.y != homeLat))) {
-                repository.updateMember(
-                    eloiseMember.copy(
-                        x = homeLng,
-                        y = homeLat,
-                        speedMph = 0.0,
-                        statusText = "At Home",
-                        etaMinutes = 0
+            val contactsPrefs = getApplication<Application>().getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
+            val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+            
+            // Guarantee Eloise tombstone is permanently locked in SharedPreferences
+            deletedMembersPrefs.edit()
+                .putBoolean("deleted_eloise", true)
+                .putBoolean("deleted_member_eloise", true)
+                .apply()
+
+            // Populate / restore contacts and photos for active members in local database
+            for (m in current) {
+                val cleanKey = m.name.lowercase()
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+
+                // If user deleted this member, or if it is Eloise/demo ghost, purge immediately from SQLite!
+                if (m.id == "eloise" || cleanKey.contains("eloise") || m.name.contains("eloise", ignoreCase = true) ||
+                    deletedMembersPrefs.getBoolean("deleted_${m.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
+                    repository.deleteMember(m)
+                    repository.clearBreadcrumbsForMember(m.id)
+                    continue
+                }
+
+                val filesDir = getApplication<Application>().filesDir
+                val fallbackPhoto = when {
+                    cleanKey.contains("isabel") -> contactsPrefs.getString("photo_isabel", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780424521532.jpg").absolutePath
+                    cleanKey.contains("annette") -> contactsPrefs.getString("photo_annette", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1781086356923.jpg").absolutePath
+                    cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("photo_dad", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780170267190.jpg").absolutePath
+                    else -> ""
+                }
+
+                val fallbackPhone = when {
+                    cleanKey.contains("isabel") -> contactsPrefs.getString("phone_isabel", "") ?: "+447760477416"
+                    cleanKey.contains("annette") -> contactsPrefs.getString("phone_annette", "") ?: "+447803171262"
+                    cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("phone_dad", "") ?: "+447802436159"
+                    else -> ""
+                }
+
+                val resolvedPhoto = when {
+                    m.photoPath.isNotBlank() -> m.photoPath
+                    contactsPrefs.getString("photo_$cleanKey", "")?.isNotBlank() == true -> contactsPrefs.getString("photo_$cleanKey", "")!!
+                    fallbackPhoto.isNotBlank() -> fallbackPhoto
+                    else -> ""
+                }
+
+                val resolvedPhoneNum = when {
+                    m.phoneNumber.isNotBlank() -> m.phoneNumber
+                    contactsPrefs.getString("phone_$cleanKey", "")?.isNotBlank() == true -> contactsPrefs.getString("phone_$cleanKey", "")!!
+                    fallbackPhone.isNotBlank() -> fallbackPhone
+                    else -> ""
+                }
+
+                // If Isabel is at Home or was set with inaccurate test offsets, calibrate position
+                val isIsabel = m.id == "isabel" || (cleanKey.contains("isabel") && !m.id.startsWith("device_"))
+                
+                var targetX = m.x
+                var targetY = m.y
+                var targetStatus = m.statusText
+
+                if (isIsabel && (m.statusText.contains("Dance Class") || m.statusText.contains("At School") || (m.x == 0.0 && m.y == 0.0) || (Math.hypot(m.x - homeLng, m.y - homeLat) * 111.0 > 100.0))) {
+                    targetX = homeLng
+                    targetY = homeLat
+                    targetStatus = "At Home"
+                }
+
+                if (resolvedPhoto != m.photoPath || resolvedPhoneNum != m.phoneNumber || targetX != m.x || targetY != m.y) {
+                    repository.updateMember(
+                        m.copy(
+                            photoPath = resolvedPhoto,
+                            phoneNumber = resolvedPhoneNum,
+                            x = targetX,
+                            y = targetY,
+                            statusText = targetStatus
+                        )
                     )
-                )
+                }
             }
 
             if (current.none { it.id == "me" }) {
@@ -382,8 +633,16 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun addShoppingItem(name: String, memberId: String, memberName: String) {
         viewModelScope.launch {
             if (name.isBlank()) return@launch
-            val item = ShoppingItem(name = name, addedByMemberId = memberId, addedByMemberName = memberName)
+            val cleanKey = name.lowercase().trim()
+            val cleanKeyNormalized = cleanKey.replace("[^a-z0-9]".toRegex(), "")
+            try {
+                val prefs = getApplication<Application>().getSharedPreferences("shopping_deletions", android.content.Context.MODE_PRIVATE)
+                prefs.edit().remove(cleanKey).remove(cleanKeyNormalized).apply()
+            } catch (e: Exception) {}
+
+            val item = ShoppingItem(name = name.trim(), addedByMemberId = memberId, addedByMemberName = memberName, timestamp = System.currentTimeMillis())
             repository.insertShoppingItem(item)
+            cloudSyncManager.unmarkShoppingItemDeletedInCloud(name.trim())
             repository.insertLog(ActivityLog(
                 memberId = memberId,
                 memberName = memberName,
@@ -413,11 +672,28 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteShoppingItem(item: ShoppingItem) {
         viewModelScope.launch {
+            val cleanKey = item.name.lowercase().trim()
+            val cleanKeyNormalized = cleanKey.replace("[^a-z0-9]".toRegex(), "")
             try {
                 val prefs = getApplication<Application>().getSharedPreferences("shopping_deletions", android.content.Context.MODE_PRIVATE)
-                prefs.edit().putLong(item.name.lowercase().trim(), System.currentTimeMillis()).apply()
+                prefs.edit()
+                    .putLong(cleanKey, System.currentTimeMillis())
+                    .putLong(cleanKeyNormalized, System.currentTimeMillis())
+                    .apply()
             } catch (e: Exception) {}
-            repository.deleteShoppingItem(item)
+
+            // Delete all matching duplicate items from local SQLite DB
+            val allItems = repository.getShoppingItemsOnce()
+            for (i in allItems) {
+                val iNorm = i.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (i.id == item.id || iNorm == cleanKeyNormalized || i.name.equals(item.name, ignoreCase = true)) {
+                    repository.deleteShoppingItem(i)
+                }
+            }
+
+            // Also remove from cloud group payload
+            cloudSyncManager.removeShoppingItemFromCloud(item.name)
+
             repository.insertLog(ActivityLog(
                 memberId = "system",
                 memberName = "Shopping List",
@@ -436,49 +712,112 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         return baseStatus
     }
 
-    private fun savePreferences() {
-         val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
-         prefs.edit().apply {
-             putBoolean("isUserSignedIn", isUserSignedIn.value); putString("userDisplayName", userDisplayName.value); putString("userEmail", userEmail.value)
-             putString("myDeviceName", myDeviceName.value); putString("myDeviceColor", myDeviceColor.value); putString("myDeviceEmoji", myDeviceEmoji.value)
-             putString("myDeviceUUID", myDeviceUUID.value); putString("groupSyncToken", groupSyncToken.value); putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
-             putLong("ghostModeExpiryTime", ghostModeExpiryTime.value); putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
-             putBoolean("isWifeCloudSimulationEnabled", isWifeCloudSimulationEnabled.value); putBoolean("hasCompletedOnboarding", hasCompletedOnboarding.value)
-             putBoolean("isCircleDigestReset", isCircleDigestReset.value)
-             putBoolean("isVoiceAnnouncementsEnabled", isVoiceAnnouncementsEnabled.value)
-             putFloat("homeLat", homeLat.toFloat()); putFloat("homeLng", homeLng.toFloat()); putBoolean("isHomeCalibrated", isHomeCalibrated)
-             putString("myDevicePhone", myDevicePhone.value); putString("myDevicePhotoPath", myDevicePhotoPath.value)
-             putString("activeGroupPinCode", activeGroupPinCode.value); putString("activeGroupCreatorId", activeGroupCreatorId.value)
-             apply()
-         }
-     }
+     private fun savePreferences() {
+          val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+          prefs.edit().apply {
+              putBoolean("isUserSignedIn", isUserSignedIn.value); putString("userDisplayName", userDisplayName.value); putString("userEmail", userEmail.value)
+              putString("myDeviceName", myDeviceName.value); putString("myDeviceColor", myDeviceColor.value); putString("myDeviceEmoji", myDeviceEmoji.value)
+              putString("myDeviceUUID", myDeviceUUID.value); putString("groupSyncToken", groupSyncToken.value); putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
+              putLong("ghostModeExpiryTime", ghostModeExpiryTime.value); putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
+              putBoolean("isWifeCloudSimulationEnabled", isWifeCloudSimulationEnabled.value); putBoolean("hasCompletedOnboarding", hasCompletedOnboarding.value)
+              putBoolean("isCircleDigestReset", isCircleDigestReset.value)
+              putBoolean("isVoiceAnnouncementsEnabled", isVoiceAnnouncementsEnabled.value)
+              putBoolean("isDepartureAlertsEnabled", isDepartureAlertsEnabled.value)
+              putFloat("homeLat", homeLat.toFloat()); putFloat("homeLng", homeLng.toFloat()); putBoolean("isHomeCalibrated", isHomeCalibrated)
+              putFloat("homeRadiusMeters", homeRadiusMeters.toFloat())
+              putFloat("workLat", workLat.toFloat()); putFloat("workLng", workLng.toFloat()); putBoolean("isWorkCalibrated", isWorkCalibrated)
+              putFloat("workRadiusMeters", workRadiusMeters.toFloat())
+              putString("myDevicePhone", myDevicePhone.value); putString("myDevicePhotoPath", myDevicePhotoPath.value)
+              putString("activeGroupPinCode", activeGroupPinCode.value); putString("activeGroupCreatorId", activeGroupCreatorId.value)
+              apply()
+          }
+      }
 
-     private fun loadPreferences() {
-         val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
-         isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
-         userDisplayName.value = prefs.getString("userDisplayName", "") ?: ""; userEmail.value = prefs.getString("userEmail", "") ?: ""
-         myDeviceName.value = prefs.getString("myDeviceName", "Dad") ?: "Dad"; myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
-         myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"; myDevicePhone.value = prefs.getString("myDevicePhone", "+447802436159") ?: "+447802436159"
-         myDevicePhotoPath.value = prefs.getString("myDevicePhotoPath", "") ?: ""
-         
-         activeGroupPinCode.value = prefs.getString("activeGroupPinCode", "4666") ?: "4666"
-         activeGroupCreatorId.value = prefs.getString("activeGroupCreatorId", "336a12") ?: "336a12"
-         
-         var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
-         if (dUuid.isBlank()) { dUuid = java.util.UUID.randomUUID().toString().substring(0, 6); prefs.edit().putString("myDeviceUUID", dUuid).apply() }
-         myDeviceUUID.value = dUuid
+      private fun loadPreferences() {
+          val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+          isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
+          userDisplayName.value = prefs.getString("userDisplayName", "") ?: ""; userEmail.value = prefs.getString("userEmail", "") ?: ""
+          myDeviceName.value = prefs.getString("myDeviceName", "Dad") ?: "Dad"; myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+          myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"; myDevicePhone.value = prefs.getString("myDevicePhone", "+447802436159") ?: "+447802436159"
+          myDevicePhotoPath.value = prefs.getString("myDevicePhotoPath", "") ?: ""
+          
+          activeGroupPinCode.value = prefs.getString("activeGroupPinCode", "4666") ?: "4666"
+          activeGroupCreatorId.value = prefs.getString("activeGroupCreatorId", "336a12") ?: "336a12"
+          
+          var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
+          if (dUuid.isBlank()) { dUuid = java.util.UUID.randomUUID().toString().substring(0, 6); prefs.edit().putString("myDeviceUUID", dUuid).apply() }
+          myDeviceUUID.value = dUuid
 
-         val savedToken = prefs.getString("groupSyncToken", "81e5632c_pin_group") ?: "81e5632c_pin_group"
-         groupSyncToken.value = cloudSyncManager.convertToValidToken(savedToken)
+          val savedToken = prefs.getString("groupSyncToken", "81e5632c_pin_group") ?: "81e5632c_pin_group"
+          groupSyncToken.value = cloudSyncManager.convertToValidToken(savedToken)
 
-         isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true); ghostModeExpiryTime.value = prefs.getLong("ghostModeExpiryTime", 0L)
-         isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false); isWifeCloudSimulationEnabled.value = prefs.getBoolean("isWifeCloudSimulationEnabled", false)
-         hasCompletedOnboarding.value = prefs.getBoolean("hasCompletedOnboarding", false) || groupSyncToken.value.isNotBlank()
-         isCircleDigestReset.value = prefs.getBoolean("isCircleDigestReset", false)
-         isVoiceAnnouncementsEnabled.value = prefs.getBoolean("isVoiceAnnouncementsEnabled", false)
-         proximityAlertDistanceMeters.value = prefs.getInt("proximityAlertDistanceMeters", 400)
-         homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble(); homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble(); isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
-     }
+          isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true); ghostModeExpiryTime.value = prefs.getLong("ghostModeExpiryTime", 0L)
+          isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false); isWifeCloudSimulationEnabled.value = prefs.getBoolean("isWifeCloudSimulationEnabled", false)
+          hasCompletedOnboarding.value = prefs.getBoolean("hasCompletedOnboarding", false) || groupSyncToken.value.isNotBlank()
+          isCircleDigestReset.value = prefs.getBoolean("isCircleDigestReset", false)
+          isVoiceAnnouncementsEnabled.value = prefs.getBoolean("isVoiceAnnouncementsEnabled", false)
+          isDepartureAlertsEnabled.value = prefs.getBoolean("isDepartureAlertsEnabled", true)
+          proximityAlertDistanceMeters.value = prefs.getInt("proximityAlertDistanceMeters", 400)
+          homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble(); homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble(); isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
+          homeRadiusMeters = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
+          workLat = prefs.getFloat("workLat", 0.0f).toDouble(); workLng = prefs.getFloat("workLng", 0.0f).toDouble(); isWorkCalibrated = prefs.getBoolean("isWorkCalibrated", false)
+          workRadiusMeters = prefs.getFloat("workRadiusMeters", AppConfig.DEFAULT_WORK_RADIUS_METERS.toFloat()).toDouble()
+      }
+
+    fun setWorkToCurrentLocation() {
+        viewModelScope.launch {
+            val me = familyMembers.value.firstOrNull { it.id == "me" }
+            if (me != null && me.x != 0.0 && me.y != 0.0) {
+                workLat = me.y
+                workLng = me.x
+                isWorkCalibrated = true
+                savePreferences()
+                _uiEvents.emit("💼 Work Area set to current GPS: ${String.format(java.util.Locale.US, "%.4f, %.4f", workLat, workLng)}")
+            } else {
+                _uiEvents.emit("⚠️ GPS lock required to calibrate Work location.")
+            }
+        }
+    }
+
+    fun setWorkLocation(lat: Double, lng: Double, radius: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS) {
+        workLat = lat
+        workLng = lng
+        workRadiusMeters = radius
+        isWorkCalibrated = true
+        savePreferences()
+        viewModelScope.launch {
+            _uiEvents.emit("💼 Work Area updated.")
+        }
+    }
+
+    fun clearWorkLocation() {
+        workLat = 0.0
+        workLng = 0.0
+        isWorkCalibrated = false
+        savePreferences()
+        viewModelScope.launch {
+            _uiEvents.emit("Work Area cleared.")
+        }
+    }
+
+    fun updateHomeRadius(radiusMeters: Double) {
+        homeRadiusMeters = radiusMeters
+        savePreferences()
+    }
+
+    fun updateWorkRadius(radiusMeters: Double) {
+        workRadiusMeters = radiusMeters
+        savePreferences()
+    }
+
+    fun toggleDepartureAlerts(enabled: Boolean) {
+        isDepartureAlertsEnabled.value = enabled
+        savePreferences()
+        viewModelScope.launch {
+            val status = if (enabled) "ENABLED" else "DISABLED"
+            _uiEvents.emit("Building Departure Warnings $status")
+        }
+    }
 
     fun updateProximityAlertDistance(meters: Int) {
         proximityAlertDistanceMeters.value = meters
@@ -594,11 +933,59 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteFamilyMember(memberId: String) {
         viewModelScope.launch {
-            val target = familyMembers.value.firstOrNull { it.id == memberId } ?: return@launch
-            repository.deleteMember(target)
-            repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of ${target.name}", iconName = "away"))
-            if (selectedMemberId.value == memberId) selectedMemberId.value = null
-            _uiEvents.emit("${target.name} removed from radar circle.")
+            val allCurrent = repository.getFamilyMembersOnce()
+            val target = allCurrent.firstOrNull { it.id == memberId }
+                ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
+            val cleanId = memberId.lowercase().trim()
+            val targetName = target?.name ?: memberId
+
+            // 1. Permanently record deletion in SharedPreferences so it can NEVER be resurrected
+            val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+            val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+            prefs.edit()
+                .putBoolean("deleted_$cleanId", true)
+                .putBoolean("deleted_$cleanName", true)
+                .putBoolean("deleted_member_$cleanId", true)
+                .putBoolean("deleted_member_$cleanName", true)
+                .putLong("deleted_time_$cleanId", System.currentTimeMillis())
+                .apply()
+
+            // 2. Delete all matching records from local database (by ID, and by clean name)
+            for (m in allCurrent) {
+                val mClean = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+                if (m.id == memberId || m.id == cleanId || mClean == cleanName || (cleanName.isNotEmpty() && mClean.contains(cleanName))) {
+                    repository.deleteMember(m)
+                }
+            }
+
+            // 3. Remove from cloud group payload
+            cloudSyncManager.removeMemberFromCloud(memberId, targetName)
+
+            // 4. Remove location breadcrumbs for this member
+            repository.clearBreadcrumbsForMember(memberId)
+            if (target != null && target.id != memberId) repository.clearBreadcrumbsForMember(target.id)
+
+            repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of $targetName", iconName = "away"))
+            if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
+            _uiEvents.emit("$targetName removed from radar circle.")
+        }
+    }
+
+    fun purgeDeletedCacheAndRefresh() {
+        viewModelScope.launch {
+            val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+            val allCurrent = repository.getFamilyMembersOnce()
+            for (m in allCurrent) {
+                val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+                if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) || 
+                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false) ||
+                    cleanKey.contains("eloise")) {
+                    repository.deleteMember(m)
+                }
+            }
+            _uiEvents.emit("Radar cache cleaned & refreshed!")
         }
     }
 
@@ -655,7 +1042,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val xDistKm = (lng - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat))
             val yDistKm = (lat - homeLat) * 111.0
             val distTotalKm = Math.hypot(xDistKm, yDistKm)
-            val isAtHome = distTotalKm < 0.035 // 35 meter tight home geofence
+            val isAtHome = distTotalKm <= 0.12 // 120 meters realistic residential geofence
 
             val targetX = if (isAtHome) homeLng else lng
             val targetY = if (isAtHome) homeLat else lat
@@ -670,21 +1057,40 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             } else 0.0
 
             val currentSpeedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
-            val hasDeparted = distFromAnchorKm > 0.15 && currentSpeedMph > 2.5
+            val isMoving = if (isAtHome) false else (currentSpeedMph >= 1.2 || distFromAnchorKm > 0.15)
+            val now = System.currentTimeMillis()
 
-            val resolvedLocationSince = if (savedLocationSince > 0L && !hasDeparted) {
-                savedLocationSince
-            } else if (me.locationSince > 0L && !hasDeparted) {
-                prefs.edit().putLong("my_location_since", me.locationSince).apply()
-                me.locationSince
-            } else {
-                val now = System.currentTimeMillis()
+            val resolvedLocationSince = if (isMoving) {
                 prefs.edit()
-                    .putLong("my_location_since", now)
+                    .putLong("my_location_since", 0L)
                     .putFloat("anchor_lat", targetY.toFloat())
                     .putFloat("anchor_lng", targetX.toFloat())
                     .apply()
-                now
+                0L
+            } else {
+                if (isAtHome) {
+                    if (savedLocationSince > 0L) {
+                        savedLocationSince
+                    } else {
+                        prefs.edit()
+                            .putLong("my_location_since", now)
+                            .putFloat("anchor_lat", homeLat.toFloat())
+                            .putFloat("anchor_lng", homeLng.toFloat())
+                            .apply()
+                        now
+                    }
+                } else {
+                    if (distFromAnchorKm > 0.10 || savedLocationSince == 0L || anchorLat == 0.0) {
+                        prefs.edit()
+                            .putLong("my_location_since", now)
+                            .putFloat("anchor_lat", targetY.toFloat())
+                            .putFloat("anchor_lng", targetX.toFloat())
+                            .apply()
+                        now
+                    } else {
+                        savedLocationSince
+                    }
+                }
             }
 
             repository.updateMember(
@@ -809,7 +1215,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         val emoji: String,
         val temp: Double,
         val windSpeed: Double,
-        val description: String
+        val description: String,
+        val minTempNight: Double = 0.0,
+        val maxTempDay: Double = 0.0
     )
 
     val memberWeatherDetailed = MutableStateFlow<Map<String, WeatherInfo>>(emptyMap())
@@ -838,7 +1246,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun fetchWeatherForCoordinates(memberId: String, lat: Double, lng: Double) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val url = java.net.URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng&current_weather=true")
+                val url = java.net.URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lng&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=auto")
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 3000
                 conn.readTimeout = 3000
@@ -848,15 +1256,21 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     val tempMatcher = java.util.regex.Pattern.compile("\"temperature\"\\s*:\\s*(-?\\d+\\.?\\d*)").matcher(text)
                     val windMatcher = java.util.regex.Pattern.compile("\"windspeed\"\\s*:\\s*(-?\\d+\\.?\\d*)").matcher(text)
                     val codeMatcher = java.util.regex.Pattern.compile("\"weathercode\"\\s*:\\s*(\\d+)").matcher(text)
-                    
+                    val minTempMatcher = java.util.regex.Pattern.compile("\"temperature_2m_min\"\\s*:\\s*\\[\\s*(-?\\d+\\.?\\d*)").matcher(text)
+                    val maxTempMatcher = java.util.regex.Pattern.compile("\"temperature_2m_max\"\\s*:\\s*\\[\\s*(-?\\d+\\.?\\d*)").matcher(text)
+
                     var temp = 15.0
                     var wind = 5.0
                     var code = 0
+                    var minTempNight = 0.0
+                    var maxTempDay = 0.0
                     
                     if (tempMatcher.find()) temp = tempMatcher.group(1)!!.toDouble()
                     if (windMatcher.find()) wind = windMatcher.group(1)!!.toDouble()
                     if (codeMatcher.find()) code = codeMatcher.group(1)!!.toInt()
-                    
+                    if (minTempMatcher.find()) minTempNight = minTempMatcher.group(1)!!.toDouble()
+                    if (maxTempMatcher.find()) maxTempDay = maxTempMatcher.group(1)!!.toDouble()
+
                     val (emoji, desc) = when (code) {
                         0 -> Pair("☀️", "Clear Sky")
                         1, 2, 3 -> Pair("🌤️", "Partly Cloudy")
@@ -872,7 +1286,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     memberWeatherCache[memberId] = emoji
                     memberWeather.value = memberWeatherCache.toMap()
                     
-                    val weatherInfo = WeatherInfo(emoji, temp, wind, desc)
+                    val weatherInfo = WeatherInfo(emoji, temp, wind, desc, minTempNight, maxTempDay)
                     memberDetailedWeatherCache[memberId] = weatherInfo
                     memberWeatherDetailed.value = memberDetailedWeatherCache.toMap()
                 }

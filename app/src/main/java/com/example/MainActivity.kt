@@ -68,6 +68,10 @@ import androidx.compose.foundation.basicMarquee
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        val globalSpokenTimestamps = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    }
+
     private val viewModel: FamilyViewModel by viewModels()
     private var locationManager: LocationManager? = null
     private var textToSpeech: TextToSpeech? = null
@@ -398,6 +402,7 @@ fun MainScreen(
 ) {
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
     val locationTrails by viewModel.locationTrails.collectAsStateWithLifecycle()
+    val routeTimeFilter by viewModel.routeTimeFilter.collectAsStateWithLifecycle()
     val logs by viewModel.activityLogs.collectAsStateWithLifecycle()
     val shoppingItems by viewModel.shoppingItems.collectAsStateWithLifecycle()
     val isPaused by viewModel.isSimulationPaused.collectAsStateWithLifecycle()
@@ -405,6 +410,13 @@ fun MainScreen(
     val selectedMemberId by viewModel.selectedMemberId.collectAsStateWithLifecycle()
     val homeLat by viewModel.homeLatFlow.collectAsStateWithLifecycle()
     val homeLng by viewModel.homeLngFlow.collectAsStateWithLifecycle()
+    val homeRadiusMeters by viewModel.homeRadiusFlow.collectAsStateWithLifecycle()
+    val workLat by viewModel.workLatFlow.collectAsStateWithLifecycle()
+    val workLng by viewModel.workLngFlow.collectAsStateWithLifecycle()
+    val isWorkCalibrated by viewModel.isWorkCalibratedFlow.collectAsStateWithLifecycle()
+    val workRadiusMeters by viewModel.workRadiusFlow.collectAsStateWithLifecycle()
+    val isDepartureAlertsEnabled by viewModel.isDepartureAlertsEnabled.collectAsStateWithLifecycle()
+
     val safeZones by viewModel.safeZones.collectAsStateWithLifecycle()
     val memberWeatherDetailed by viewModel.memberWeatherDetailed.collectAsStateWithLifecycle()
     val isCircleDigestReset by viewModel.isCircleDigestReset.collectAsStateWithLifecycle()
@@ -429,6 +441,7 @@ fun MainScreen(
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
 
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
     var isSettingsOpen by remember { mutableStateOf(false) }
@@ -445,15 +458,59 @@ fun MainScreen(
 
     LaunchedEffect(Unit) {
         viewModel.uiEvents.collect { message ->
-            val isProximityAlert = message.contains("Approaching Alert") || message.contains("getting close") || message.contains("close to your location") || message.contains("minutes away") || message.contains("close to Home")
-            if (isProximityAlert && isVoiceAnnouncementsEnabled) {
-                try {
-                    val toneG = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 100)
-                    toneG.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 350)
-                } catch (e: Exception) {}
-                try {
-                    textToSpeech?.speak(message, TextToSpeech.QUEUE_FLUSH, null, null)
-                } catch (e: Exception) {}
+            val isDepartureAlert = message.contains("Departure Warning") || message.contains("has left") || message.contains("left the house")
+            val isArrivalAlert = message.contains("Arrival Notice") || message.contains("has arrived")
+            val isProximityAlert = message.contains("Approaching Alert") || message.contains("getting close") || message.contains("close to your location") || message.contains("minutes away") || message.contains("close to Home") || message.contains("arrived Home")
+
+            if (isDepartureAlert || isArrivalAlert) {
+                com.example.data.AlertNotificationHelper.postAlertNotification(
+                    context,
+                    if (isDepartureAlert) "🚪 Departure Warning" else "📍 Arrival Notice",
+                    message.replace(Regex("^[🚪📍ℹ️]\\s*"), "")
+                )
+            }
+
+            if ((isProximityAlert || isDepartureAlert || isArrivalAlert) && isVoiceAnnouncementsEnabled) {
+                val now = System.currentTimeMillis()
+                val cleanSpeechText = message
+                    .replace(Regex("^[🚪📍ℹ️🚨🏠👋]\\s*"), "")
+                    .replace(Regex("^(Departure Warning|Arrival Notice|Approaching Alert):\\s*", RegexOption.IGNORE_CASE), "")
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+
+                val rawPerson = cleanSpeechText.split(Regex("[\\s,]+")).firstOrNull()?.lowercase() ?: "general"
+                val personName = rawPerson.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                val actionKey = when {
+                    cleanSpeechText.contains("left", ignoreCase = true) -> "left"
+                    cleanSpeechText.contains("arrived", ignoreCase = true) -> "arrived"
+                    cleanSpeechText.contains("home in", ignoreCase = true) || cleanSpeechText.contains("with you in", ignoreCase = true) -> "approaching"
+                    else -> "alert"
+                }
+                val spokenKey = "${rawPerson}_$actionKey"
+                val lastSpoken = MainActivity.globalSpokenTimestamps[spokenKey] ?: 0L
+
+                // Only announce via voice once every 15 minutes per unique person and action
+                if (now - lastSpoken > 15 * 60 * 1000L) {
+                    MainActivity.globalSpokenTimestamps[spokenKey] = now
+
+                    val formattedSpeech = when {
+                        cleanSpeechText.contains("has arrived at home", ignoreCase = true) || cleanSpeechText.contains("has arrived home", ignoreCase = true) -> {
+                            "$personName has arrived home"
+                        }
+                        cleanSpeechText.contains("has left the house", ignoreCase = true) || cleanSpeechText.contains("has left", ignoreCase = true) -> {
+                            "$personName has left the house"
+                        }
+                        else -> cleanSpeechText
+                    }
+
+                    try {
+                        val toneG = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 100)
+                        toneG.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 350)
+                    } catch (e: Exception) {}
+                    try {
+                        textToSpeech?.speak(formattedSpeech, TextToSpeech.QUEUE_FLUSH, null, null)
+                    } catch (e: Exception) {}
+                }
             }
             if (message.contains("SOS ALERT") || message.contains("SOS BEACON")) {
                 // Show full-screen SOS overlay for 5 seconds
@@ -473,22 +530,12 @@ fun MainScreen(
         }
     }
 
-    // Auto-deactivate location history trail & member selection after 20 seconds
-    LaunchedEffect(selectedMemberId) {
-        if (selectedMemberId != null) {
-            delay(20000)
-            if (viewModel.selectedMemberId.value == selectedMemberId) {
-                viewModel.selectedMemberId.value = null
-            }
-        }
-    }
+
 
     val sheetHeight by animateDpAsState(
         targetValue = if (isFamilyListExpanded) 520.dp else 105.dp,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
     )
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     // Handle system back gesture / back button to naturally close open panels
     BackHandler(enabled = isSettingsOpen || isFamilyListExpanded || isFamilyPopupOpen) {
@@ -555,6 +602,11 @@ fun MainScreen(
             activeGroupCreatorId = activeGroupCreatorId,
             myDeviceUUID = myDeviceUUID,
             onKickMember = { memberId -> viewModel.kickGroupMember(memberId) },
+            homeRadiusMeters = homeRadiusMeters,
+            workLat = workLat,
+            workLng = workLng,
+            isWorkCalibrated = isWorkCalibrated,
+            workRadiusMeters = workRadiusMeters,
             safeZones = safeZones,
             onAddSafeZone = { viewModel.addSafeZone(it) },
             onDeleteSafeZone = { viewModel.removeSafeZone(it) },
@@ -564,77 +616,27 @@ fun MainScreen(
             groupPinMappings = groupPinMappings,
             activeGroupPinCode = activeGroupPinCode,
             onSwitchCircle = { pin -> viewModel.selectActiveCircle(pin) },
+            routeTimeFilter = routeTimeFilter,
+            onSelectRouteTimeFilter = { filter -> viewModel.setRouteTimeFilter(filter) },
+            shoppingItems = shoppingItems,
+            onOpenShoppingList = { isShoppingListPopupOpen = true },
             bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. TOP SHOPPING LIST MARQUEE TICKER
-        if (shoppingItems.isNotEmpty()) {
-            val activeItemsText = remember(shoppingItems) {
-                shoppingItems.filter { !it.isChecked }.joinToString("   •   ") { it.name }
-            }
-            if (activeItemsText.isNotBlank()) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 90.dp) // Float below system notifications / SOS
-                        .fillMaxWidth(0.9f)
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .border(BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(18.dp))
-                        .clickable { isShoppingListPopupOpen = true }
-                        .zIndex(70f),
-                    color = CosmicSlateCard,
-                    shadowElevation = 4.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("🛒", fontSize = 14.sp)
-                        Text(
-                            text = "Need: $activeItemsText",
-                            color = TextPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            modifier = Modifier
-                                .weight(1f)
-                                .basicMarquee(iterations = Int.MAX_VALUE)
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. FLOATING OVERLAY QUICK ACTIONS BUBBLES (Bottom-Left)
+        // 2. FLOATING OVERLAY QUICK ACTIONS BUBBLES (Bottom-Left)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 16.dp, bottom = 80.dp)
+                .padding(start = 16.dp, bottom = 24.dp)
                 .zIndex(75f),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                // Notepad / Shopping List Bubble
-                FloatingActionButton(
-                    onClick = { isShoppingListPopupOpen = !isShoppingListPopupOpen },
-                    containerColor = CosmicSlateCard,
-                    contentColor = RadarCyan,
-                    shape = CircleShape,
-                    modifier = Modifier.size(50.dp).border(1.dp, SlateBorder, CircleShape),
-                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                ) {
-                    Text("📝", fontSize = 20.sp)
-                }
-
-                // Face / Family quick-focus bubble triggers
+                // 1. Family Members Quick Focus Bubble (Leftmost)
                 Column(
                     horizontalAlignment = Alignment.Start,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -650,7 +652,6 @@ fun MainScreen(
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-
                             fun getMemberLabel(m: com.example.data.FamilyMember, isMe: Boolean): String {
                                 val cleanName = m.name.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
                                 if (isMe) return "$cleanName (You)"
@@ -694,11 +695,23 @@ fun MainScreen(
                         containerColor = CosmicSlateCard,
                         contentColor = RadarCyan,
                         shape = CircleShape,
-                        modifier = Modifier.size(50.dp).border(1.dp, SlateBorder, CircleShape),
+                        modifier = Modifier.size(46.dp).border(1.dp, SlateBorder, CircleShape),
                         elevation = FloatingActionButtonDefaults.elevation(4.dp)
                     ) {
-                        Text("👤", fontSize = 20.sp)
+                        Text("👤", fontSize = 18.sp)
                     }
+                }
+
+                // 2. Shopping / Notes Quick Bubble
+                FloatingActionButton(
+                    onClick = { isShoppingListPopupOpen = !isShoppingListPopupOpen },
+                    containerColor = CosmicSlateCard,
+                    contentColor = RadarCyan,
+                    shape = CircleShape,
+                    modifier = Modifier.size(46.dp).border(1.dp, SlateBorder, CircleShape),
+                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                ) {
+                    Text("📝", fontSize = 18.sp)
                 }
             }
         }
@@ -776,6 +789,19 @@ fun MainScreen(
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1
                             )
+                            Surface(
+                                color = RadarCyan.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "v2.5",
+                                    color = RadarCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                         Button(
                             onClick = { isSettingsOpen = false },
@@ -841,11 +867,24 @@ fun MainScreen(
                             onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
                             homeLat = homeLat,
                             homeLng = homeLng,
+                            homeRadiusMeters = homeRadiusMeters,
+                            onUpdateHomeRadius = { viewModel.updateHomeRadius(it) },
+                            onCalibrateWork = { viewModel.setWorkToCurrentLocation() },
+                            onClearWork = { viewModel.clearWorkLocation() },
+                            workLat = workLat,
+                            workLng = workLng,
+                            isWorkCalibrated = isWorkCalibrated,
+                            workRadiusMeters = workRadiusMeters,
+                            onUpdateWorkRadius = { viewModel.updateWorkRadius(it) },
+                            isDepartureAlertsEnabled = isDepartureAlertsEnabled,
+                            onToggleDepartureAlerts = { viewModel.toggleDepartureAlerts(it) },
                             isVoiceAnnouncementsEnabled = isVoiceAnnouncementsEnabled,
                             onToggleVoiceAnnouncements = { viewModel.toggleVoiceAnnouncements(it) },
                             proximityAlertDistanceMeters = proximityAlertDistanceMeters,
                             onUpdateProximityAlertDistance = { viewModel.updateProximityAlertDistance(it) }
                         )
+
+                        RoomAudioMonitorControls(members = members)
 
                         ShoppingListControls(
                             shoppingItems = shoppingItems,
@@ -883,7 +922,7 @@ fun MainScreen(
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = "Pulse Tracker Telemetry Version v1.5 - Secure Client-Side SQL Database",
+                                    text = "Pulse Tracker Telemetry Version v2.5 - Secure Client-Side SQL Database",
                                     color = SecondarySlate.copy(alpha = 0.5f),
                                     fontSize = 8.sp,
                                     fontFamily = FontFamily.Monospace

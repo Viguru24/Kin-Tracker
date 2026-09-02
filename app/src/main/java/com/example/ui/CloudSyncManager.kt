@@ -35,7 +35,13 @@ class CloudSyncManager(
     private val setHomeCalibrated: (Double, Double) -> Unit,
     private val isSimulationModeEnabled: StateFlow<Boolean>,
     private val getMyActiveStatusText: (String) -> String,
-    private val savePreferences: () -> Unit
+    private val savePreferences: () -> Unit,
+    private val getWorkLat: () -> Double = { 0.0 },
+    private val getWorkLng: () -> Double = { 0.0 },
+    private val isWorkCalibrated: () -> Boolean = { false },
+    private val setWorkCalibrated: (Double, Double) -> Unit = { _, _ -> },
+    private val getHomeRadius: () -> Double = { AppConfig.DEFAULT_HOME_RADIUS_METERS },
+    private val getWorkRadius: () -> Double = { AppConfig.DEFAULT_WORK_RADIUS_METERS }
 ) {
     private val cloudService = CloudSyncService.create()
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
@@ -137,59 +143,107 @@ class CloudSyncManager(
                 etaMinutes = if (isGhostMode) 0 else meMember.etaMinutes,
                 lastActive = lastActiveTimestamp,
                 avatarEmoji = meMember.avatarEmoji,
-                locationSince = meMember.locationSince
+                locationSince = meMember.locationSince,
+                localIp = com.example.data.RoomAudioStreamManager.getLocalIpAddress(application),
+                isAudioTransmitter = com.example.data.RoomAudioStreamManager.isTransmitterActive.value
             )
 
-            // Sync and Merge Shopping items
+            // Sync and Merge Shopping items with cloud tombstones
             val localShoppingItems = repository.getShoppingItemsOnce()
             val deletionPrefs = application.getSharedPreferences("shopping_deletions", android.content.Context.MODE_PRIVATE)
             val incomingShoppingItems = payload?.shoppingItems ?: emptyList()
+            val incomingDeletions = payload?.deletedShoppingItems ?: emptyMap()
 
-            val mergedShoppingMap = mutableMapOf<String, CloudShoppingItem>()
+            val mergedDeletions = mutableMapOf<String, Long>()
+            val nowMs = System.currentTimeMillis()
+            val cutoff = nowMs - (30L * 24 * 60 * 60 * 1000L) // 30 days retention
 
-            // 1. Populate map with local items
-            for (localItem in localShoppingItems) {
-                val key = localItem.name.lowercase().trim()
-                mergedShoppingMap[key] = CloudShoppingItem(
-                    name = localItem.name,
-                    isChecked = localItem.isChecked,
-                    addedByMemberId = localItem.addedByMemberId,
-                    addedByMemberName = localItem.addedByMemberName,
-                    timestamp = localItem.timestamp
-                )
+            // Read local deletions
+            for ((k, v) in deletionPrefs.all) {
+                if (v is Long && v > cutoff) {
+                    mergedDeletions[k] = v
+                }
+            }
+            // Merge incoming cloud deletions
+            for ((k, v) in incomingDeletions) {
+                if (v > cutoff) {
+                    val existing = mergedDeletions[k] ?: 0L
+                    if (v > existing) {
+                        mergedDeletions[k] = v
+                    }
+                }
+            }
+            // Persist merged deletions locally
+            val delEditor = deletionPrefs.edit()
+            for ((k, v) in mergedDeletions) {
+                delEditor.putLong(k, v)
+            }
+            delEditor.apply()
+
+            fun getDeletionTimestamp(name: String): Long {
+                val normKey = name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                val rawKey = name.lowercase().trim()
+                return maxOf(mergedDeletions[normKey] ?: 0L, mergedDeletions[rawKey] ?: 0L)
             }
 
-            // 2. Merge with cloud items
-            for (cloudItem in incomingShoppingItems) {
-                val key = cloudItem.name.lowercase().trim()
-                val localDeletionTime = deletionPrefs.getLong(key, 0L)
+            val mergedShoppingMap = LinkedHashMap<String, CloudShoppingItem>()
 
-                if (localDeletionTime > cloudItem.timestamp) {
-                    // We deleted it after it was updated in the cloud. Drop it.
-                    mergedShoppingMap.remove(key)
-                } else {
-                    val localMatch = mergedShoppingMap[key]
-                    if (localMatch != null) {
-                        // Exists both locally and in cloud, LWW logic:
-                        if (cloudItem.timestamp > localMatch.timestamp) {
-                            mergedShoppingMap[key] = cloudItem
-                        }
-                    } else {
-                        // Exists in cloud but not locally:
-                        if (localDeletionTime == 0L || cloudItem.timestamp > localDeletionTime) {
-                            mergedShoppingMap[key] = cloudItem
-                        }
+            // 1. Populate map with local items (only if not deleted)
+            for (localItem in localShoppingItems) {
+                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (normKey.isBlank()) continue
+                val delTime = getDeletionTimestamp(localItem.name)
+                if (delTime == 0L || localItem.timestamp > delTime) {
+                    val existing = mergedShoppingMap[normKey]
+                    if (existing == null || localItem.timestamp > existing.timestamp) {
+                        mergedShoppingMap[normKey] = CloudShoppingItem(
+                            name = localItem.name,
+                            isChecked = localItem.isChecked,
+                            addedByMemberId = localItem.addedByMemberId,
+                            addedByMemberName = localItem.addedByMemberName,
+                            timestamp = localItem.timestamp
+                        )
                     }
                 }
             }
 
-            // 3. Write updates back to local DB
+            // 2. Merge with cloud items
+            for (cloudItem in incomingShoppingItems) {
+                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (normKey.isBlank()) continue
+                val delTime = getDeletionTimestamp(cloudItem.name)
+                if (delTime > 0L && cloudItem.timestamp <= delTime) {
+                    // Deleted item tombstone confirmed — drop from map
+                    mergedShoppingMap.remove(normKey)
+                } else if (delTime == 0L || cloudItem.timestamp > delTime) {
+                    val localMatch = mergedShoppingMap[normKey]
+                    if (localMatch == null || cloudItem.timestamp > localMatch.timestamp) {
+                        mergedShoppingMap[normKey] = cloudItem
+                    }
+                }
+            }
+
+            // 3. Write deduplicated items back to local DB and delete all local duplicate rows
             val finalShoppingList = mergedShoppingMap.values.toList()
+            val seenKeysInDb = mutableSetOf<String>()
+
+            for (localItem in localShoppingItems) {
+                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                val matchedCloud = mergedShoppingMap[normKey]
+                if (matchedCloud == null || seenKeysInDb.contains(normKey)) {
+                    // It was deleted or it's a duplicate local item! Remove from SQLite!
+                    repository.deleteShoppingItem(localItem)
+                } else {
+                    seenKeysInDb.add(normKey)
+                    if (localItem.isChecked != matchedCloud.isChecked && matchedCloud.timestamp > localItem.timestamp) {
+                        repository.updateShoppingItem(localItem.copy(isChecked = matchedCloud.isChecked, timestamp = matchedCloud.timestamp))
+                    }
+                }
+            }
+
             for (cloudItem in finalShoppingList) {
-                val key = cloudItem.name.lowercase().trim()
-                val localMatch = localShoppingItems.firstOrNull { it.name.lowercase().trim() == key }
-                if (localMatch == null) {
-                    // New item from cloud, insert locally
+                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                if (!seenKeysInDb.contains(normKey)) {
                     repository.insertShoppingItem(
                         ShoppingItem(
                             name = cloudItem.name,
@@ -199,26 +253,7 @@ class CloudSyncManager(
                             timestamp = cloudItem.timestamp
                         )
                     )
-                } else {
-                    // Exists locally, update if checked status is different and cloud timestamp is newer
-                    if (localMatch.isChecked != cloudItem.isChecked && cloudItem.timestamp > localMatch.timestamp) {
-                        repository.updateShoppingItem(
-                            localMatch.copy(
-                                isChecked = cloudItem.isChecked,
-                                timestamp = cloudItem.timestamp
-                            )
-                        )
-                    }
-                }
-            }
-
-            // 4. Delete items from local DB that were deleted by other clients
-            for (localItem in localShoppingItems) {
-                val key = localItem.name.lowercase().trim()
-                val inIncoming = incomingShoppingItems.any { it.name.lowercase().trim() == key }
-                val inMerged = mergedShoppingMap.containsKey(key)
-                if (inIncoming && !inMerged) {
-                    repository.deleteShoppingItem(localItem)
+                    seenKeysInDb.add(normKey)
                 }
             }
 
@@ -226,6 +261,10 @@ class CloudSyncManager(
                 if (!isHomeCalibrated() && payload.isHomeCalibrated) {
                     setHomeCalibrated(payload.homeLat, payload.homeLng)
                     uiEvents.emit("Synced common Home coordinates from cloud group!")
+                }
+                if (!isWorkCalibrated() && payload.isWorkCalibrated && payload.workLat != 0.0 && payload.workLng != 0.0) {
+                    setWorkCalibrated(payload.workLat, payload.workLng)
+                    uiEvents.emit("Synced common Work coordinates from cloud group!")
                 }
 
                 val updatedMembers = payload.members.toMutableMap()
@@ -258,18 +297,30 @@ class CloudSyncManager(
                     homeLat = if (payload.isHomeCalibrated) payload.homeLat else getHomeLat(),
                     homeLng = if (payload.isHomeCalibrated) payload.homeLng else getHomeLng(),
                     isHomeCalibrated = payload.isHomeCalibrated || isHomeCalibrated(),
+                    workLat = if (payload.isWorkCalibrated) payload.workLat else getWorkLat(),
+                    workLng = if (payload.isWorkCalibrated) payload.workLng else getWorkLng(),
+                    isWorkCalibrated = payload.isWorkCalibrated || isWorkCalibrated(),
+                    homeRadiusMeters = getHomeRadius(),
+                    workRadiusMeters = getWorkRadius(),
                     lastUpdated = lastActiveTimestamp,
                     members = updatedMembers,
-                    shoppingItems = finalShoppingList
+                    shoppingItems = finalShoppingList,
+                    deletedShoppingItems = mergedDeletions
                 )
             } else {
                 CloudGroupPayload(
                     homeLat = getHomeLat(),
                     homeLng = getHomeLng(),
                     isHomeCalibrated = isHomeCalibrated(),
+                    workLat = getWorkLat(),
+                    workLng = getWorkLng(),
+                    isWorkCalibrated = isWorkCalibrated(),
+                    homeRadiusMeters = getHomeRadius(),
+                    workRadiusMeters = getWorkRadius(),
                     lastUpdated = lastActiveTimestamp,
                     members = mapOf(myCloudId to myCloudMember),
-                    shoppingItems = finalShoppingList
+                    shoppingItems = finalShoppingList,
+                    deletedShoppingItems = mergedDeletions
                 )
             }
 
@@ -297,13 +348,29 @@ class CloudSyncManager(
             }
 
             val incomingCloudMembers = newPayload.members.values
+            val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
 
             for (cloudM in incomingCloudMembers) {
+                if (cloudM.localIp.isNotBlank()) {
+                    com.example.data.RoomAudioStreamManager.registerMemberIp(cloudM.id, cloudM.localIp, cloudM.name)
+                }
                 if (cloudM.id == myCloudId) continue
                 val cleanCloudName = cloudM.name.lowercase().trim()
                 if (cleanCloudName == cleanMyName || 
                     (cleanMyName.contains("louis") && cleanCloudName.contains("louis")) ||
                     (cleanMyName.contains("dad") && cleanCloudName.contains("dad"))) {
+                    continue
+                }
+
+                val cleanKey = cleanCloudName
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+
+                // Check if user explicitly deleted this member locally:
+                if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_${cloudM.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
                     continue
                 }
 
@@ -313,35 +380,56 @@ class CloudSyncManager(
                     it.id != "me" && it.id != cloudM.id &&
                     (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
                      (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
-                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")) ||
-                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")))
+                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")))
+                }
+
+                val contactsPrefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
+
+                val filesDir = application.filesDir
+                val fallbackPhoto = when {
+                    cleanKey.contains("isabel") -> contactsPrefs.getString("photo_isabel", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780424521532.jpg").absolutePath
+                    cleanKey.contains("annette") -> contactsPrefs.getString("photo_annette", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1781086356923.jpg").absolutePath
+                    cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("photo_dad", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780170267190.jpg").absolutePath
+                    else -> ""
+                }
+
+                val fallbackPhone = when {
+                    cleanKey.contains("isabel") -> contactsPrefs.getString("phone_isabel", "") ?: "+447760477416"
+                    cleanKey.contains("annette") -> contactsPrefs.getString("phone_annette", "") ?: "+447803171262"
+                    cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("phone_dad", "") ?: "+447802436159"
+                    else -> ""
                 }
 
                 // Preserve local photoPath and phoneNumber from the matchingByName record, or fall back to persistent local contacts directory
-                var resolvedPhone = if (matchingLocal?.phoneNumber?.isNotBlank() == true) {
-                    matchingLocal.phoneNumber
-                } else if (matchingByName?.phoneNumber?.isNotBlank() == true) {
-                    matchingByName.phoneNumber
-                } else {
-                    val prefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
-                    prefs.getString("phone_${cloudM.name.lowercase().trim()}", "") ?: ""
+                var resolvedPhone = when {
+                    matchingLocal?.phoneNumber?.isNotBlank() == true -> matchingLocal.phoneNumber
+                    matchingByName?.phoneNumber?.isNotBlank() == true -> matchingByName.phoneNumber
+                    contactsPrefs.getString("phone_$cleanKey", "")?.isNotBlank() == true -> contactsPrefs.getString("phone_$cleanKey", "")!!
+                    contactsPrefs.getString("phone_${cloudM.name.lowercase().trim()}", "")?.isNotBlank() == true -> contactsPrefs.getString("phone_${cloudM.name.lowercase().trim()}", "")!!
+                    fallbackPhone.isNotBlank() -> fallbackPhone
+                    else -> ""
                 }
 
-                var resolvedPhoto = if (matchingLocal?.photoPath?.isNotBlank() == true) {
-                    matchingLocal.photoPath
-                } else if (matchingByName?.photoPath?.isNotBlank() == true) {
-                    matchingByName.photoPath
-                } else {
-                    val prefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
-                    prefs.getString("photo_${cloudM.name.lowercase().trim()}", "") ?: ""
+                var resolvedPhoto = when {
+                    matchingLocal?.photoPath?.isNotBlank() == true -> matchingLocal.photoPath
+                    matchingByName?.photoPath?.isNotBlank() == true -> matchingByName.photoPath
+                    contactsPrefs.getString("photo_$cleanKey", "")?.isNotBlank() == true -> contactsPrefs.getString("photo_$cleanKey", "")!!
+                    contactsPrefs.getString("photo_${cloudM.name.lowercase().trim()}", "")?.isNotBlank() == true -> contactsPrefs.getString("photo_${cloudM.name.lowercase().trim()}", "")!!
+                    fallbackPhoto.isNotBlank() -> fallbackPhoto
+                    else -> ""
                 }
 
                 // Persistently cache any valid phone/photo to the local contacts directory so it's remembered forever
                 if (resolvedPhone.isNotBlank() || resolvedPhoto.isNotBlank()) {
-                    val prefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
-                    prefs.edit().apply {
-                        if (resolvedPhone.isNotBlank()) putString("phone_${cloudM.name.lowercase().trim()}", resolvedPhone)
-                        if (resolvedPhoto.isNotBlank()) putString("photo_${cloudM.name.lowercase().trim()}", resolvedPhoto)
+                    contactsPrefs.edit().apply {
+                        if (resolvedPhone.isNotBlank()) {
+                            putString("phone_$cleanKey", resolvedPhone)
+                            putString("phone_${cloudM.name.lowercase().trim()}", resolvedPhone)
+                        }
+                        if (resolvedPhoto.isNotBlank()) {
+                            putString("photo_$cleanKey", resolvedPhoto)
+                            putString("photo_${cloudM.name.lowercase().trim()}", resolvedPhoto)
+                        }
                         apply()
                     }
                 }
@@ -375,35 +463,84 @@ class CloudSyncManager(
                     }
                 }
 
-                // Compute locationSince: normalize remote duration to eliminate device clock skew / 1-hour timezone differences
-                val remoteSince = cloudM.locationSince
+                // Compute speed and movement:
                 val movedDistanceKm = if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && cloudM.x != 0.0 && cloudM.y != 0.0) {
                     Math.hypot((matchingLocal.x - cloudM.x) * 111.0 * Math.cos(Math.toRadians(cloudM.y)), (matchingLocal.y - cloudM.y) * 111.0)
                 } else 0.0
 
-                val coordsMoved = matchingLocal == null || (movedDistanceKm > 0.15 && cloudM.speedMph > 2.5)
+                val timeDeltaSec = if (matchingLocal != null && matchingLocal.lastActive > 0L && cloudM.lastActive > matchingLocal.lastActive) {
+                    (cloudM.lastActive - matchingLocal.lastActive) / 1000.0
+                } else 0.0
 
-                val locationSince = when {
-                    !coordsMoved && matchingLocal != null && matchingLocal.locationSince > 0L -> {
-                        // Person hasn't departed — preserve steady continuous timer
-                        matchingLocal.locationSince
-                    }
-                    remoteSince > 0L && cloudM.lastActive >= remoteSince -> {
-                        // Normalize elapsed duration relative to local time to prevent clock/timezone jumps
-                        val remoteElapsedMs = cloudM.lastActive - remoteSince
-                        (System.currentTimeMillis() - remoteElapsedMs).coerceAtMost(System.currentTimeMillis())
-                    }
-                    remoteSince > 0L -> remoteSince
-                    matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
-                    else -> System.currentTimeMillis()
+                // When remote GPS reports 0.0 speed, derive speed only when moving significantly
+                val derivedSpeedMph = if (timeDeltaSec in 1.0..300.0 && movedDistanceKm > 0.02) {
+                    (movedDistanceKm / timeDeltaSec) * 3600.0 * 0.621371
+                } else 0.0
+
+                val resolvedSpeedMph = when {
+                    cloudM.speedMph >= 0.6 -> cloudM.speedMph
+                    derivedSpeedMph >= 0.8 -> Math.round(derivedSpeedMph * 10.0) / 10.0
+                    else -> 0.0
                 }
+
+                // Check if member is at Home base (within 150m perimeter or explicit At Home status)
+                val homeLat = getHomeLat()
+                val homeLng = getHomeLng()
+                val distToHomeKm = if (homeLat != 0.0 && homeLng != 0.0 && cloudM.x != 0.0 && cloudM.y != 0.0) {
+                    Math.hypot((cloudM.x - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat)), (cloudM.y - homeLat) * 111.0)
+                } else 999.0
+
+                val isMemberAtHome = distToHomeKm <= 0.15 || cloudM.statusText.contains("At Home", ignoreCase = true) || cloudM.statusText.contains("at Home")
+
+                // True movement requires sustained speed >= 1.2 mph or derived speed from rapid relocation
+                val isMoving = if (isMemberAtHome) false else (resolvedSpeedMph >= 1.2 || derivedSpeedMph >= 1.5)
+                val remoteSince = cloudM.locationSince
+                val wasMemberAtHome = matchingLocal?.statusText?.contains("At Home", ignoreCase = true) == true
+                val hasStatusTransitioned = isMemberAtHome != wasMemberAtHome
+                val isRemoteSinceStaleHomeTimestamp = !isMemberAtHome && remoteSince > 0L && (System.currentTimeMillis() - remoteSince) > 6 * 3600 * 1000L
+
+                val locationSince = if (isMoving) {
+                    0L // Moving/traveling: reset stationary timer
+                } else {
+                    val now = System.currentTimeMillis()
+                    when {
+                        // 1. If remote sent a stale Home timestamp while away at a shop/new place, reject it and preserve/create away arrival
+                        isRemoteSinceStaleHomeTimestamp -> {
+                            if (matchingLocal != null && matchingLocal.locationSince > 0L && (now - matchingLocal.locationSince) < 6 * 3600 * 1000L && movedDistanceKm <= 0.08) {
+                                matchingLocal.locationSince
+                            } else {
+                                now - (48 * 60 * 1000L) // Set to recent arrival at shop (~48m ago)
+                            }
+                        }
+                        // 2. If remote provided a valid arrival timestamp that is consistent with the current location:
+                        remoteSince > 0L && remoteSince <= now && !(hasStatusTransitioned && (now - remoteSince) > 2 * 3600 * 1000L) && !(movedDistanceKm > 0.2 && (now - remoteSince) > 2 * 3600 * 1000L) -> {
+                            remoteSince
+                        }
+                        // 3. Member recently relocated (> 100m) or transitioned status: record fresh arrival at new location
+                        movedDistanceKm > 0.10 || hasStatusTransitioned -> {
+                            now
+                        }
+                        // 4. If previously recorded stationary timestamp exists and member hasn't moved away, keep it!
+                        matchingLocal != null && matchingLocal.locationSince > 0L && (isMemberAtHome || movedDistanceKm <= 0.08) -> {
+                            matchingLocal.locationSince
+                        }
+                        else -> now
+                    }
+                }
+
+                val finalStatus = if (isMemberAtHome) "At Home (Live GPS)" else activeStatus
+                val finalSpeedMph = if (isMemberAtHome) 0.0 else resolvedSpeedMph
+                val finalComingHome = if (isMemberAtHome) false else cloudM.isComingHome
+                val finalEta = if (isMemberAtHome) 0 else cloudM.etaMinutes
+                val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else cloudM.x
+                val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else cloudM.y
 
                 val mappedLocal = FamilyMember(
                     id = cloudM.id, name = cloudM.name, avatarColorHex = cloudM.avatarColorHex,
-                    x = cloudM.x, y = cloudM.y, batteryPercentage = cloudM.batteryPercentage,
-                    isCharging = cloudM.isCharging, speedMph = cloudM.speedMph,
-                    statusText = activeStatus, isComingHome = cloudM.isComingHome,
-                    etaMinutes = cloudM.etaMinutes, avatarEmoji = cloudM.avatarEmoji,
+                    x = finalX, y = finalY, batteryPercentage = cloudM.batteryPercentage,
+                    isCharging = cloudM.isCharging, speedMph = finalSpeedMph,
+                    statusText = finalStatus, isComingHome = finalComingHome,
+                    etaMinutes = finalEta, avatarEmoji = cloudM.avatarEmoji,
                     phoneNumber = if (matchingLocal?.phoneNumber?.isNotBlank() == true) matchingLocal.phoneNumber else resolvedPhone,
                     photoPath = if (matchingLocal?.photoPath?.isNotBlank() == true) matchingLocal.photoPath else resolvedPhoto,
                     lastActive = cloudM.lastActive,
@@ -412,6 +549,9 @@ class CloudSyncManager(
 
                 if (matchingLocal == null) repository.insertFamilyMembers(listOf(mappedLocal))
                 else repository.updateMember(mappedLocal)
+                if (mappedLocal.x != 0.0 && mappedLocal.y != 0.0) {
+                    repository.recordBreadcrumbThrottled(mappedLocal.id, mappedLocal.y, mappedLocal.x, mappedLocal.speedMph)
+                }
             }
 
             for (localM in existingLocal) {
@@ -490,6 +630,76 @@ class CloudSyncManager(
         }
     }
 
+    suspend fun removeMemberFromCloud(memberId: String, memberName: String) {
+        val token = groupSyncToken.value
+        if (token.isBlank()) return
+        try {
+            val payload = getGroupData(token) ?: return
+            val updatedMembers = payload.members.toMutableMap()
+            val cleanTargetName = memberName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+
+            val keysToRemove = updatedMembers.filter { entry ->
+                entry.key == memberId || 
+                entry.value.id == memberId ||
+                entry.value.name.lowercase().contains(cleanTargetName)
+            }.keys
+
+            for (k in keysToRemove) {
+                updatedMembers.remove(k)
+            }
+
+            val updatedPayload = payload.copy(
+                lastUpdated = System.currentTimeMillis(),
+                members = updatedMembers
+            )
+            updateGroupData(token, updatedPayload)
+        } catch (e: Exception) {}
+    }
+
+    suspend fun removeShoppingItemFromCloud(itemName: String) {
+        val token = groupSyncToken.value
+        if (token.isBlank()) return
+        try {
+            val payload = getGroupData(token) ?: return
+            val cleanTarget = itemName.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+            val rawTarget = itemName.lowercase().trim()
+            val delTime = System.currentTimeMillis()
+            val updatedShopping = payload.shoppingItems.filter {
+                val itNorm = it.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+                itNorm != cleanTarget && !it.name.equals(itemName, ignoreCase = true)
+            }
+            val updatedDeletions = payload.deletedShoppingItems.toMutableMap()
+            updatedDeletions[cleanTarget] = delTime
+            updatedDeletions[rawTarget] = delTime
+            val updatedPayload = payload.copy(
+                lastUpdated = delTime,
+                shoppingItems = updatedShopping,
+                deletedShoppingItems = updatedDeletions
+            )
+            updateGroupData(token, updatedPayload)
+        } catch (e: Exception) {}
+    }
+
+    suspend fun unmarkShoppingItemDeletedInCloud(itemName: String) {
+        val token = groupSyncToken.value
+        if (token.isBlank()) return
+        try {
+            val payload = getGroupData(token) ?: return
+            val cleanTarget = itemName.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
+            val rawTarget = itemName.lowercase().trim()
+            if (payload.deletedShoppingItems.containsKey(cleanTarget) || payload.deletedShoppingItems.containsKey(rawTarget)) {
+                val updatedDeletions = payload.deletedShoppingItems.toMutableMap()
+                updatedDeletions.remove(cleanTarget)
+                updatedDeletions.remove(rawTarget)
+                val updatedPayload = payload.copy(
+                    lastUpdated = System.currentTimeMillis(),
+                    deletedShoppingItems = updatedDeletions
+                )
+                updateGroupData(token, updatedPayload)
+            }
+        } catch (e: Exception) {}
+    }
+
     fun generateNewGroupKey() {
         scope.launch {
             try {
@@ -498,6 +708,11 @@ class CloudSyncManager(
                     homeLat = getHomeLat(),
                     homeLng = getHomeLng(),
                     isHomeCalibrated = isHomeCalibrated(),
+                    workLat = getWorkLat(),
+                    workLng = getWorkLng(),
+                    isWorkCalibrated = isWorkCalibrated(),
+                    homeRadiusMeters = getHomeRadius(),
+                    workRadiusMeters = getWorkRadius(),
                     lastUpdated = System.currentTimeMillis()
                 )
                 val randomKey = UUID.randomUUID().toString().substring(0, 6)
@@ -528,7 +743,7 @@ class CloudSyncManager(
         scope.launch {
             try {
                 cloudStatusText.value = "Creating Group..."
-                val pin = String.format("%04d", Random().nextInt(9000) + 1000)
+                val pin = String.format(java.util.Locale.US, "%04d", Random().nextInt(9000) + 1000)
                 val randomKey = UUID.randomUUID().toString().substring(0, 8)
                 val cleanUrl = "${randomKey}_pin_group"
                 
@@ -540,6 +755,11 @@ class CloudSyncManager(
                     homeLat = getHomeLat(),
                     homeLng = getHomeLng(),
                     isHomeCalibrated = isHomeCalibrated(),
+                    workLat = getWorkLat(),
+                    workLng = getWorkLng(),
+                    isWorkCalibrated = isWorkCalibrated(),
+                    homeRadiusMeters = getHomeRadius(),
+                    workRadiusMeters = getWorkRadius(),
                     lastUpdated = System.currentTimeMillis(),
                     creatorId = myDeviceUUID.value,
                     pinCode = pin
@@ -587,6 +807,9 @@ class CloudSyncManager(
                             val groupPayload = getGroupData(resolvedToken)
                             if (groupPayload != null && groupPayload.isHomeCalibrated) {
                                 setHomeCalibrated(groupPayload.homeLat, groupPayload.homeLng)
+                            }
+                            if (groupPayload != null && groupPayload.isWorkCalibrated && groupPayload.workLat != 0.0 && groupPayload.workLng != 0.0) {
+                                setWorkCalibrated(groupPayload.workLat, groupPayload.workLng)
                             }
                             
                             val newMapping = GroupPinMapping(

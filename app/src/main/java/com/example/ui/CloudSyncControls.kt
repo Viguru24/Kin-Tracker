@@ -78,7 +78,7 @@ fun CloudSyncControls(
             val hours = diffMs / 3600000
             val minutes = (diffMs % 3600000) / 60000
             val seconds = (diffMs % 60000) / 1000
-            timeLeftString = String.format("%02d:%02d:%02d", hours, minutes, seconds)
+            timeLeftString = String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
             kotlinx.coroutines.delay(1000L)
         }
         timeLeftString = ""
