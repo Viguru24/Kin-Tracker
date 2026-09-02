@@ -53,6 +53,7 @@ fun MemberCard(
     onEditMember: (FamilyMember) -> Unit,
     onDeleteMember: (FamilyMember) -> Unit,
     onTriggerAlarm: (String) -> Unit,
+    isRinging: Boolean = false,
     onOpenWhatsApp: (FamilyMember) -> Unit,
     onTriggerSOS: () -> Unit,
     onSendReaction: (String, String) -> Unit
@@ -623,6 +624,7 @@ fun MemberCard(
                 }
             )
             if (member.id != "me") {
+                val isRingingNow = isRinging || member.statusText == "🚨 ALARM"
                 HorizontalDivider(color = DividerGray)
                 DropdownMenuItem(
                     text = {
@@ -633,10 +635,15 @@ fun MemberCard(
                             Icon(
                                 imageVector = Icons.Default.Notifications,
                                 contentDescription = "Trigger Alarm",
-                                tint = ActiveAmber,
+                                tint = if (isRingingNow) ErrorRed else ActiveAmber,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Text("Find Their Phone (🚨 Alarm)", color = ActiveAmber, fontSize = 13.sp)
+                            Text(
+                                text = if (isRingingNow) "🔕 Stop Ringing Phone" else "Find Their Phone (🚨 Alarm)",
+                                color = if (isRingingNow) ErrorRed else ActiveAmber,
+                                fontSize = 13.sp,
+                                fontWeight = if (isRingingNow) FontWeight.Bold else FontWeight.Normal
+                            )
                         }
                     },
                     onClick = {

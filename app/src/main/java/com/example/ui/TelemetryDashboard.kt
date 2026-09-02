@@ -56,6 +56,7 @@ fun TelemetryDashboard(
     onUpdateMember: (FamilyMember) -> Unit,
     onDeleteMember: (String) -> Unit,
     onTriggerAlarm: (String) -> Unit = {},
+    activeRingingMembers: Set<String> = emptySet(),
     onOpenWhatsApp: (FamilyMember) -> Unit = {},
     onTriggerSOS: () -> Unit = {},
     onSendReaction: (String, String) -> Unit = { _, _ -> },
@@ -139,6 +140,7 @@ fun TelemetryDashboard(
                     onEditMember = { memberToEdit = it },
                     onDeleteMember = { memberToDelete = it },
                     onTriggerAlarm = onTriggerAlarm,
+                    isRinging = activeRingingMembers.contains(member.id) || activeRingingMembers.contains(member.name),
                     onOpenWhatsApp = onOpenWhatsApp,
                     onTriggerSOS = onTriggerSOS,
                     onSendReaction = onSendReaction

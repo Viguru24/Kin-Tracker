@@ -6,8 +6,11 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Vibrator
+import android.os.VibratorManager
 
 object AlarmHelper {
     private var mediaPlayer: MediaPlayer? = null
@@ -15,11 +18,15 @@ object AlarmHelper {
     private var appContext: Context? = null
     private var screenStateReceiver: android.content.BroadcastReceiver? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var vibrator: Vibrator? = null
+
+    val isRinging: Boolean
+        get() = (mediaPlayer?.isPlaying == true || fallbackRingtone?.isPlaying == true)
 
     fun triggerAlarm(context: Context) {
         try {
             appContext = context.applicationContext
-            if (mediaPlayer?.isPlaying == true || fallbackRingtone?.isPlaying == true) return
+            if (isRinging) return
 
             // Acquire CPU and screen wakeup lock so the alarm triggers immediately when device is locked/asleep
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
@@ -29,17 +36,17 @@ object AlarmHelper {
                     android.os.PowerManager.PARTIAL_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
                     "KinTracker:AlarmWakeLock"
                 ).apply {
-                    acquire(10000)
+                    acquire(14000)
                 }
-            } catch (wlEx: Exception) {
+            } catch (_: Exception) {
                 try {
                     wakeLock = powerManager.newWakeLock(
                         android.os.PowerManager.PARTIAL_WAKE_LOCK,
                         "KinTracker:AlarmWakeLock"
                     ).apply {
-                        acquire(10000)
+                        acquire(14000)
                     }
-                } catch (ex: Exception) {}
+                } catch (_: Exception) {}
             }
 
             // Register screen state receiver to stop alarm when power button is pressed (screen toggled)
@@ -57,6 +64,24 @@ object AlarmHelper {
                 context.applicationContext.registerReceiver(receiver, filter)
             }
 
+            // Start vibration pattern
+            try {
+                vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vibratorManager?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
+                val pattern = longArrayOf(0, 800, 400, 800, 400, 800)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(android.os.VibrationEffect.createWaveform(pattern, 0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(pattern, 0)
+                }
+            } catch (_: Exception) {}
+
             var alarmUri: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             if (alarmUri == null) {
                 alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
@@ -71,7 +96,6 @@ object AlarmHelper {
                 val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVolume, 0)
             } catch (volEx: Exception) {
-                // Ignore volume adjustment errors if permission is denied
                 volEx.printStackTrace()
             }
 
@@ -90,9 +114,10 @@ object AlarmHelper {
                 start()
             }
 
+            // Automatically stop after 12 seconds (rings a few times loudly then shuts off)
             Handler(Looper.getMainLooper()).postDelayed({
                 stopAlarm()
-            }, 10000)
+            }, 12000)
         } catch (e: Exception) {
             e.printStackTrace()
             // Fallback to RingtoneManager if MediaPlayer fails
@@ -104,7 +129,7 @@ object AlarmHelper {
                 ringtone?.play()
                 Handler(Looper.getMainLooper()).postDelayed({
                     stopAlarm()
-                }, 10000)
+                }, 12000)
             } catch (ex: Exception) {
                 ex.printStackTrace()
             }
@@ -130,6 +155,11 @@ object AlarmHelper {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+
+        try {
+            vibrator?.cancel()
+            vibrator = null
+        } catch (_: Exception) {}
 
         try {
             val receiver = screenStateReceiver

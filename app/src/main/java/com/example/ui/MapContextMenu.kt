@@ -33,6 +33,7 @@ fun MapContextMenu(
     activeGroupCreatorId: String,
     isRouteTrailEnabled: Boolean = false,
     onToggleRouteTrail: () -> Unit = {},
+    isRinging: Boolean = false,
     onDismiss: () -> Unit,
     onOpenWhatsApp: (FamilyMember) -> Unit,
     onTriggerSOS: () -> Unit,
@@ -193,14 +194,15 @@ fun MapContextMenu(
                     }
                 }
 
-                // Find Their Phone (Alarm)
+                // Find Their Phone (Alarm) / Stop Ringing
                 if (member.id != "me") {
+                    val isRingingNow = isRinging || member.statusText == "🚨 ALARM"
                     Button(
                         onClick = {
                             onDismiss()
                             onTriggerAlarm(member.id)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = ActiveAmber),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isRingingNow) Color(0xFFE53935) else ActiveAmber),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -208,8 +210,18 @@ fun MapContextMenu(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(imageVector = Icons.Default.Notifications, contentDescription = "Alarm", tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Text("Find Their Phone (🚨 Alarm)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Alarm",
+                                tint = if (isRingingNow) Color.White else Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (isRingingNow) "🔕 Stop Ringing ${member.name}" else "🔔 Find Their Phone (Ring Loudly)",
+                                color = if (isRingingNow) Color.White else Color.Black,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 }

@@ -33,6 +33,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     val isCloudSyncEnabled = MutableStateFlow(true)
     val groupSyncToken = MutableStateFlow("")
+    val activeRingingMembers = MutableStateFlow<Set<String>>(emptySet())
     val ghostModeExpiryTime = MutableStateFlow(0L)
     val myDeviceName = MutableStateFlow("Dad")
     val myDeviceColor = MutableStateFlow("#AA22FF")
@@ -1018,14 +1019,74 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun triggerFindMyPhone(memberId: String) = viewModelScope.launch { cloudSyncManager.getGroupData(groupSyncToken.value)?.let { payload ->
-        val updatedMembers = payload.members.toMutableMap()
-        updatedMembers[memberId]?.let { target ->
-            updatedMembers[memberId] = target.copy(statusText = "🚨 ALARM")
-            cloudSyncManager.updateGroupData(groupSyncToken.value, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
-            _uiEvents.emit("Sent loud alarm command to ${target.name}'s phone.")
+    fun triggerFindMyPhone(memberId: String) = viewModelScope.launch {
+        val token = groupSyncToken.value
+        cloudSyncManager.getGroupData(token)?.let { payload ->
+            val updatedMembers = payload.members.toMutableMap()
+            val targetEntry = updatedMembers.entries.firstOrNull {
+                it.key == memberId || it.value.id == memberId || it.value.name.equals(memberId, ignoreCase = true)
+            }
+            if (targetEntry != null) {
+                val targetKey = targetEntry.key
+                val target = targetEntry.value
+                updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM")
+                cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
+                activeRingingMembers.value = activeRingingMembers.value + memberId + target.id + target.name
+                _uiEvents.emit("🚨 Ringing ${target.name}'s phone loudly...")
+
+                // Automatically timeout/reset after 14 seconds
+                launch {
+                    kotlinx.coroutines.delay(14000L)
+                    if (activeRingingMembers.value.contains(memberId) || activeRingingMembers.value.contains(target.id)) {
+                        stopFindMyPhone(memberId, isAutoTimeout = true)
+                    }
+                }
+            } else {
+                // If local member match
+                val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+                if (localTarget != null) {
+                    activeRingingMembers.value = activeRingingMembers.value + memberId + localTarget.id + localTarget.name
+                    _uiEvents.emit("🚨 Ringing ${localTarget.name}'s phone loudly...")
+                    launch {
+                        kotlinx.coroutines.delay(14000L)
+                        activeRingingMembers.value = activeRingingMembers.value - memberId - localTarget.id - localTarget.name
+                    }
+                }
+            }
         }
-    } }
+    }
+
+    fun stopFindMyPhone(memberId: String, isAutoTimeout: Boolean = false) = viewModelScope.launch {
+        val token = groupSyncToken.value
+        activeRingingMembers.value = activeRingingMembers.value - memberId
+        cloudSyncManager.getGroupData(token)?.let { payload ->
+            val updatedMembers = payload.members.toMutableMap()
+            val targetEntry = updatedMembers.entries.firstOrNull {
+                it.key == memberId || it.value.id == memberId || it.value.name.equals(memberId, ignoreCase = true)
+            }
+            if (targetEntry != null) {
+                val targetKey = targetEntry.key
+                val target = targetEntry.value
+                activeRingingMembers.value = activeRingingMembers.value - target.id - target.name
+                if (target.statusText == "🚨 ALARM") {
+                    updatedMembers[targetKey] = target.copy(statusText = "Stationary")
+                    cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
+                }
+                if (!isAutoTimeout) {
+                    _uiEvents.emit("🔕 Stopped ringing ${target.name}'s phone.")
+                }
+            }
+        }
+    }
+
+    fun toggleFindMyPhone(memberId: String) {
+        val isCurrentlyRinging = activeRingingMembers.value.any { it == memberId || memberId.contains(it) }
+        if (isCurrentlyRinging) {
+            stopFindMyPhone(memberId)
+        } else {
+            triggerFindMyPhone(memberId)
+        }
+    }
 
     fun sendEmojiReaction(memberId: String, emoji: String) {
         viewModelScope.launch {

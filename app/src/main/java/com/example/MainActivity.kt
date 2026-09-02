@@ -422,6 +422,7 @@ fun MainScreen(
     val isCircleDigestReset by viewModel.isCircleDigestReset.collectAsStateWithLifecycle()
     val isVoiceAnnouncementsEnabled by viewModel.isVoiceAnnouncementsEnabled.collectAsStateWithLifecycle()
     val proximityAlertDistanceMeters by viewModel.proximityAlertDistanceMeters.collectAsStateWithLifecycle()
+    val activeRingingMembers by viewModel.activeRingingMembers.collectAsStateWithLifecycle()
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsStateWithLifecycle()
     val groupSyncToken by viewModel.groupSyncToken.collectAsStateWithLifecycle()
@@ -598,7 +599,8 @@ fun MainScreen(
             onOpenWhatsApp = openWhatsApp,
             onUpdateMember = { viewModel.updateFamilyMember(it) },
             onDeleteMember = { viewModel.deleteFamilyMember(it) },
-            onTriggerAlarm = { viewModel.triggerFindMyPhone(it) },
+            onTriggerAlarm = { viewModel.toggleFindMyPhone(it) },
+            activeRingingMembers = activeRingingMembers,
             activeGroupCreatorId = activeGroupCreatorId,
             myDeviceUUID = myDeviceUUID,
             onKickMember = { memberId -> viewModel.kickGroupMember(memberId) },
@@ -623,6 +625,50 @@ fun MainScreen(
             bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
+
+        // Top Floating HUD Banner when Find My Phone Alarm is active
+        if (activeRingingMembers.isNotEmpty()) {
+            val ringingNames = members.filter { activeRingingMembers.contains(it.id) || activeRingingMembers.contains(it.name) }
+                .joinToString(", ") { it.name }
+                .ifEmpty { "Phone" }
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 58.dp, start = 16.dp, end = 16.dp)
+                    .zIndex(99f),
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xF0E53935),
+                border = BorderStroke(1.5.dp, Color(0xFFFF8A80)),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("🚨", fontSize = 16.sp)
+                    Text(
+                        text = "Ringing $ringingNames loudly...",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Button(
+                        onClick = {
+                            activeRingingMembers.forEach { memberId ->
+                                viewModel.stopFindMyPhone(memberId)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text("🔕 Stop Ringing", color = Color(0xFFD32F2F), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
 
         // 2. FLOATING OVERLAY QUICK ACTIONS BUBBLES (Bottom-Left)
         Column(

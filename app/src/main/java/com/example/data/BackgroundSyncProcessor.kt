@@ -149,6 +149,8 @@ object BackgroundSyncProcessor {
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(context)
+            } else if (!matchesMe && AlarmHelper.isRinging) {
+                AlarmHelper.stopAlarm()
             }
 
             val prefsHomeLat = prefs.getFloat("homeLat", AppConfig.DEFAULT_HOME_LAT.toFloat()).toDouble()

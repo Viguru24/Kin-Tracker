@@ -126,6 +126,8 @@ class CloudSyncManager(
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(application)
+            } else if (!matchesMe && AlarmHelper.isRinging) {
+                AlarmHelper.stopAlarm()
             }
 
             val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime.value
