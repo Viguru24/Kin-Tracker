@@ -125,3 +125,9 @@ data class CircleMutationResponse(
     val inviteCode: String? = null,
     val error: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class PinMappingResponse(
+    val groupSyncToken: String = "",
+    val creatorId: String = ""
+)

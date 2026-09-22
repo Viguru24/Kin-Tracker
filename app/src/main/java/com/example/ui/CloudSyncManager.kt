@@ -952,10 +952,24 @@ class CloudSyncManager(
                 if (response.isSuccessful) {
                     val bodyString = response.body()?.string() ?: ""
                     if (bodyString.isNotBlank() && bodyString != "null" && bodyString != "{}") {
-                        val mapAdapter = com.squareup.moshi.Moshi.Builder().build().adapter(Map::class.java)
-                        val map = mapAdapter.fromJson(bodyString)
-                        val resolvedToken = map?.get("groupSyncToken") as? String
-                        val creatorId = map?.get("creatorId") as? String ?: ""
+                        var resolvedToken: String? = null
+                        var creatorId: String = ""
+
+                        try {
+                            val pinAdapter = moshi.adapter(PinMappingResponse::class.java)
+                            val pinResp = pinAdapter.fromJson(bodyString)
+                            resolvedToken = pinResp?.groupSyncToken
+                            creatorId = pinResp?.creatorId ?: ""
+                        } catch (_: Exception) {}
+
+                        // Fallback parsing via org.json in case of schema variance
+                        if (resolvedToken.isNullOrBlank()) {
+                            try {
+                                val jsonObj = org.json.JSONObject(bodyString)
+                                resolvedToken = jsonObj.optString("groupSyncToken", "")
+                                creatorId = jsonObj.optString("creatorId", "")
+                            } catch (_: Exception) {}
+                        }
 
                         if (!resolvedToken.isNullOrBlank()) {
                             val groupPayload = getGroupData(resolvedToken)
@@ -975,6 +989,8 @@ class CloudSyncManager(
                             hasSuccessfullySyncedThisSession = false
                             savePreferences()
                             startCloudSyncLoop()
+                            // Immediately broadcast location into the new group
+                            try { performCloudSyncTick() } catch (_: Exception) {}
                             uiEvents.emit("✅ Joined Circle $cleanCode!")
                             onResult(true, "Joined circle!")
                             return@launch
