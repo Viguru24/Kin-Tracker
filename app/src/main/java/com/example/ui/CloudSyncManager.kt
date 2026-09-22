@@ -845,13 +845,15 @@ class CloudSyncManager(
                     circleCode = "$p1-$p2"
                     val randomKey = UUID.randomUUID().toString().substring(0, 8)
                     circleToken = "${randomKey}_pin_group"
-
-                    val pinMappingToken = "pin_${circleCode.replace("-", "")}"
-                    val mappingJson = "{\"groupSyncToken\":\"$circleToken\",\"creatorId\":\"${myDeviceUUID.value}\"}"
-                    try {
-                        cloudService.updateGroupData(pinMappingToken, mappingJson.toRequestBody("application/json".toMediaTypeOrNull()))
-                    } catch (_: Exception) {}
                 }
+
+                // ALWAYS register the PIN→token lookup key on the VPS so any device can join with the code.
+                // This is the join mechanism — without this, joinGroupWithPin has nothing to look up.
+                val pinMappingToken = "pin_${circleCode.replace("-", "")}"
+                val mappingJson = "{\"groupSyncToken\":\"$circleToken\",\"creatorId\":\"${myDeviceUUID.value}\"}"
+                try {
+                    cloudService.updateGroupData(pinMappingToken, mappingJson.toRequestBody("application/json".toMediaTypeOrNull()))
+                } catch (_: Exception) {}
 
                 val initialPayload = CloudGroupPayload(
                     homeLat = getHomeLat(),
@@ -901,7 +903,7 @@ class CloudSyncManager(
                 val cleanCode = pin.trim().replace("\\s".toRegex(), "").uppercase()
                 cloudStatusText.value = "Connecting to Circle..."
 
-                // 1. Try modern REST Join on VPS
+                // 1. Try modern REST Join (works once new server is deployed to VPS)
                 try {
                     val joinReq = JoinCircleRequest(
                         inviteCode = cleanCode,
@@ -913,13 +915,10 @@ class CloudSyncManager(
                     val response = apiService.joinCircle(joinReq)
                     if (response.isSuccessful && response.body()?.circle != null) {
                         val circle = response.body()!!.circle!!
-                        if (circle.isHomeCalibrated) {
-                            setHomeCalibrated(circle.homeLat, circle.homeLng)
-                        }
+                        if (circle.isHomeCalibrated) setHomeCalibrated(circle.homeLat, circle.homeLng)
                         if (circle.isWorkCalibrated && circle.workLat != 0.0 && circle.workLng != 0.0) {
                             setWorkCalibrated(circle.workLat, circle.workLng)
                         }
-
                         val newMapping = GroupPinMapping(
                             pinCode = circle.inviteCode.ifBlank { cleanCode },
                             groupToken = circle.circleId,
@@ -931,7 +930,6 @@ class CloudSyncManager(
                         )
                         repository.deactivateAllGroups()
                         repository.insertGroupPinMapping(newMapping)
-
                         groupSyncToken.value = circle.circleId
                         activeGroupPinCode.value = circle.inviteCode.ifBlank { cleanCode }
                         activeGroupCreatorId.value = circle.creatorId
@@ -939,44 +937,37 @@ class CloudSyncManager(
                         hasSuccessfullySyncedThisSession = false
                         savePreferences()
                         startCloudSyncLoop()
-
                         uiEvents.emit("Joined Circle '${circle.name}' (${circle.inviteCode})!")
                         onResult(true, "Joined circle!")
                         return@launch
                     }
                 } catch (e: Exception) {
-                    // Fall back to legacy sync token resolution
+                    // New REST API not yet deployed — fall through to VPS PIN lookup
                 }
 
-                // 2. Legacy fallback
+                // 2. VPS PIN lookup: GET pin_{code} from the sync server to resolve the group token.
+                // The creator's device writes this key when they create the circle (see createGroupWithPin).
                 val pinMappingToken = "pin_${cleanCode.replace("-", "")}"
                 val response = cloudService.getGroupData(pinMappingToken)
                 if (response.isSuccessful) {
                     val bodyString = response.body()?.string() ?: ""
                     if (bodyString.isNotBlank() && bodyString != "null" && bodyString != "{}") {
-                        val mapAdapter = Moshi.Builder().build().adapter(Map::class.java)
+                        val mapAdapter = com.squareup.moshi.Moshi.Builder().build().adapter(Map::class.java)
                         val map = mapAdapter.fromJson(bodyString)
                         val resolvedToken = map?.get("groupSyncToken") as? String
                         val creatorId = map?.get("creatorId") as? String ?: ""
 
                         if (!resolvedToken.isNullOrBlank()) {
                             val groupPayload = getGroupData(resolvedToken)
-                            if (groupPayload != null && groupPayload.isHomeCalibrated) {
-                                setHomeCalibrated(groupPayload.homeLat, groupPayload.homeLng)
-                            }
-                            if (groupPayload != null && groupPayload.isWorkCalibrated && groupPayload.workLat != 0.0 && groupPayload.workLng != 0.0) {
-                                setWorkCalibrated(groupPayload.workLat, groupPayload.workLng)
-                            }
-
+                            if (groupPayload != null && groupPayload.isHomeCalibrated) setHomeCalibrated(groupPayload.homeLat, groupPayload.homeLng)
+                            if (groupPayload != null && groupPayload.isWorkCalibrated && groupPayload.workLat != 0.0) setWorkCalibrated(groupPayload.workLat, groupPayload.workLng)
                             val newMapping = GroupPinMapping(
                                 pinCode = cleanCode, groupToken = resolvedToken, groupName = "Family Circle",
                                 creatorId = creatorId, createdTimestamp = System.currentTimeMillis(),
-                                isOwner = creatorId == myDeviceUUID.value,
-                                isActive = true
+                                isOwner = creatorId == myDeviceUUID.value, isActive = true
                             )
                             repository.deactivateAllGroups()
                             repository.insertGroupPinMapping(newMapping)
-
                             groupSyncToken.value = resolvedToken
                             activeGroupPinCode.value = cleanCode
                             activeGroupCreatorId.value = creatorId
@@ -984,21 +975,22 @@ class CloudSyncManager(
                             hasSuccessfullySyncedThisSession = false
                             savePreferences()
                             startCloudSyncLoop()
-
-                            uiEvents.emit("Successfully joined Circle $cleanCode!")
+                            uiEvents.emit("✅ Joined Circle $cleanCode!")
                             onResult(true, "Joined circle!")
                             return@launch
                         }
                     }
                 }
-                uiEvents.emit("Could not find Circle with code '$cleanCode'. Please check and try again.")
-                onResult(false, "Invalid Code")
+
+                uiEvents.emit("Could not find a Circle with code '$cleanCode'. Check the code and try again.")
+                onResult(false, "Circle not found")
             } catch (e: Exception) {
                 uiEvents.emit("Connection failed: ${e.localizedMessage}")
                 onResult(false, "Connection error")
             }
         }
     }
+
 
     fun updateActiveGroupSettings(newName: String, newPin: String) {
         scope.launch {

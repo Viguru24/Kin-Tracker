@@ -585,9 +585,12 @@ fun CloudSyncControls(
                             ) {
                                 OutlinedTextField(
                                     value = pinToJoinInput,
-                                    onValueChange = { if (it.length <= 4) pinToJoinInput = it },
-                                    label = { Text("4-digit PIN") },
-                                    placeholder = { Text("e.g. 5729") },
+                                    onValueChange = { input ->
+                                        val clean = input.filter { it.isLetterOrDigit() || it == '-' }.uppercase()
+                                        if (clean.length <= 10) pinToJoinInput = clean
+                                    },
+                                    label = { Text("Invite Code / PIN") },
+                                    placeholder = { Text("e.g. 4666 or KT-4666") },
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.weight(1f),
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -600,8 +603,8 @@ fun CloudSyncControls(
                                 )
                                 Button(
                                     onClick = {
-                                        if (pinToJoinInput.length == 4) {
-                                            onJoinGroupWithPin(pinToJoinInput)
+                                        if (pinToJoinInput.trim().length >= 4) {
+                                            onJoinGroupWithPin(pinToJoinInput.trim())
                                             pinToJoinInput = ""
                                         }
                                     },
@@ -1075,6 +1078,10 @@ fun CloudSyncControls(
         AddDeviceDialog(
             activeGroupPinCode = activeGroupPinCode,
             activeGroupName = activeCircleName,
+            members = members,
+            onJoinGroupWithPin = onJoinGroupWithPin,
+            onCreateGroupWithPin = onCreateGroupWithPin,
+            onDeleteMemberFromCircle = { member -> onKickMember(member.id) },
             onDismiss = { showAddDeviceDialog = false }
         )
     }
