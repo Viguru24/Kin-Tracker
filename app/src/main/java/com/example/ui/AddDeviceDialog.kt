@@ -63,12 +63,12 @@ fun AddDeviceDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {},
-        containerColor = Color(0xFF131520),
+        containerColor = Color(0xFF1E232F),
         shape = RoundedCornerShape(24.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp)
-            .border(BorderStroke(1.5.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(24.dp)),
+            .border(BorderStroke(1.5.dp, Color(0xFF384358)), RoundedCornerShape(24.dp)),
         text = {
             Column(
                 modifier = Modifier
@@ -85,41 +85,41 @@ fun AddDeviceDialog(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(RadarCyan.copy(alpha = 0.15f)),
+                                .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("📱", fontSize = 18.sp)
+                            Text("📱", fontSize = 20.sp)
                         }
                         Column {
                             Text(
-                                text = "Family Circles & Members",
-                                color = TextPrimary,
-                                fontSize = 16.sp,
+                                text = "Family Circle",
+                                color = Color.White,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "${activeGroupName.ifBlank { "Family Circle" }} • Code: $pinCode",
-                                color = RadarCyan,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
+                                text = "${activeGroupName.ifBlank { "Family Circle" }} • PIN: $pinCode",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
 
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close",
-                            tint = SecondarySlate
+                            tint = Color(0xFFB0BEC5)
                         )
                     }
                 }
@@ -128,8 +128,8 @@ fun AddDeviceDialog(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF1E2232),
-                    border = BorderStroke(1.dp, SlateBorder)
+                    color = Color(0xFF161922),
+                    border = BorderStroke(1.dp, Color(0xFF2D3545))
                 ) {
                     Row(
                         modifier = Modifier
@@ -142,18 +142,18 @@ fun AddDeviceDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (selectedTab == 0) PrimaryCosmic else Color.Transparent)
+                                .background(if (selectedTab == 0) Color(0xFF2A3447) else Color.Transparent)
                                 .clickable {
                                     selectedTab = 0
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "👥 Join",
-                                color = if (selectedTab == 0) Color.White else SecondarySlate,
-                                fontSize = 11.sp,
+                                color = if (selectedTab == 0) Color.White else Color(0xFF90A4AE),
+                                fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -163,18 +163,18 @@ fun AddDeviceDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (selectedTab == 1) PrimaryCosmic else Color.Transparent)
+                                .background(if (selectedTab == 1) Color(0xFF2A3447) else Color.Transparent)
                                 .clickable {
                                     selectedTab = 1
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "➕ Invite",
-                                color = if (selectedTab == 1) Color.White else SecondarySlate,
-                                fontSize = 11.sp,
+                                color = if (selectedTab == 1) Color.White else Color(0xFF90A4AE),
+                                fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -182,20 +182,20 @@ fun AddDeviceDialog(
                         // Tab 2: Delete from Circle
                         Box(
                             modifier = Modifier
-                                .weight(1.1f)
+                                .weight(1f)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (selectedTab == 2) Color(0xFFD32F2F) else Color.Transparent)
+                                .background(if (selectedTab == 2) Color(0xFF3B1E22) else Color.Transparent)
                                 .clickable {
                                     selectedTab = 2
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "🗑️ Delete",
-                                color = if (selectedTab == 2) Color.White else SecondarySlate,
-                                fontSize = 11.sp,
+                                text = "🗑️ Remove",
+                                color = if (selectedTab == 2) Color(0xFFFF5252) else Color(0xFF90A4AE),
+                                fontSize = 13.sp,
                                 fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -206,30 +206,30 @@ fun AddDeviceDialog(
                 if (selectedTab == 0 && !showCreateCircleView) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFF181C2A),
-                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.25f))
+                            color = Color(0xFF161922),
+                            border = BorderStroke(1.dp, Color(0xFF2D3545))
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "CONNECT THIS DEVICE TO AN EXISTING CIRCLE",
-                                    color = RadarCyan,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    text = "CONNECT TO A FAMILY CIRCLE",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
                                     letterSpacing = 1.sp
                                 )
                                 Text(
-                                    text = "Enter the 6-character invite code (or 4-digit PIN) generated by your family circle to connect instantly.",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp,
-                                    lineHeight = 16.sp
+                                    text = "Enter the 4-digit PIN (e.g. 4666) or 6-character invite code to connect instantly.",
+                                    color = Color(0xFFCFD8DC),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
                                 )
                             }
                         }
@@ -243,18 +243,21 @@ fun AddDeviceDialog(
                                     pinToJoinInput = clean
                                 }
                             },
-                            label = { Text("Circle Invite Code") },
-                            placeholder = { Text("e.g. K9F-2Q8 or KT-4666") },
-                            shape = RoundedCornerShape(12.dp),
+                            label = { Text("Circle PIN or Invite Code", color = Color(0xFFB0BEC5), fontSize = 14.sp) },
+                            placeholder = { Text("e.g. 4666 or KT-4666", color = Color(0xFF78909C), fontSize = 14.sp) },
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth(),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
-                                focusedBorderColor = RadarCyan,
-                                unfocusedBorderColor = SlateBorder,
-                                focusedLabelColor = RadarCyan,
-                                unfocusedLabelColor = SecondarySlate
+                                focusedBorderColor = Color(0xFF00E5FF),
+                                unfocusedBorderColor = Color(0xFF384358),
+                                focusedContainerColor = Color(0xFF161922),
+                                unfocusedContainerColor = Color(0xFF161922),
+                                focusedLabelColor = Color(0xFF00E5FF),
+                                unfocusedLabelColor = Color(0xFFB0BEC5)
                             ),
                             singleLine = true
                         )
@@ -270,18 +273,18 @@ fun AddDeviceDialog(
                             },
                             enabled = isValidCode,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = RadarCyan,
-                                disabledContainerColor = RadarCyan.copy(alpha = 0.25f)
+                                containerColor = Color(0xFF00E5FF),
+                                disabledContainerColor = Color(0xFF263238)
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(50.dp)
                         ) {
                             Text(
                                 text = "Join Circle 👥",
-                                color = if (isValidCode) Color.Black else SecondarySlate,
-                                fontSize = 13.sp,
+                                color = if (isValidCode) Color.Black else Color(0xFF78909C),
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -400,35 +403,34 @@ fun AddDeviceDialog(
                         // Big PIN display card
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFF1B2030),
-                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.35f))
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color(0xFF161922),
+                            border = BorderStroke(1.5.dp, Color(0xFF00E5FF).copy(alpha = 0.5f))
                         ) {
                             Column(
-                                modifier = Modifier.padding(16.dp),
+                                modifier = Modifier.padding(18.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    text = "THIS CIRCLE'S INVITE CODE",
-                                    color = SecondarySlate,
-                                    fontSize = 10.sp,
+                                    text = "CIRCLE INVITE PIN",
+                                    color = Color(0xFFB0BEC5),
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
                                     letterSpacing = 1.5.sp
                                 )
                                 Text(
                                     text = pinCode,
-                                    color = RadarCyan,
-                                    fontSize = 36.sp,
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 42.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
                                     letterSpacing = 4.sp
                                 )
                                 Text(
-                                    text = "Share this invite code to connect family members and devices to this circle",
-                                    color = TextSecondary,
-                                    fontSize = 10.sp,
+                                    text = "Share this PIN with family members to connect their device instantly.",
+                                    color = Color(0xFFCFD8DC),
+                                    fontSize = 13.sp,
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -438,33 +440,34 @@ fun AddDeviceDialog(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(12.dp))
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .background(Color(0xFF161922), RoundedCornerShape(14.dp))
+                                .border(BorderStroke(1.dp, Color(0xFF2D3545)), RoundedCornerShape(14.dp))
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
                                 text = "HOW TO CONNECT THE OTHER DEVICE:",
-                                color = SecondarySlate,
-                                fontSize = 9.sp,
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                                letterSpacing = 0.8.sp
                             )
 
                             // Step 1
                             Row(
-                                verticalAlignment = Alignment.Top,
+                                verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(18.dp)
+                                        .size(24.dp)
                                         .clip(CircleShape)
-                                        .background(PrimaryCosmic),
+                                        .background(Color(0xFF00E5FF).copy(alpha = 0.2f)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("1", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("1", color = Color(0xFF00E5FF), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Text("Open Kin-Tracker on the other device.", color = TextPrimary, fontSize = 11.sp)
+                                Text("Open Kin-Tracker on their phone.", color = Color.White, fontSize = 13.sp)
                             }
 
                             // Step 2
