@@ -598,11 +598,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             
             // Clear any legacy deleted_eloise tombstone flags in SharedPreferences so real Eloise device can sync
-            deletedMembersPrefs.edit()
-                .remove("deleted_eloise")
-                .remove("deleted_member_eloise")
-                .remove("deleted_Eloise")
-                .apply()
+            // This covers both hardcoded name keys AND any device-ID-based keys that may contain "eloise"
+            deletedMembersPrefs.edit().apply {
+                remove("deleted_eloise")
+                remove("deleted_member_eloise")
+                remove("deleted_Eloise")
+                // Also sweep for any key containing "eloise" (covers UUID-based device IDs for Eloise's phone)
+                for (key in deletedMembersPrefs.all.keys) {
+                    if (key.contains("eloise", ignoreCase = true)) {
+                        remove(key)
+                    }
+                }
+                apply()
+            }
 
             // Populate / restore contacts and photos for active members in local database
             for (m in current) {

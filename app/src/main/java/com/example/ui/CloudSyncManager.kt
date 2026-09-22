@@ -404,18 +404,20 @@ class CloudSyncManager(
                     it.id != "me" && it.id != cloudM.id && !it.id.startsWith("device_") &&
                     (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
                      (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
-                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")))
+                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")) ||
+                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")))
                 }
 
                 val contactsPrefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
 
                 val filesDir = application.filesDir
-                // Fallback photos only for the three known family members — never auto-assign to unknown/new devices
+                // Fallback photos for all known family members — never auto-assign to unknown/new devices
                 val isKnownFamilyMember = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
-                    cleanKey.contains("dad") || cleanKey.contains("louis")
+                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise")
                 val fallbackPhoto = when {
                     cleanKey.contains("isabel") -> contactsPrefs.getString("photo_isabel", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780424521532.jpg").absolutePath
                     cleanKey.contains("annette") -> contactsPrefs.getString("photo_annette", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1781086356923.jpg").absolutePath
+                    cleanKey.contains("eloise") -> contactsPrefs.getString("photo_eloise", "")?.takeIf { it.isNotBlank() } ?: ""
                     cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("photo_dad", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780170267190.jpg").absolutePath
                     else -> "" // Unknown/new device — no fallback photo; user must set one manually
                 }
@@ -423,6 +425,7 @@ class CloudSyncManager(
                 val fallbackPhone = when {
                     cleanKey.contains("isabel") -> contactsPrefs.getString("phone_isabel", "") ?: "+447760477416"
                     cleanKey.contains("annette") -> contactsPrefs.getString("phone_annette", "") ?: "+447803171262"
+                    cleanKey.contains("eloise") -> contactsPrefs.getString("phone_eloise", "") ?: ""
                     cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("phone_dad", "") ?: "+447802436159"
                     else -> ""
                 }
