@@ -40,7 +40,7 @@ class FamilyRepository(private val familyDao: FamilyDao) {
         // Clean up legacy test IDs if any exist
         for (m in currentMembers) {
             val mClean = m.name.lowercase().trim()
-            if (m.id in listOf("sarah", "mom", "dad", "alex", "louis", "eloise") || mClean.contains("eloise")) {
+            if (m.id in listOf("sarah", "mom", "dad", "alex") && !mClean.contains("eloise")) {
                 familyDao.deleteFamilyMember(m)
                 familyDao.clearBreadcrumbsForMember(m.id)
             }

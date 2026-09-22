@@ -32,6 +32,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val locationTrails: StateFlow<Map<String, List<Pair<Double, Double>>>> = _locationTrails
 
     val isCloudSyncEnabled = MutableStateFlow(true)
+    val isLocationPaused = MutableStateFlow(false)
     val groupSyncToken = MutableStateFlow("")
     val activeRingingMembers = MutableStateFlow<Set<String>>(emptySet())
     val ghostModeExpiryTime = MutableStateFlow(0L)
@@ -215,6 +216,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     if (m.x == 0.0 && m.y == 0.0) return@forEach
                     // Persist throttled breadcrumb to DB
                     repository.recordBreadcrumbThrottled(m.id, m.y, m.x, m.speedMph)
+                    com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(m.id, m.y, m.x, m.speedMph)
                     
                     val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
                     val existingCoords = activeTrails[m.id] ?: emptyList()
@@ -322,6 +324,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     private val outsideConfirmCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val insideConfirmCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val lastZoneAlertTime = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val wasTravelingWithMeOutsideHome = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val lastCoLocatedTimestamp = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun setupSafeZoneGeofences() {
         viewModelScope.launch {
@@ -365,6 +369,21 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 if (places.isEmpty() || members.isEmpty()) return@collect
                 val now = System.currentTimeMillis()
 
+                val me = members.firstOrNull {
+                    it.id == "me" ||
+                    (myDeviceUUID.value.isNotBlank() && it.id == myDeviceUUID.value) ||
+                    (myDeviceName.value.isNotBlank() && it.name.equals(myDeviceName.value, ignoreCase = true)) ||
+                    it.name.contains("(You)", ignoreCase = true)
+                }
+                val hasMyGps = me != null && me.x != 0.0 && me.y != 0.0
+                val homePlace = places.firstOrNull { it.isHome }
+                val distMeToHomeMeters = if (hasMyGps && homePlace != null) {
+                    val x = (me!!.x - homePlace.longitude) * 111.0 * Math.cos(Math.toRadians(homePlace.latitude))
+                    val y = (me.y - homePlace.latitude) * 111.0
+                    Math.hypot(x, y) * 1000.0
+                } else Double.MAX_VALUE
+                val isMeOutsideHome = hasMyGps && distMeToHomeMeters > 200.0
+
                 members.forEach { member ->
                     if (member.x == 0.0 && member.y == 0.0) return@forEach
 
@@ -374,6 +393,26 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                             member.name.equals(myDeviceName.value, ignoreCase = true) ||
                             member.name.contains("(You)", ignoreCase = true)
                     if (isSelf) return@forEach
+
+                    val distToMeMeters = if (hasMyGps) {
+                        val xDistMe = (member.x - me!!.x) * 111.0 * Math.cos(Math.toRadians(member.y))
+                        val yDistMe = (member.y - me.y) * 111.0
+                        Math.hypot(xDistMe, yDistMe) * 1000.0
+                    } else Double.MAX_VALUE
+
+                    val distMemberToHomeMeters = if (homePlace != null) {
+                        val x = (member.x - homePlace.longitude) * 111.0 * Math.cos(Math.toRadians(homePlace.latitude))
+                        val y = (member.y - homePlace.latitude) * 111.0
+                        Math.hypot(x, y) * 1000.0
+                    } else Double.MAX_VALUE
+                    val isMemberOutsideHome = distMemberToHomeMeters > 200.0
+
+                    if (hasMyGps && distToMeMeters <= 250.0) {
+                        lastCoLocatedTimestamp[member.id] = now
+                        if (isMeOutsideHome && isMemberOutsideHome) {
+                            wasTravelingWithMeOutsideHome[member.id] = true
+                        }
+                    }
 
                     places.forEach { place ->
                         val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
@@ -406,15 +445,35 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                                     if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
                                         lastZoneAlertTime["arr_$key"] = now
                                         val placeDisplayName = if (place.isHome) "Home" else place.name
-                                        repository.insertLog(
-                                            ActivityLog(
-                                                memberId = member.id,
-                                                memberName = member.name,
-                                                actionText = "arrived at $placeDisplayName",
-                                                iconName = "check_in"
+
+                                        val isWithMeNow = hasMyGps && distToMeMeters <= 200.0
+                                        val recentlyWithMe = (now - (lastCoLocatedTimestamp[member.id] ?: 0L)) < 5 * 60 * 1000L
+                                        val traveledTogether = (wasTravelingWithMeOutsideHome[member.id] == true) && recentlyWithMe
+                                        val isArrivingWithMe = (place.isHome && (isWithMeNow || traveledTogether)) || (!place.isHome && isWithMeNow)
+
+                                        if (isArrivingWithMe) {
+                                            repository.insertLog(
+                                                ActivityLog(
+                                                    memberId = member.id,
+                                                    memberName = member.name,
+                                                    actionText = "arrived at $placeDisplayName (with you)",
+                                                    iconName = "check_in"
+                                                )
                                             )
-                                        )
-                                        _uiEvents.emit("📍 Arrival Notice: $cleanMemberName has arrived at $placeDisplayName!")
+                                            if (place.isHome) {
+                                                wasTravelingWithMeOutsideHome[member.id] = false
+                                            }
+                                        } else {
+                                            repository.insertLog(
+                                                ActivityLog(
+                                                    memberId = member.id,
+                                                    memberName = member.name,
+                                                    actionText = "arrived at $placeDisplayName",
+                                                    iconName = "check_in"
+                                                )
+                                            )
+                                            _uiEvents.emit("📍 Arrival Notice: $cleanMemberName has arrived at $placeDisplayName!")
+                                        }
                                     }
                                 }
                             }
@@ -436,18 +495,29 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                                     if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
                                         lastZoneAlertTime["dep_$key"] = now
                                         val placeDisplayName = if (place.isHome) "the house" else place.name
-                                        val warningMsg = "🚪 Departure Warning: $cleanMemberName has left $placeDisplayName!"
-                                        
-                                        repository.insertLog(
-                                            ActivityLog(
-                                                memberId = member.id,
-                                                memberName = member.name,
-                                                actionText = "left ${place.name} (departed building)",
-                                                iconName = "away"
+                                        val isDepartingWithMe = hasMyGps && distToMeMeters <= 200.0
+                                        if (isDepartingWithMe) {
+                                            repository.insertLog(
+                                                ActivityLog(
+                                                    memberId = member.id,
+                                                    memberName = member.name,
+                                                    actionText = "left ${place.name} (with you)",
+                                                    iconName = "away"
+                                                )
                                             )
-                                        )
-                                        if (isDepartureAlertsEnabled.value) {
-                                            _uiEvents.emit(warningMsg)
+                                        } else {
+                                            val warningMsg = "🚪 Departure Warning: $cleanMemberName has left $placeDisplayName!"
+                                            repository.insertLog(
+                                                ActivityLog(
+                                                    memberId = member.id,
+                                                    memberName = member.name,
+                                                    actionText = "left ${place.name} (departed building)",
+                                                    iconName = "away"
+                                                )
+                                            )
+                                            if (isDepartureAlertsEnabled.value) {
+                                                _uiEvents.emit(warningMsg)
+                                            }
                                         }
                                     }
                                 }
@@ -527,10 +597,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val contactsPrefs = getApplication<Application>().getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             
-            // Guarantee Eloise tombstone is permanently locked in SharedPreferences
+            // Clear any legacy deleted_eloise tombstone flags in SharedPreferences so real Eloise device can sync
             deletedMembersPrefs.edit()
-                .putBoolean("deleted_eloise", true)
-                .putBoolean("deleted_member_eloise", true)
+                .remove("deleted_eloise")
+                .remove("deleted_member_eloise")
+                .remove("deleted_Eloise")
                 .apply()
 
             // Populate / restore contacts and photos for active members in local database
@@ -539,9 +610,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                     .trim()
 
-                // If user deleted this member, or if it is Eloise/demo ghost, purge immediately from SQLite!
-                if (m.id == "eloise" || cleanKey.contains("eloise") || m.name.contains("eloise", ignoreCase = true) ||
-                    deletedMembersPrefs.getBoolean("deleted_${m.id}", false) ||
+                // If user explicitly deleted this member, purge immediately from SQLite
+                if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) ||
                     deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
                     deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
                     deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
@@ -609,6 +679,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 repository.insertFamilyMembers(listOf(FamilyMember("me", myDeviceName.value, myDeviceColor.value, homeLng, homeLat, 100, false, 0.0, "Syncing GPS...", false, 0, myDeviceEmoji.value, myDevicePhone.value, myDevicePhotoPath.value, locationSince = savedLocationSince)))
             } else {
                 current.first { it.id == "me" }.let {
+                    val resolvedName = if (it.name.isNotBlank() && it.name != "Dad" && myDeviceName.value == "Dad") it.name else myDeviceName.value
+                    if (myDeviceName.value != resolvedName) {
+                        myDeviceName.value = resolvedName
+                        savePreferences()
+                    }
                     val resolvedSince = if (it.locationSince > 0L) it.locationSince else savedLocationSince
                     repository.updateMember(it.copy(name = myDeviceName.value, avatarColorHex = myDeviceColor.value, avatarEmoji = myDeviceEmoji.value, phoneNumber = myDevicePhone.value, photoPath = myDevicePhotoPath.value, locationSince = resolvedSince))
                 }
@@ -719,6 +794,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
               putBoolean("isUserSignedIn", isUserSignedIn.value); putString("userDisplayName", userDisplayName.value); putString("userEmail", userEmail.value)
               putString("myDeviceName", myDeviceName.value); putString("myDeviceColor", myDeviceColor.value); putString("myDeviceEmoji", myDeviceEmoji.value)
               putString("myDeviceUUID", myDeviceUUID.value); putString("groupSyncToken", groupSyncToken.value); putBoolean("isCloudSyncEnabled", isCloudSyncEnabled.value)
+              putBoolean("isLocationPaused", isLocationPaused.value)
               putLong("ghostModeExpiryTime", ghostModeExpiryTime.value); putBoolean("isSimulationModeEnabled", isSimulationModeEnabled.value)
               putBoolean("isWifeCloudSimulationEnabled", isWifeCloudSimulationEnabled.value); putBoolean("hasCompletedOnboarding", hasCompletedOnboarding.value)
               putBoolean("isCircleDigestReset", isCircleDigestReset.value)
@@ -753,15 +829,20 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           groupSyncToken.value = cloudSyncManager.convertToValidToken(savedToken)
 
           isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true); ghostModeExpiryTime.value = prefs.getLong("ghostModeExpiryTime", 0L)
+          isLocationPaused.value = prefs.getBoolean("isLocationPaused", false)
           isSimulationModeEnabled.value = prefs.getBoolean("isSimulationModeEnabled", false); isWifeCloudSimulationEnabled.value = prefs.getBoolean("isWifeCloudSimulationEnabled", false)
           hasCompletedOnboarding.value = prefs.getBoolean("hasCompletedOnboarding", false) || groupSyncToken.value.isNotBlank()
           isCircleDigestReset.value = prefs.getBoolean("isCircleDigestReset", false)
           isVoiceAnnouncementsEnabled.value = prefs.getBoolean("isVoiceAnnouncementsEnabled", false)
           isDepartureAlertsEnabled.value = prefs.getBoolean("isDepartureAlertsEnabled", true)
           proximityAlertDistanceMeters.value = prefs.getInt("proximityAlertDistanceMeters", 400)
-          homeLat = prefs.getFloat("homeLat", 51.332308f).toDouble(); homeLng = prefs.getFloat("homeLng", -0.117188f).toDouble(); isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
+          homeLat = prefs.getFloat("homeLat", AppConfig.DEFAULT_HOME_LAT.toFloat()).toDouble()
+          homeLng = prefs.getFloat("homeLng", AppConfig.DEFAULT_HOME_LNG.toFloat()).toDouble()
+          isHomeCalibrated = prefs.getBoolean("isHomeCalibrated", true)
           homeRadiusMeters = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
-          workLat = prefs.getFloat("workLat", 0.0f).toDouble(); workLng = prefs.getFloat("workLng", 0.0f).toDouble(); isWorkCalibrated = prefs.getBoolean("isWorkCalibrated", false)
+          workLat = prefs.getFloat("workLat", AppConfig.DEFAULT_WORK_LAT.toFloat()).toDouble()
+          workLng = prefs.getFloat("workLng", AppConfig.DEFAULT_WORK_LNG.toFloat()).toDouble()
+          isWorkCalibrated = prefs.getBoolean("isWorkCalibrated", false)
           workRadiusMeters = prefs.getFloat("workRadiusMeters", AppConfig.DEFAULT_WORK_RADIUS_METERS.toFloat()).toDouble()
       }
 
@@ -920,12 +1001,31 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 prefs.edit().apply {
                     if (updated.phoneNumber.isNotBlank()) putString("phone_$cleanName", updated.phoneNumber)
                     if (updated.photoPath.isNotBlank()) putString("photo_$cleanName", updated.photoPath)
+                    // Persist the user's chosen name so the cloud sync loop never overwrites it
+                    if (updated.id != "me") putString("edited_name_${updated.id}", updated.name)
                     apply()
                 }
             }
-            if (updated.id == "me") {
-                myDeviceName.value = updated.name; myDeviceColor.value = updated.avatarColorHex; myDeviceEmoji.value = updated.avatarEmoji
-                myDevicePhone.value = updated.phoneNumber; myDevicePhotoPath.value = updated.photoPath; savePreferences()
+            val isMyDevice = updated.id == "me" || 
+                             updated.id == myDeviceUUID.value || 
+                             updated.id.endsWith("_" + myDeviceUUID.value) ||
+                             updated.name.equals(myDeviceName.value, ignoreCase = true)
+            if (isMyDevice) {
+                myDeviceName.value = updated.name
+                myDeviceColor.value = updated.avatarColorHex
+                myDeviceEmoji.value = updated.avatarEmoji
+                myDevicePhone.value = updated.phoneNumber
+                myDevicePhotoPath.value = updated.photoPath
+                repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
+                    repository.updateMember(it.copy(
+                        name = updated.name,
+                        avatarColorHex = updated.avatarColorHex,
+                        avatarEmoji = updated.avatarEmoji,
+                        phoneNumber = updated.phoneNumber,
+                        photoPath = updated.photoPath
+                    ))
+                }
+                savePreferences()
             }
             repository.insertLog(ActivityLog(memberId = updated.id, memberName = updated.name, actionText = "updated tracker details", iconName = "check_in"))
             _uiEvents.emit("${updated.name}'s tracker details updated!")
@@ -943,18 +1043,25 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             // 1. Permanently record deletion in SharedPreferences so it can NEVER be resurrected
             val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+            val isMyDeviceName = cleanName == "dad" || cleanName == "louis" || cleanName.contains("other device") || cleanName.isBlank()
             prefs.edit()
                 .putBoolean("deleted_$cleanId", true)
-                .putBoolean("deleted_$cleanName", true)
                 .putBoolean("deleted_member_$cleanId", true)
-                .putBoolean("deleted_member_$cleanName", true)
-                .putLong("deleted_time_$cleanId", System.currentTimeMillis())
                 .apply()
 
-            // 2. Delete all matching records from local database (by ID, and by clean name)
+            if (!isMyDeviceName) {
+                prefs.edit()
+                    .putBoolean("deleted_$cleanName", true)
+                    .putBoolean("deleted_member_$cleanName", true)
+                    .apply()
+            }
+            prefs.edit().putLong("deleted_time_$cleanId", System.currentTimeMillis()).apply()
+
+            // 2. Delete all matching records from local database (NEVER delete 'me')
             for (m in allCurrent) {
+                if (m.id == "me") continue
                 val mClean = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-                if (m.id == memberId || m.id == cleanId || mClean == cleanName || (cleanName.isNotEmpty() && mClean.contains(cleanName))) {
+                if (m.id == memberId || m.id == cleanId || (!isMyDeviceName && (mClean == cleanName || (cleanName.isNotEmpty() && mClean.contains(cleanName))))) {
                     repository.deleteMember(m)
                 }
             }
@@ -981,8 +1088,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) || 
                     deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
                     deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false) ||
-                    cleanKey.contains("eloise")) {
+                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
                     repository.deleteMember(m)
                 }
             }
@@ -1018,6 +1124,68 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             _uiEvents.emit(if (enabled) "Ghost Mode activated. Location sharing paused for 8 hours." else "Ghost Mode deactivated. Resumed live tracking.")
         }
     }
+
+    fun toggleLocationPaused(paused: Boolean) {
+        viewModelScope.launch {
+            isLocationPaused.value = paused
+            savePreferences()
+            val action = if (paused) "paused my device (removed from screen)" else "un-paused my device (restored to screen)"
+            repository.insertLog(ActivityLog(memberId = "me", memberName = myDeviceName.value, actionText = action, iconName = if (paused) "visibility_off" else "home"))
+            _uiEvents.emit(if (paused) "⏸️ My device paused: removed from screen." else "👁️ My device un-paused: restored to screen.")
+        }
+    }
+
+    fun toggleMemberTracking(memberId: String) = viewModelScope.launch {
+        val myNameVal = myDeviceName.value
+        val myCloudIdVal = "device_" + myNameVal.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+        if (memberId == "me" || memberId == myCloudIdVal || memberId.equals(myNameVal, ignoreCase = true)) {
+            toggleLocationPaused(!isLocationPaused.value)
+            return@launch
+        }
+
+        val token = groupSyncToken.value
+        val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+        val targetName = localTarget?.name ?: memberId
+        val currentlyPaused = localTarget?.isLocationPaused == true || localTarget?.statusText?.contains("Paused", ignoreCase = true) == true
+        val targetPaused = !currentlyPaused
+
+        if (targetPaused && selectedMemberId.value == memberId) {
+            selectedMemberId.value = null
+        }
+
+        // Update local database immediately so the device is removed from / restored to the screen instantly
+        localTarget?.let {
+            repository.updateMember(it.copy(
+                isLocationPaused = targetPaused,
+                statusText = if (targetPaused) "⏸️ Paused (Hidden)" else "Stationary"
+            ))
+        }
+
+        val actionMsg = if (targetPaused) "paused $targetName (removed from screen)" else "un-paused $targetName (restored to screen)"
+        repository.insertLog(ActivityLog(memberId = "me", memberName = myDeviceName.value, actionText = actionMsg, iconName = if (targetPaused) "visibility_off" else "home"))
+        _uiEvents.emit(if (targetPaused) "⏸️ Paused $targetName: removed from screen." else "👁️ Un-paused $targetName: restored to screen.")
+
+        if (token.isNotBlank()) {
+            cloudSyncManager.getGroupData(token)?.let { payload ->
+                val updatedMembers = payload.members.toMutableMap()
+                val targetEntry = updatedMembers.entries.firstOrNull {
+                    it.key == memberId || it.value.id == memberId || it.value.name.equals(memberId, ignoreCase = true)
+                }
+                if (targetEntry != null) {
+                    val targetKey = targetEntry.key
+                    val target = targetEntry.value
+                    val newStatus = if (targetPaused) "⏸️ Paused (Hidden)" else "Stationary"
+                    updatedMembers[targetKey] = target.copy(
+                        isLocationPaused = targetPaused,
+                        statusText = newStatus,
+                        speedMph = if (targetPaused) 0.0 else target.speedMph
+                    )
+                    cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
+                }
+            }
+        }
+    }
+
 
     fun triggerFindMyPhone(memberId: String) = viewModelScope.launch {
         val token = groupSyncToken.value
@@ -1226,8 +1394,36 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     } }
 
     fun toggleCloudSync(e: Boolean, t: String, n: String, c: String, em: String, p: String) {
-        myDeviceName.value = n; myDeviceColor.value = c; myDeviceEmoji.value = em; myDevicePhone.value = p
+        val cleanName = n.trim().ifBlank { myDeviceName.value }
+        myDeviceName.value = cleanName; myDeviceColor.value = c; myDeviceEmoji.value = em; myDevicePhone.value = p
+        viewModelScope.launch {
+            repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
+                repository.updateMember(it.copy(name = cleanName, avatarColorHex = c, avatarEmoji = em, phoneNumber = p))
+            }
+        }
+        savePreferences()
         cloudSyncManager.toggleCloudSync(e, t, myDeviceName, myDeviceColor, myDeviceEmoji, myDevicePhone)
+    }
+
+    fun updateMyDeviceProfile(name: String, colorHex: String, emoji: String, phone: String = "", photoPath: String = "") {
+        val cleanName = name.trim().ifBlank { myDeviceName.value }
+        myDeviceName.value = cleanName
+        myDeviceColor.value = colorHex
+        myDeviceEmoji.value = emoji
+        if (phone.isNotBlank()) myDevicePhone.value = phone
+        if (photoPath.isNotBlank()) myDevicePhotoPath.value = photoPath
+        viewModelScope.launch {
+            repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
+                repository.updateMember(it.copy(
+                    name = cleanName,
+                    avatarColorHex = colorHex,
+                    avatarEmoji = emoji,
+                    phoneNumber = if (phone.isNotBlank()) phone else it.phoneNumber,
+                    photoPath = if (photoPath.isNotBlank()) photoPath else it.photoPath
+                ))
+            }
+        }
+        savePreferences()
     }
 
     fun generateNewGroupKey() = cloudSyncManager.generateNewGroupKey()

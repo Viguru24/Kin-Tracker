@@ -130,6 +130,23 @@ class CloudSyncManager(
                 AlarmHelper.stopAlarm()
             }
 
+            val prefs = application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+            val myEntry = payload?.members?.values?.firstOrNull {
+                it.id == myCloudId || it.name.trim().equals(myName.trim(), ignoreCase = true)
+            }
+            val currentLocPaused = prefs.getBoolean("is_location_paused", false)
+            if (myEntry != null && myEntry.isLocationPaused != currentLocPaused) {
+                prefs.edit().putBoolean("is_location_paused", myEntry.isLocationPaused).apply()
+                if (myEntry.isLocationPaused) {
+                    com.example.data.BackgroundLocationService.stopService(application)
+                    uiEvents.emit("⏸️ Location tracking paused remotely.")
+                } else {
+                    com.example.data.BackgroundLocationService.startService(application)
+                    uiEvents.emit("🛰️ Location tracking resumed remotely.")
+                }
+            }
+
+            val isLocPaused = prefs.getBoolean("is_location_paused", false)
             val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime.value
             val myCloudMember = CloudMember(
                 id = myCloudId,
@@ -139,15 +156,16 @@ class CloudSyncManager(
                 y = if (isGhostMode) 0.0 else meMember.y,
                 batteryPercentage = meMember.batteryPercentage,
                 isCharging = meMember.isCharging,
-                speedMph = if (isGhostMode) 0.0 else meMember.speedMph,
-                statusText = if (isGhostMode) "Ghost Mode Active (Location Paused)" else getMyActiveStatusText(meMember.statusText),
-                isComingHome = if (isGhostMode) false else meMember.isComingHome,
-                etaMinutes = if (isGhostMode) 0 else meMember.etaMinutes,
+                speedMph = if (isGhostMode || isLocPaused) 0.0 else meMember.speedMph,
+                statusText = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else getMyActiveStatusText(meMember.statusText),
+                isComingHome = if (isGhostMode || isLocPaused) false else meMember.isComingHome,
+                etaMinutes = if (isGhostMode || isLocPaused) 0 else meMember.etaMinutes,
                 lastActive = lastActiveTimestamp,
                 avatarEmoji = meMember.avatarEmoji,
                 locationSince = meMember.locationSince,
                 localIp = com.example.data.RoomAudioStreamManager.getLocalIpAddress(application),
-                isAudioTransmitter = com.example.data.RoomAudioStreamManager.isTransmitterActive.value
+                isAudioTransmitter = com.example.data.RoomAudioStreamManager.isTransmitterActive.value,
+                isLocationPaused = isLocPaused
             )
 
             // Sync and Merge Shopping items with cloud tombstones
@@ -260,35 +278,47 @@ class CloudSyncManager(
             }
 
             val newPayload = if (payload != null) {
-                if (!isHomeCalibrated() && payload.isHomeCalibrated) {
-                    setHomeCalibrated(payload.homeLat, payload.homeLng)
-                    uiEvents.emit("Synced common Home coordinates from cloud group!")
+                if (payload.isHomeCalibrated && payload.homeLat != 0.0 && payload.homeLng != 0.0) {
+                    val currentHomeLat = getHomeLat()
+                    val currentHomeLng = getHomeLng()
+                    val distDiff = Math.hypot((payload.homeLng - currentHomeLng) * 111.0, (payload.homeLat - currentHomeLat) * 111.0)
+                    if (!isHomeCalibrated() || distDiff > 0.03) { // >30m difference from group home
+                        setHomeCalibrated(payload.homeLat, payload.homeLng)
+                        uiEvents.emit("Synced common Home coordinates from cloud group!")
+                    }
                 }
-                if (!isWorkCalibrated() && payload.isWorkCalibrated && payload.workLat != 0.0 && payload.workLng != 0.0) {
-                    setWorkCalibrated(payload.workLat, payload.workLng)
-                    uiEvents.emit("Synced common Work coordinates from cloud group!")
+                if (payload.isWorkCalibrated && payload.workLat != 0.0 && payload.workLng != 0.0) {
+                    val currentWorkLat = getWorkLat()
+                    val currentWorkLng = getWorkLng()
+                    val distDiff = Math.hypot((payload.workLng - currentWorkLng) * 111.0, (payload.workLat - currentWorkLat) * 111.0)
+                    if (!isWorkCalibrated() || distDiff > 0.03) {
+                        setWorkCalibrated(payload.workLat, payload.workLng)
+                        uiEvents.emit("Synced common Work coordinates from cloud group!")
+                    }
                 }
 
                 val updatedMembers = payload.members.toMutableMap()
                 val cleanMyName = myName.lowercase().trim()
                 val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
 
-                // Clean up duplicates / stale devices for this member's name (inactive > 5 minutes)
+                // Clean up old duplicate entries for THIS device UUID only.
+                // Also purge genuinely unknown/unnamed devices inactive > 7 days.
+                // NEVER auto-purge known family members (Isabel, Annette, etc.) — they
+                // may simply have a flat battery or lost signal temporarily.
+                val knownFamilyKeywords = listOf("isabel", "eloise", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother")
+                val staleThresholdMs = 7 * 24 * 3600 * 1000L // 7 days before considering a device truly gone
+                val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
                 val keysToRemove = updatedMembers.filter { entry ->
                     val entryId = entry.key
                     val entryName = entry.value.name.lowercase().trim()
-                    val entryCleanNameNoRole = entryName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
-                    val isStale = (System.currentTimeMillis() - entry.value.lastActive) > 5 * 60 * 1000L
-                    
-                    entryId != myCloudId && isStale && (
-                        entryCleanNameNoRole == myCleanNameNoRole ||
-                        (myCleanNameNoRole.contains("louis") && entryCleanNameNoRole.contains("louis")) ||
-                        (myCleanNameNoRole.contains("dad") && entryCleanNameNoRole.contains("dad")) ||
-                        (myCleanNameNoRole.contains("annette") && entryCleanNameNoRole.contains("annette")) ||
-                        (myCleanNameNoRole.contains("wife") && entryCleanNameNoRole.contains("wife")) ||
-                        (myCleanNameNoRole.contains("isabel") && entryCleanNameNoRole.contains("isabel")) ||
-                        (myCleanNameNoRole.contains("eloise") && entryCleanNameNoRole.contains("eloise"))
-                    )
+                    val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + myDeviceUUID.value)
+                    val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_$entryId", false)
+                    val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) }
+                    // Only purge stale entries that are NOT known family members
+                    val isStaleUnknown = !isKnownFamily &&
+                        (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
+                    isMyOldDeviceKey || isExplicitlyDeleted || isStaleUnknown
                 }.keys
                 for (k in keysToRemove) {
                     updatedMembers.remove(k)
@@ -337,15 +367,10 @@ class CloudSyncManager(
             localMockCloudData[token] = payloadJson
 
             val existingLocal = repository.getFamilyMembersOnce()
-            val cleanMyName = myName.lowercase().trim()
-            val isLouisOrDad = cleanMyName.contains("louis") || cleanMyName.contains("dad")
+            // Clean up any legacy mock members, but never delete actual family devices!
             for (localM in existingLocal) {
-                if (localM.id != "me" && localM.id != myCloudId) {
-                    val cleanLocalName = localM.name.lowercase().trim()
-                    if (cleanLocalName == cleanMyName || 
-                        (isLouisOrDad && (cleanLocalName.contains("louis") || cleanLocalName.contains("dad")))) {
-                        repository.deleteMember(localM)
-                    }
+                if (localM.id.startsWith("mock_")) {
+                    repository.deleteMember(localM)
                 }
             }
 
@@ -356,14 +381,10 @@ class CloudSyncManager(
                 if (cloudM.localIp.isNotBlank()) {
                     com.example.data.RoomAudioStreamManager.registerMemberIp(cloudM.id, cloudM.localIp, cloudM.name)
                 }
-                if (cloudM.id == myCloudId) continue
-                val cleanCloudName = cloudM.name.lowercase().trim()
-                if (cleanCloudName == cleanMyName || 
-                    (cleanMyName.contains("louis") && cleanCloudName.contains("louis")) ||
-                    (cleanMyName.contains("dad") && cleanCloudName.contains("dad"))) {
-                    continue
-                }
+                // Do not ingest self device (already tracked locally with GPS as "me")
+                if (cloudM.id == myCloudId || cloudM.id.endsWith("_" + myDeviceUUID.value)) continue
 
+                val cleanCloudName = cloudM.name.lowercase().trim()
                 val cleanKey = cleanCloudName
                     .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                     .trim()
@@ -379,7 +400,7 @@ class CloudSyncManager(
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
 
                 val matchingByName = existingLocal.firstOrNull {
-                    it.id != "me" && it.id != cloudM.id &&
+                    it.id != "me" && it.id != cloudM.id && !it.id.startsWith("device_") &&
                     (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
                      (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
                      (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")))
@@ -388,11 +409,14 @@ class CloudSyncManager(
                 val contactsPrefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
 
                 val filesDir = application.filesDir
+                // Fallback photos only for the three known family members — never auto-assign to unknown/new devices
+                val isKnownFamilyMember = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
+                    cleanKey.contains("dad") || cleanKey.contains("louis")
                 val fallbackPhoto = when {
                     cleanKey.contains("isabel") -> contactsPrefs.getString("photo_isabel", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780424521532.jpg").absolutePath
                     cleanKey.contains("annette") -> contactsPrefs.getString("photo_annette", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1781086356923.jpg").absolutePath
                     cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("photo_dad", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780170267190.jpg").absolutePath
-                    else -> ""
+                    else -> "" // Unknown/new device — no fallback photo; user must set one manually
                 }
 
                 val fallbackPhone = when {
@@ -412,12 +436,13 @@ class CloudSyncManager(
                     else -> ""
                 }
 
+                // Only apply fallback photo for known family members; new/unknown devices get no auto-photo
                 var resolvedPhoto = when {
                     matchingLocal?.photoPath?.isNotBlank() == true -> matchingLocal.photoPath
                     matchingByName?.photoPath?.isNotBlank() == true -> matchingByName.photoPath
                     contactsPrefs.getString("photo_$cleanKey", "")?.isNotBlank() == true -> contactsPrefs.getString("photo_$cleanKey", "")!!
                     contactsPrefs.getString("photo_${cloudM.name.lowercase().trim()}", "")?.isNotBlank() == true -> contactsPrefs.getString("photo_${cloudM.name.lowercase().trim()}", "")!!
-                    fallbackPhoto.isNotBlank() -> fallbackPhoto
+                    isKnownFamilyMember && fallbackPhoto.isNotBlank() -> fallbackPhoto
                     else -> ""
                 }
 
@@ -530,15 +555,24 @@ class CloudSyncManager(
                     }
                 }
 
-                val finalStatus = if (isMemberAtHome) "At Home (Live GPS)" else activeStatus
-                val finalSpeedMph = if (isMemberAtHome) 0.0 else resolvedSpeedMph
-                val finalComingHome = if (isMemberAtHome) false else cloudM.isComingHome
-                val finalEta = if (isMemberAtHome) 0 else cloudM.etaMinutes
+                val isMemberLocPaused = cloudM.isLocationPaused || cloudM.statusText.contains("Paused", ignoreCase = true)
+                val finalStatus = if (isMemberLocPaused) "⏸️ Paused (Home Sleep)" else if (isMemberAtHome) "At Home (Live GPS)" else activeStatus
+                val finalSpeedMph = if (isMemberAtHome || isMemberLocPaused) 0.0 else resolvedSpeedMph
+                val finalComingHome = if (isMemberAtHome || isMemberLocPaused) false else cloudM.isComingHome
+                val finalEta = if (isMemberAtHome || isMemberLocPaused) 0 else cloudM.etaMinutes
                 val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else cloudM.x
                 val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else cloudM.y
 
+                // If the user has locally renamed this member, always honour their choice over the cloud name
+                val userEditedName = contactsPrefs.getString("edited_name_${cloudM.id}", null)
+                val resolvedName = when {
+                    userEditedName?.isNotBlank() == true -> userEditedName
+                    cloudM.name.trim().equals(myName.trim(), ignoreCase = true) -> "${cloudM.name} (Other Device)"
+                    else -> cloudM.name
+                }
+
                 val mappedLocal = FamilyMember(
-                    id = cloudM.id, name = cloudM.name, avatarColorHex = cloudM.avatarColorHex,
+                    id = cloudM.id, name = resolvedName, avatarColorHex = cloudM.avatarColorHex,
                     x = finalX, y = finalY, batteryPercentage = cloudM.batteryPercentage,
                     isCharging = cloudM.isCharging, speedMph = finalSpeedMph,
                     statusText = finalStatus, isComingHome = finalComingHome,
@@ -546,22 +580,38 @@ class CloudSyncManager(
                     phoneNumber = if (matchingLocal?.phoneNumber?.isNotBlank() == true) matchingLocal.phoneNumber else resolvedPhone,
                     photoPath = if (matchingLocal?.photoPath?.isNotBlank() == true) matchingLocal.photoPath else resolvedPhoto,
                     lastActive = cloudM.lastActive,
-                    locationSince = locationSince
+                    locationSince = locationSince,
+                    isLocationPaused = isMemberLocPaused
                 )
 
                 if (matchingLocal == null) repository.insertFamilyMembers(listOf(mappedLocal))
                 else repository.updateMember(mappedLocal)
                 if (mappedLocal.x != 0.0 && mappedLocal.y != 0.0) {
                     repository.recordBreadcrumbThrottled(mappedLocal.id, mappedLocal.y, mappedLocal.x, mappedLocal.speedMph)
+                    com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(
+                        memberId = mappedLocal.id,
+                        lat = mappedLocal.y,
+                        lng = mappedLocal.x,
+                        speedMph = mappedLocal.speedMph
+                    )
                 }
             }
 
+
+
+            val knownFamilyKeywordsLocal = listOf("isabel", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother")
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
                 if (localM.id.startsWith("device_") && !newPayload.members.containsKey(localM.id)) {
-                    repository.deleteMember(localM)
+                    val localNameLower = localM.name.lowercase().trim()
+                    val isKnownFamilyLocal = knownFamilyKeywordsLocal.any { localNameLower.contains(it) }
+                    // Only remove from local DB if this is NOT a known family member — they may just be temporarily offline
+                    if (!isKnownFamilyLocal) {
+                        repository.deleteMember(localM)
+                    }
                 }
             }
+
 
             val activeOtherCount = incomingCloudMembers.count { it.id != myCloudId }
             cloudStatusText.value = if (fetchSuccess && putSuccessful) "Synced Live ($activeOtherCount connected blips)"
@@ -640,10 +690,14 @@ class CloudSyncManager(
             val updatedMembers = payload.members.toMutableMap()
             val cleanTargetName = memberName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
 
+            val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+            val isMyDeviceName = cleanTargetName == "dad" || cleanTargetName == "louis" || cleanTargetName.contains("other device") || cleanTargetName.isBlank()
+
             val keysToRemove = updatedMembers.filter { entry ->
+                if (entry.key == myCloudId || entry.key.endsWith("_" + myDeviceUUID.value)) return@filter false
                 entry.key == memberId || 
                 entry.value.id == memberId ||
-                entry.value.name.lowercase().contains(cleanTargetName)
+                (!isMyDeviceName && entry.value.name.lowercase().contains(cleanTargetName))
             }.keys
 
             for (k in keysToRemove) {
