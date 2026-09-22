@@ -390,12 +390,17 @@ class CloudSyncManager(
                     .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                     .trim()
 
-                // Check if user explicitly deleted this member locally:
-                if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_${cloudM.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
-                    continue
+                val isKnownFamily = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
+                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise")
+
+                // Check if user explicitly deleted this member locally (NEVER block known family members):
+                if (!isKnownFamily) {
+                    if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_${cloudM.id}", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
+                        continue
+                    }
                 }
 
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }

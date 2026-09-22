@@ -618,14 +618,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                     .trim()
 
-                // If user explicitly deleted this member, purge immediately from SQLite
-                if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
-                    repository.deleteMember(m)
-                    repository.clearBreadcrumbsForMember(m.id)
-                    continue
+                val isKnownFamily = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
+                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise")
+
+                // If user explicitly deleted this member, purge immediately from SQLite (NEVER purge known family)
+                if (!isKnownFamily) {
+                    if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
+                        repository.deleteMember(m)
+                        repository.clearBreadcrumbsForMember(m.id)
+                        continue
+                    }
                 }
 
                 val filesDir = getApplication<Application>().filesDir
@@ -633,6 +638,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     cleanKey.contains("isabel") -> contactsPrefs.getString("photo_isabel", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780424521532.jpg").absolutePath
                     cleanKey.contains("annette") -> contactsPrefs.getString("photo_annette", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1781086356923.jpg").absolutePath
                     cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("photo_dad", "")?.takeIf { it.isNotBlank() } ?: java.io.File(filesDir, "profile_1780170267190.jpg").absolutePath
+                    cleanKey.contains("eloise") -> contactsPrefs.getString("photo_eloise", "") ?: ""
                     else -> ""
                 }
 
@@ -640,6 +646,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     cleanKey.contains("isabel") -> contactsPrefs.getString("phone_isabel", "") ?: "+447760477416"
                     cleanKey.contains("annette") -> contactsPrefs.getString("phone_annette", "") ?: "+447803171262"
                     cleanKey.contains("dad") || cleanKey.contains("louis") -> contactsPrefs.getString("phone_dad", "") ?: "+447802436159"
+                    cleanKey.contains("eloise") -> contactsPrefs.getString("phone_eloise", "") ?: ""
                     else -> ""
                 }
 
