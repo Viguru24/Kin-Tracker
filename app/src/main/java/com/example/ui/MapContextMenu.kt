@@ -4,8 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -21,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.FamilyMember
+import com.example.data.RailwayTransitDetector
+import com.example.data.TransitMode
 import com.example.ui.theme.*
 
 /**
@@ -39,6 +43,7 @@ fun MapContextMenu(
     onTriggerSOS: () -> Unit,
     onSendReaction: (memberId: String, reaction: String) -> Unit,
     onTriggerAlarm: (String) -> Unit,
+    onToggleTracking: (String) -> Unit = {},
     onKickMember: (String) -> Unit,
     onEditMember: (FamilyMember) -> Unit,
     onDeleteMember: (FamilyMember) -> Unit
@@ -74,7 +79,12 @@ fun MapContextMenu(
                     }
                     Column {
                         Text(text = member.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text(text = member.statusText, color = TextSecondary, fontSize = 11.sp)
+                        val isMemberPaused = member.isLocationPaused || member.statusText.contains("Paused", ignoreCase = true)
+                        if (isMemberPaused) {
+                            Text(text = "⏸️ Tracking Paused (Home Sleep)", color = Color(0xFFFFB300), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text(text = member.statusText, color = TextSecondary, fontSize = 11.sp)
+                        }
                     }
                 }
 
@@ -99,7 +109,9 @@ fun MapContextMenu(
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
             ) {
                 Text(text = "Choose action for ${member.name}:", color = TextSecondary, fontSize = 13.sp)
 
@@ -129,8 +141,57 @@ fun MapContextMenu(
                     }
                 }
 
+                // Transit Mode Quick Toggle (Train / Car / Auto)
+                val currentOverride = RailwayTransitDetector.getManualOverride(member.id)
+                Button(
+                    onClick = {
+                        val nextMode = when (currentOverride) {
+                            null -> TransitMode.TRAIN
+                            TransitMode.TRAIN -> TransitMode.DRIVING
+                            TransitMode.DRIVING -> null
+                            else -> null
+                        }
+                        RailwayTransitDetector.setManualOverride(member.id, nextMode)
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = when (currentOverride) {
+                            TransitMode.TRAIN -> Color(0xFF6A1B9A)
+                            TransitMode.DRIVING -> Color(0xFFE65100)
+                            else -> SlateBorder
+                        }
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when (currentOverride) {
+                                TransitMode.TRAIN -> "🚆"
+                                TransitMode.DRIVING -> "🚗"
+                                else -> "🔄"
+                            },
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = when (currentOverride) {
+                                TransitMode.TRAIN -> "Transit: On Train (Tap to cycle)"
+                                TransitMode.DRIVING -> "Transit: In Car (Tap to cycle)"
+                                else -> "Transit: Auto-Detect (Tap to set Train/Car)"
+                            },
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
                 // WhatsApp Action
                 Button(
+
                     onClick = {
                         onDismiss()
                         onOpenWhatsApp(member)
@@ -225,6 +286,39 @@ fun MapContextMenu(
                         }
                     }
                 }
+
+                // Pause / Un-pause Device (Remove from screen temporarily until un-pause)
+                val isMemberPaused = member.isLocationPaused || member.statusText.contains("Paused", ignoreCase = true)
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onToggleTracking(member.id)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isMemberPaused) Color(0xFF2E7D32) else Color(0xFF455A64)
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (isMemberPaused) "👁️" else "⏸️", fontSize = 16.sp)
+                        Text(
+                            text = when {
+                                member.id == "me" && isMemberPaused -> "Un-pause & Show My Device on Screen"
+                                member.id == "me" -> "Pause & Remove My Device from Screen"
+                                isMemberPaused -> "Un-pause & Show ${member.name} on Screen"
+                                else -> "Pause & Remove ${member.name} from Screen"
+                            },
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
 
                 // Kick / Remove Member (Owner only)
                 if (isOwner && member.id != "me" && member.id.startsWith("device_")) {

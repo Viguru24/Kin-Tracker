@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.data.AppConfig
 import com.example.data.FamilyMember
 import com.example.data.SafeZone
 import com.example.data.ShoppingItem
@@ -50,6 +51,7 @@ import com.example.data.TransitMode
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.rememberCoroutineScope
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -75,6 +77,183 @@ import java.io.FileOutputStream
 
 
 
+data class MemberVisualState(
+    var currentGeo: GeoPoint,
+    var targetGeo: GeoPoint,
+    var speedMph: Double,
+    var bearingDeg: Double,
+    var lastTargetUpdateTime: Long,
+    var isMoving: Boolean,
+    var markerRef: Marker? = null
+)
+
+data class ClusterLayoutResult(
+    val adjustedCoordinates: Map<String, GeoPoint>,
+    val clusterAnchorPoints: Map<String, GeoPoint>,
+    val clusters: List<List<String>>
+)
+
+fun computeClusterLayout(
+    members: List<FamilyMember>,
+    safeZones: List<SafeZone>,
+    homeLat: Double,
+    homeLng: Double,
+    homeRadiusMeters: Double,
+    isWorkCalibrated: Boolean,
+    workLat: Double,
+    workLng: Double,
+    workRadiusMeters: Double
+): ClusterLayoutResult {
+    val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
+    val clusterAnchorPoints = mutableMapOf<String, GeoPoint>()
+    val clusters = mutableListOf<List<String>>()
+
+    val activeMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
+    val homeClusterMembers = mutableListOf<String>()
+    val safeZoneClusterMembers = mutableMapOf<String, MutableList<String>>()
+    val workClusterMembers = mutableListOf<String>()
+    val unassignedMembers = mutableListOf<FamilyMember>()
+
+    activeMembers.forEach { m ->
+        val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
+        } else Double.MAX_VALUE
+        val isHome = distToHome <= homeRadiusMeters || m.statusText.contains("At Home", ignoreCase = true)
+
+        val matchedZone = safeZones.firstOrNull { zone ->
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= zone.radiusMeters
+        }
+        val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workRadiusMeters
+
+        if (isHome) {
+            homeClusterMembers.add(m.id)
+        } else if (matchedZone != null) {
+            safeZoneClusterMembers.getOrPut(matchedZone.id) { mutableListOf() }.add(m.id)
+        } else if (isInsideWork) {
+            workClusterMembers.add(m.id)
+        } else {
+            unassignedMembers.add(m)
+        }
+    }
+
+    // A. Form Home Cluster
+    if (homeClusterMembers.size > 1 && homeLat != 0.0 && homeLng != 0.0) {
+        clusters.add(homeClusterMembers.sorted())
+    } else if (homeClusterMembers.size == 1) {
+        val mId = homeClusterMembers[0]
+        val member = activeMembers.first { it.id == mId }
+        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+    }
+
+    // B. Form Safe Zone Clusters
+    safeZones.forEach { zone ->
+        val zoneMembers = safeZoneClusterMembers[zone.id]
+        if (zoneMembers != null) {
+            if (zoneMembers.size > 1) {
+                clusters.add(zoneMembers.sorted())
+            } else if (zoneMembers.size == 1) {
+                val mId = zoneMembers[0]
+                val member = activeMembers.first { it.id == mId }
+                adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+            }
+        }
+    }
+
+    // C. Form Work Cluster
+    if (workClusterMembers.size > 1 && workLat != 0.0 && workLng != 0.0) {
+        clusters.add(workClusterMembers.sorted())
+    } else if (workClusterMembers.size == 1) {
+        val mId = workClusterMembers[0]
+        val member = activeMembers.first { it.id == mId }
+        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+    }
+
+    // D. Form Ad-Hoc Co-Located Clusters for members outside zones (within 40m)
+    val visited = mutableSetOf<String>()
+    for (i in unassignedMembers.indices) {
+        val m1 = unassignedMembers[i]
+        if (visited.contains(m1.id)) continue
+
+        val currentCluster = mutableListOf(m1.id)
+        visited.add(m1.id)
+
+        for (j in i + 1 until unassignedMembers.size) {
+            val m2 = unassignedMembers[j]
+            if (visited.contains(m2.id)) continue
+
+            val distM = com.example.data.GeoUtils.distanceMeters(m1.y, m1.x, m2.y, m2.x)
+            if (distM < 40.0) {
+                currentCluster.add(m2.id)
+                visited.add(m2.id)
+            }
+        }
+
+        if (currentCluster.size > 1) {
+            clusters.add(currentCluster.sorted())
+        } else {
+            val mId = currentCluster[0]
+            val member = activeMembers.first { it.id == mId }
+            adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+        }
+    }
+
+    // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor
+    for (cluster in clusters) {
+        val isHomeCluster = cluster.any { homeClusterMembers.contains(it) }
+        val matchedZone = safeZones.firstOrNull { zone ->
+            safeZoneClusterMembers[zone.id]?.any { cluster.contains(it) } == true
+        }
+        val isWorkCluster = cluster.any { workClusterMembers.contains(it) }
+
+        val anchorGeo = when {
+            isHomeCluster && homeLat != 0.0 && homeLng != 0.0 -> GeoPoint(homeLat, homeLng)
+            matchedZone != null -> GeoPoint(matchedZone.latitude, matchedZone.longitude)
+            isWorkCluster && workLat != 0.0 && workLng != 0.0 -> GeoPoint(workLat, workLng)
+            else -> {
+                var sumLat = 0.0
+                var sumLng = 0.0
+                for (mId in cluster) {
+                    val member = activeMembers.first { it.id == mId }
+                    sumLat += member.y
+                    sumLng += member.x
+                }
+                GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
+            }
+        }
+
+        val spreadRadiusMeters = when (cluster.size) {
+            2 -> 16.0
+            3 -> 20.0
+            4 -> 24.0
+            else -> maxOf(24.0, (cluster.size * 7.5))
+        }
+
+        val startAngle = when (cluster.size) {
+            2 -> -Math.PI / 2.0
+            3 -> -Math.PI / 2.0
+            4 -> -Math.PI / 4.0
+            else -> -Math.PI / 2.0
+        }
+
+        val angleStep = (2.0 * Math.PI) / cluster.size
+        val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude))
+
+        for (idx in cluster.indices) {
+            val mId = cluster[idx]
+            val angle = startAngle + (idx * angleStep)
+            val deltaLat = (spreadRadiusMeters * kotlin.math.sin(angle)) / 111139.0
+            val deltaLng = (spreadRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
+
+            val orbitGeo = GeoPoint(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
+            adjustedCoordinates[mId] = orbitGeo
+            clusterAnchorPoints[mId] = anchorGeo
+        }
+    }
+
+    return ClusterLayoutResult(adjustedCoordinates, clusterAnchorPoints, clusters)
+}
+
 @Composable
 fun RadarMap(
     members: List<FamilyMember>,
@@ -91,6 +270,7 @@ fun RadarMap(
     onUpdateMember: (FamilyMember) -> Unit = {},
     onDeleteMember: (String) -> Unit = {},
     onTriggerAlarm: (String) -> Unit = {},
+    onToggleMemberTracking: (String) -> Unit = {},
     activeRingingMembers: Set<String> = emptySet(),
     activeGroupCreatorId: String = "",
     myDeviceUUID: String = "",
@@ -113,6 +293,10 @@ fun RadarMap(
     onSelectRouteTimeFilter: (String) -> Unit = {},
     shoppingItems: List<ShoppingItem> = emptyList(),
     onOpenShoppingList: () -> Unit = {},
+    onJoinGroupWithPin: (String) -> Unit = {},
+    onCreateGroupWithPin: (String) -> Unit = {},
+    isLocationPaused: Boolean = false,
+    onToggleLocationPaused: (Boolean) -> Unit = {},
     bottomPadding: Dp = 120.dp,
     modifier: Modifier = Modifier
 ) {
@@ -155,7 +339,7 @@ fun RadarMap(
 
     var animTick by remember { mutableStateOf(0) }
     val hasMovingMembers = remember(members) {
-        members.any { it.speedMph >= 0.6 || classifyTransitMode(it.speedMph, it.statusText) != TransitMode.STATIONARY }
+        members.any { it.speedMph >= 0.6 || classifyTransitMode(it.speedMph, it.statusText, it.id) != TransitMode.STATIONARY }
     }
     LaunchedEffect(hasMovingMembers) {
         if (hasMovingMembers) {
@@ -182,61 +366,236 @@ fun RadarMap(
         }
     }
 
-    val visualCoordinates = remember { mutableStateMapOf<String, GeoPoint>() }
-    val activeAnimators = remember { mutableMapOf<String, android.animation.ValueAnimator>() }
+    val visualCoordinates = remember { java.util.concurrent.ConcurrentHashMap<String, GeoPoint>() }
+    val memberVisualStates = remember { mutableMapOf<String, MemberVisualState>() }
 
-    // Smooth coordinate & camera interpolation engine (Dead Reckoning & ValueAnimator)
-    LaunchedEffect(members) {
-        members.forEach { m ->
+    // Synchronize incoming member target updates with barrier-aware static locking
+    LaunchedEffect(members, safeZones, homeLat, homeLng, isWorkCalibrated, workLat, workLng, isLocationPaused) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val activeMembers = members.filter {
+            !(it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true))
+        }
+        val clusterLayout = computeClusterLayout(
+            members = activeMembers,
+            safeZones = safeZones,
+            homeLat = homeLat,
+            homeLng = homeLng,
+            homeRadiusMeters = homeRadiusMeters,
+            isWorkCalibrated = isWorkCalibrated,
+            workLat = workLat,
+            workLng = workLng,
+            workRadiusMeters = workRadiusMeters
+        )
+        val adjustedCoordinates = clusterLayout.adjustedCoordinates
+
+        activeMembers.forEach { m ->
             if (m.x != 0.0 && m.y != 0.0) {
-                val targetLat = m.y
-                val targetLng = m.x
-                val start = visualCoordinates[m.id]
+                val state = memberVisualStates[m.id]
+                val transit = classifyTransitMode(m.speedMph, m.statusText, m.id)
 
-                if (start == null) {
-                    visualCoordinates[m.id] = GeoPoint(targetLat, targetLng)
+                // Check barrier containment (Home, Safe Zones, Work)
+                val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
+                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
+                } else Double.MAX_VALUE
+                val isAtHome = distToHome <= homeRadiusMeters || m.statusText.contains("At Home", ignoreCase = true)
+
+                val matchedSafeZone = safeZones.firstOrNull { zone ->
+                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= zone.radiusMeters
+                }
+                val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
+                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workRadiusMeters
+
+                val isInsideBarrier = isAtHome || (matchedSafeZone != null) || isInsideWork
+
+                // Break-out condition: member must exceed barrier boundary + 20m hysteresis AND maintain speed >= 1.8 mph
+                val isBreakingOut = when {
+                    isAtHome -> distToHome > (homeRadiusMeters + 20.0) && m.speedMph >= 1.8
+                    matchedSafeZone != null -> {
+                        val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, matchedSafeZone.latitude, matchedSafeZone.longitude)
+                        d > (matchedSafeZone.radiusMeters + 20.0) && m.speedMph >= 1.8
+                    }
+                    isInsideWork -> {
+                        val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng)
+                        d > (workRadiusMeters + 20.0) && m.speedMph >= 1.8
+                    }
+                    else -> false
+                }
+
+                // If inside a barrier and not breaking out, the member is strictly STATIC!
+                val isReportedMoving = if (isInsideBarrier && !isBreakingOut) {
+                    false
                 } else {
-                    val dLat = targetLat - start.latitude
-                    val dLng = targetLng - start.longitude
-                    val distKm = kotlin.math.hypot(dLng * 111.0 * Math.cos(Math.toRadians(targetLat)), dLat * 111.0)
-                    if (distKm > 0.0002) { // Movement > 0.2 meters
-                        activeAnimators[m.id]?.cancel()
-                        val startLat = start.latitude
-                        val startLng = start.longitude
-                        val animator = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
-                            duration = 2000L
-                            interpolator = android.view.animation.LinearInterpolator()
-                            addUpdateListener { anim ->
-                                val frac = anim.animatedFraction
-                                val currentLat = startLat + dLat * frac
-                                val currentLng = startLng + dLng * frac
-                                val interpGeo = GeoPoint(currentLat, currentLng)
-                                visualCoordinates[m.id] = interpGeo
+                    m.speedMph >= 1.8 || (transit != TransitMode.STATIONARY && m.speedMph >= 1.2)
+                }
 
-                                if (m.id == selectedMemberId && isFollowingSelectedMember && !isRouteTrailEnabled) {
-                                    mapViewRef?.let { map ->
-                                        map.controller.setCenter(interpGeo)
-                                    }
-                                }
+                val assignedClusterPos = adjustedCoordinates[m.id] ?: GeoPoint(m.y, m.x)
+
+                if (state == null) {
+                    val initialGeo = if (isInsideBarrier && !isBreakingOut) assignedClusterPos else GeoPoint(m.y, m.x)
+                    memberVisualStates[m.id] = MemberVisualState(
+                        currentGeo = initialGeo,
+                        targetGeo = initialGeo,
+                        speedMph = if (isReportedMoving) m.speedMph else 0.0,
+                        bearingDeg = 0.0,
+                        lastTargetUpdateTime = now,
+                        isMoving = isReportedMoving
+                    )
+                    visualCoordinates[m.id] = initialGeo
+                } else {
+                    if (isInsideBarrier && !isBreakingOut) {
+                        // Locked static inside barrier — zero GPS jitter motion
+                        state.isMoving = false
+                        state.speedMph = 0.0
+                        state.targetGeo = assignedClusterPos
+                        val distToTarget = com.example.data.GeoUtils.distanceMeters(
+                            state.currentGeo.latitude, state.currentGeo.longitude,
+                            assignedClusterPos.latitude, assignedClusterPos.longitude
+                        )
+                        if (distToTarget < 2.0) {
+                            state.currentGeo = assignedClusterPos
+                            state.markerRef?.position = assignedClusterPos
+                        }
+                        visualCoordinates[m.id] = state.currentGeo
+                    } else {
+                        // Truly moving outside barrier
+                        val distMovedM = com.example.data.GeoUtils.distanceMeters(
+                            state.targetGeo.latitude, state.targetGeo.longitude,
+                            m.y, m.x
+                        )
+                        // Suppress micro-jitter (< 4.0m) when speed is low
+                        if (distMovedM > 4.0 || (m.speedMph >= 1.8 && distMovedM > 1.5)) {
+                            val dLat = m.y - state.currentGeo.latitude
+                            val dLng = m.x - state.currentGeo.longitude
+                            val cosLat = kotlin.math.cos(Math.toRadians(m.y))
+                            val rawBearing = Math.toDegrees(kotlin.math.atan2(dLng * cosLat, dLat))
+                            state.bearingDeg = (rawBearing + 360.0) % 360.0
+                            state.targetGeo = GeoPoint(m.y, m.x)
+                            val elapsedSec = ((now - state.lastTargetUpdateTime) / 1000.0).coerceAtLeast(0.5)
+                            state.lastTargetUpdateTime = now
+                            state.speedMph = if (m.speedMph >= 1.0) m.speedMph else (distMovedM / elapsedSec) * 2.23694
+                            state.isMoving = isReportedMoving || state.speedMph >= 1.8
+                        } else {
+                            state.isMoving = isReportedMoving
+                            if (!isReportedMoving) {
+                                state.speedMph = 0.0
                             }
                         }
-                        activeAnimators[m.id] = animator
-                        animator.start()
                     }
                 }
             }
         }
     }
 
-    val selectedMember = members.firstOrNull { it.id == selectedMemberId }
-    val selectedMemberCoord = selectedMember?.let { if (it.x != 0.0 && it.y != 0.0) Pair(it.y, it.x) else null }
+    // High-frequency (60 FPS) continuous road interpolation & dead-reckoning engine
+    LaunchedEffect(Unit) {
+        var lastFrameTime = android.os.SystemClock.uptimeMillis()
+        while (isActive) {
+            kotlinx.coroutines.delay(16) // ~60 FPS smooth motion
+            val now = android.os.SystemClock.uptimeMillis()
+            val dt = ((now - lastFrameTime) / 1000.0).coerceIn(0.005, 0.08)
+            lastFrameTime = now
 
-    // Reset follow state whenever a new member is selected
+            var anyMoved = false
+            memberVisualStates.forEach { (mId, state) ->
+                val marker = state.markerRef ?: return@forEach
+                val curLat = state.currentGeo.latitude
+                val curLng = state.currentGeo.longitude
+                val tgtLat = state.targetGeo.latitude
+                val tgtLng = state.targetGeo.longitude
+                val distToTargetM = com.example.data.GeoUtils.distanceMeters(curLat, curLng, tgtLat, tgtLng)
+
+                if (state.isMoving) {
+                    val speedMps = (state.speedMph * 0.44704).coerceAtLeast(1.2)
+                    // Catchup speed smoothly scales to ensure it tracks incoming pings without lag
+                    val catchupSpeedMps = maxOf(speedMps, distToTargetM / 1.5)
+                    val stepM = catchupSpeedMps * dt
+
+                    if (distToTargetM > stepM && distToTargetM > 0.5) {
+                        // Smoothly advance toward target
+                        val frac = (stepM / distToTargetM).coerceIn(0.0, 1.0)
+                        val nextLat = curLat + (tgtLat - curLat) * frac
+                        val nextLng = curLng + (tgtLng - curLng) * frac
+                        state.currentGeo = GeoPoint(nextLat, nextLng)
+                        marker.position = state.currentGeo
+                        visualCoordinates[mId] = state.currentGeo
+                        anyMoved = true
+                    } else {
+                        // Reached target! DEAD RECKONING EXTRAPOLATION:
+                        // Continue moving forward along road heading at current speed!
+                        val timeSinceGps = now - state.lastTargetUpdateTime
+                        if (timeSinceGps < 30_000L) { // Extrapolate for up to 30s
+                            val decay = if (timeSinceGps > 15_000L) {
+                                (1.0 - (timeSinceGps - 15_000L) / 15_000.0).coerceIn(0.2, 1.0)
+                            } else 1.0
+                            val deadStepM = speedMps * decay * dt
+                            val rad = Math.toRadians(state.bearingDeg)
+                            val dLat = (deadStepM * kotlin.math.cos(rad)) / 111000.0
+                            val dLng = (deadStepM * kotlin.math.sin(rad)) / (111000.0 * kotlin.math.cos(Math.toRadians(curLat)))
+                            val nextLat = curLat + dLat
+                            val nextLng = curLng + dLng
+                            state.currentGeo = GeoPoint(nextLat, nextLng)
+                            state.targetGeo = state.currentGeo
+                            marker.position = state.currentGeo
+                            visualCoordinates[mId] = state.currentGeo
+                            anyMoved = true
+                        } else {
+                            state.currentGeo = state.targetGeo
+                            marker.position = state.currentGeo
+                            visualCoordinates[mId] = state.currentGeo
+                            state.isMoving = false
+                            anyMoved = true
+                        }
+                    }
+                } else {
+                    // Stationary: ease gently to settled target
+                    if (distToTargetM > 0.1) {
+                        val factor = (6.0 * dt).coerceIn(0.0, 1.0)
+                        val nextLat = if (distToTargetM < 0.25) tgtLat else curLat + (tgtLat - curLat) * factor
+                        val nextLng = if (distToTargetM < 0.25) tgtLng else curLng + (tgtLng - curLng) * factor
+                        state.currentGeo = GeoPoint(nextLat, nextLng)
+                        marker.position = state.currentGeo
+                        visualCoordinates[mId] = state.currentGeo
+                        anyMoved = true
+                    }
+                }
+
+                // Smooth camera follow for selected member ONLY when moving along roads
+                val isThisMemberSelected = mId == selectedMemberId || 
+                    (selectedMemberId != null && (mId.contains(selectedMemberId, ignoreCase = true) || selectedMemberId.contains(mId, ignoreCase = true)))
+                if (isThisMemberSelected && isFollowingSelectedMember && !isRouteTrailEnabled && state.isMoving) {
+                    mapViewRef?.let { map ->
+                        map.controller.setCenter(state.currentGeo)
+                    }
+                }
+            }
+
+            if (anyMoved) {
+                mapViewRef?.postInvalidate()
+            }
+        }
+    }
+
+    val selectedMember = members.firstOrNull { 
+        it.id == selectedMemberId || 
+        (selectedMemberId != null && (
+            it.id.contains(selectedMemberId, ignoreCase = true) || 
+            selectedMemberId.contains(it.id, ignoreCase = true) || 
+            it.name.equals(selectedMemberId, ignoreCase = true)
+        ))
+    }
+
+    // Centering & Camera Animation on Member Selection change or Deselection (fit all)
     LaunchedEffect(selectedMemberId) {
-        isFollowingSelectedMember = true
-        isRouteTrailEnabled = false
-        selectedMember?.let { m ->
-            if (m.x != 0.0 && m.y != 0.0) {
+        if (selectedMemberId != null) {
+            isFollowingSelectedMember = true
+            isRouteTrailEnabled = false
+            val m = members.firstOrNull { 
+                it.id == selectedMemberId || 
+                it.id.contains(selectedMemberId, ignoreCase = true) || 
+                selectedMemberId.contains(it.id, ignoreCase = true) || 
+                it.name.equals(selectedMemberId, ignoreCase = true) 
+            }
+            if (m != null && m.x != 0.0 && m.y != 0.0) {
                 mapViewRef?.let { map ->
                     val targetGeo = visualCoordinates[m.id] ?: GeoPoint(m.y, m.x)
                     map.controller.animateTo(targetGeo)
@@ -245,20 +604,7 @@ fun RadarMap(
                     }
                 }
             }
-        }
-    }
-
-    // Continuous Live Camera Follow Mode: initial centering when selected or fitting all members
-    LaunchedEffect(selectedMemberId, selectedMemberCoord, isFollowingSelectedMember) {
-        if (selectedMember != null && selectedMemberCoord != null && isFollowingSelectedMember && !isRouteTrailEnabled) {
-            mapViewRef?.let { map ->
-                val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                if (map.zoomLevelDouble < 14.5) {
-                    map.controller.animateTo(targetGeo)
-                    map.controller.setZoom(16.0)
-                }
-            }
-        } else if (selectedMemberId == null) {
+        } else {
             // Show All Members on Map: fit all active members in view
             val validMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
             if (validMembers.isNotEmpty()) {
@@ -339,11 +685,24 @@ fun RadarMap(
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
+                    var touchDownX = 0f
+                    var touchDownY = 0f
                     // Allow panning and swiping on the Map without triggering outer container scrolling
                     setOnTouchListener { v, event ->
-                        when (event.action) {
+                        when (event.actionMasked) {
                             android.view.MotionEvent.ACTION_DOWN -> {
+                                touchDownX = event.x
+                                touchDownY = event.y
                                 v.parent?.requestDisallowInterceptTouchEvent(true)
+                            }
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                val dx = Math.abs(event.x - touchDownX)
+                                val dy = Math.abs(event.y - touchDownY)
+                                if (dx > 12f || dy > 12f) {
+                                    // User is actively panning/scrolling the map: release camera lock!
+                                    isFollowingSelectedMember = false
+                                    isCameraFollowingMe = false
+                                }
                             }
                             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                                 v.parent?.requestDisallowInterceptTouchEvent(false)
@@ -432,107 +791,21 @@ fun RadarMap(
 
 
 
-                // --- START OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
-                val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
-                val clusterAnchorPoints = mutableMapOf<String, GeoPoint>() // Maps memberId to cluster center anchor
-                val clusters = mutableListOf<MutableList<String>>()
-                val visited = mutableSetOf<String>()
-
-                val projection = mapView.projection
-                // Life360 markers are ~54dp wide. Threshold to detect co-location is 65dp in screen space (or within 45m)
-                val clusterThresholdPx = 65.0f * density
-
-                for (i in members.indices) {
-                    val m1 = members[i]
-                    if (visited.contains(m1.id)) continue
-
-                    val currentCluster = mutableListOf(m1.id)
-                    visited.add(m1.id)
-
-                    val p1 = android.graphics.Point()
-                    projection.toPixels(GeoPoint(m1.y, m1.x), p1)
-
-                    for (j in i + 1 until members.size) {
-                        val m2 = members[j]
-                        if (visited.contains(m2.id)) continue
-
-                        val p2 = android.graphics.Point()
-                        projection.toPixels(GeoPoint(m2.y, m2.x), p2)
-
-                        val dx = p1.x - p2.x
-                        val dy = p1.y - p2.y
-                        val pixelDist = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
-
-                        val distKm = kotlin.math.hypot((m1.x - m2.x) * 111.0 * Math.cos(Math.toRadians(m1.y)), (m1.y - m2.y) * 111.0)
-                        val isGeographicallyCoLocated = distKm < 0.045 // 45 meters
-
-                        if (pixelDist < clusterThresholdPx || isGeographicallyCoLocated) {
-                            currentCluster.add(m2.id)
-                            visited.add(m2.id)
-                        }
-                    }
-                    clusters.add(currentCluster)
-                }
-
-                for (cluster in clusters) {
-                    if (cluster.size == 1) {
-                        val mId = cluster[0]
-                        val member = members.first { it.id == mId }
-                        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
-                    } else {
-                        val isHomeCluster = cluster.any { mId ->
-                            val member = members.first { it.id == mId }
-                            val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                            dist < 0.06 || member.statusText.contains("At Home")
-                        }
-
-                        val anchorGeo = if (isHomeCluster && homeLat != 0.0 && homeLng != 0.0) {
-                            GeoPoint(homeLat, homeLng)
-                        } else {
-                            var sumLat = 0.0
-                            var sumLng = 0.0
-                            for (mId in cluster) {
-                                val member = members.first { it.id == mId }
-                                sumLat += member.y
-                                sumLng += member.x
-                            }
-                            GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
-                        }
-
-                        val centerPt = android.graphics.Point()
-                        projection.toPixels(anchorGeo, centerPt)
-
-                        // Optimal non-overlapping radial orbit spread distance
-                        val spreadRadiusPx = when (cluster.size) {
-                            2 -> 38.0f * density // 76dp separation
-                            3 -> 46.0f * density
-                            4 -> 54.0f * density
-                            else -> maxOf(54.0f, (cluster.size * 24.0f) / Math.PI.toFloat()) * density
-                        }
-
-                        val startAngle = when (cluster.size) {
-                            2 -> -Math.PI / 2.0
-                            3 -> -Math.PI / 2.0
-                            4 -> -Math.PI / 4.0
-                            else -> -Math.PI / 2.0
-                        }
-
-                        val angleStep = (2.0 * Math.PI) / cluster.size
-                        for (idx in cluster.indices) {
-                            val mId = cluster[idx]
-                            val angle = startAngle + (idx * angleStep)
-                            val offsetX = spreadRadiusPx * kotlin.math.cos(angle)
-                            val offsetY = spreadRadiusPx * kotlin.math.sin(angle)
-
-                            val targetX = (centerPt.x + offsetX).toInt()
-                            val targetY = (centerPt.y + offsetY).toInt()
-
-                            val geoPt = projection.fromPixels(targetX, targetY)
-                            adjustedCoordinates[mId] = GeoPoint(geoPt.latitude, geoPt.longitude)
-                            clusterAnchorPoints[mId] = anchorGeo
-                        }
-                    }
-                }
+                // --- LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
+                val layoutResult = computeClusterLayout(
+                    members = members,
+                    safeZones = safeZones,
+                    homeLat = homeLat,
+                    homeLng = homeLng,
+                    homeRadiusMeters = homeRadiusMeters,
+                    isWorkCalibrated = isWorkCalibrated,
+                    workLat = workLat,
+                    workLng = workLng,
+                    workRadiusMeters = workRadiusMeters
+                )
+                val adjustedCoordinates = layoutResult.adjustedCoordinates
+                val clusterAnchorPoints = layoutResult.clusterAnchorPoints
+                val clusters = layoutResult.clusters
                 // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
 
                 // Draw Life360 elegant dashed leader lines from cluster anchor to each fanned-out avatar
@@ -560,8 +833,12 @@ fun RadarMap(
                     }
                 }
 
+                // Filter out paused devices — remove from screen temporarily until un-pause
+                val activeMembersOnMap = members.filter {
+                    !(it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true))
+                }
                 // Draw "me" first so other family members are drawn on top of "me" (z-order dominance)
-                val sortedMembers = members.sortedWith(Comparator { m1, m2 ->
+                val sortedMembers = activeMembersOnMap.sortedWith(Comparator { m1, m2 ->
                     when {
                         m1.id == "me" && m2.id != "me" -> -1
                         m1.id != "me" && m2.id == "me" -> 1
@@ -571,8 +848,16 @@ fun RadarMap(
 
                 // 3. Draw active family members and connect transit paths
                 sortedMembers.forEach { member ->
-                    val displayGeo = adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
-                    val trueGeo = GeoPoint(member.y, member.x)
+
+                    val visualGeo = memberVisualStates[member.id]?.currentGeo
+                    val isMemberMoving = memberVisualStates[member.id]?.isMoving == true
+                    val inCluster = adjustedCoordinates.containsKey(member.id) && clusterAnchorPoints.containsKey(member.id)
+                    val displayGeo = if (inCluster && !isMemberMoving) {
+                        adjustedCoordinates[member.id]!!
+                    } else {
+                        visualGeo ?: GeoPoint(member.y, member.x)
+                    }
+                    val trueGeo = visualGeo ?: GeoPoint(member.y, member.x)
                     val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
                     val isSelected = member.id == selectedMemberId ||
                             (selectedMemberId != null && (member.id.contains(selectedMemberId) || selectedMemberId.contains(member.id) || member.name.equals(selectedMember?.name, ignoreCase = true)))
@@ -641,7 +926,7 @@ fun RadarMap(
                                     else "now"
 
                     // Location duration badge or live movement activity badge (walking feet 👣, driving 🚗, bicycle 🚲, train 🚆)
-                    val locationDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince)
+                    val locationDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince, member.id)
 
                     val memberMarker = object : Marker(mapView) {
                         override fun showInfoWindow() {
@@ -671,6 +956,7 @@ fun RadarMap(
                         }
                     }
                     mapView.overlays.add(memberMarker)
+                    memberVisualStates[member.id]?.let { it.markerRef = memberMarker }
                 }
 
                 // Apply OpenStreetMap customizable styling options using tile sources and matrices
@@ -723,67 +1009,264 @@ fun RadarMap(
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
         var showCircleSwitcher by remember { mutableStateOf(false) }
         var showAddDeviceDialog by remember { mutableStateOf(false) }
+        var addDeviceInitialTab by remember { mutableStateOf(0) }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(top = 10.dp, start = 10.dp, end = 10.dp)
+                .padding(top = 8.dp, start = 10.dp, end = 10.dp)
                 .align(Alignment.TopCenter)
                 .zIndex(95f),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // 1. FLOATING TOP HUD ACTION BAR — Settings, Digest, Map Theme, Circle Switcher, Offline Badge (All on the same horizontal level!)
+            // 1. FLOATING TOP HUD ACTION BAR — Settings, Live/Paused Tracking Pill, Circle Switcher, Theme, Digest, Offline
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // ── LEFT: Settings Trigger Button ──
+                Surface(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clickable { onSettingsClick() }
+                        .testTag("settings_button"),
+                    color = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, SlateBorder),
+                    shadowElevation = 4.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("⚙️", fontSize = 14.sp)
+                    }
+                }
+
+                // ── CENTRE: Circle Switcher Pill ──
+                Box(contentAlignment = Alignment.TopCenter) {
+                    Surface(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .widthIn(min = 100.dp, max = 160.dp)
+                            .clickable { showCircleSwitcher = !showCircleSwitcher },
+                        color = Color(0xF0121218),
+                        shape = RoundedCornerShape(17.dp),
+                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp)
+                                .fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(text = "👥", fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = if (activeGroupPinCode.isNotBlank()) {
+                                    val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+                                    active?.groupName?.ifBlank { "Code $activeGroupPinCode" } ?: "Code $activeGroupPinCode"
+                                } else if (groupPinMappings.isNotEmpty()) {
+                                    groupPinMappings.first().groupName.ifBlank { "Family Circle" }
+                                } else "Family Circle",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(text = if (showCircleSwitcher) "▲" else "▼", color = RadarCyan, fontSize = 8.sp)
+                        }
+                    }
+
+                    // Dropdown list of circles + Add Device action
+                    if (showCircleSwitcher) {
+                        Surface(
+                            modifier = Modifier
+                                .padding(top = 40.dp)
+                                .widthIn(min = 210.dp, max = 270.dp)
+                                .zIndex(150f),
+                            color = Color(0xF8121218),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
+                            shadowElevation = 20.dp
+                        ) {
+                            Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                if (groupPinMappings.isNotEmpty()) {
+                                    groupPinMappings.forEach { circle ->
+                                        val isActive = circle.pinCode == activeGroupPinCode
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    onSwitchCircle(circle.pinCode)
+                                                    showCircleSwitcher = false
+                                                }
+                                                .background(
+                                                    if (isActive) RadarCyan.copy(alpha = 0.12f)
+                                                    else Color.Transparent
+                                                )
+                                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
+                                                    color = if (isActive) RadarCyan else Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                                Text(
+                                                    text = "Code: ${circle.pinCode}",
+                                                    color = com.example.ui.theme.TextSecondary,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            if (isActive) {
+                                                Text("●", color = RadarCyan, fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                                }
+
+                                // 👥 Join a Circle (Enter Code)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showCircleSwitcher = false
+                                            addDeviceInitialTab = 0
+                                            showAddDeviceDialog = true
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(RadarCyan.copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("👥", fontSize = 11.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Join a Circle",
+                                            color = RadarCyan,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Enter 6-character code",
+                                            color = com.example.ui.theme.TextSecondary,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+
+                                // ➕ Invite to Current Circle
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showCircleSwitcher = false
+                                            addDeviceInitialTab = 1
+                                            showAddDeviceDialog = true
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(PrimaryCosmic.copy(alpha = 0.5f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("➕", fontSize = 11.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Invite to This Circle",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Share Code ${activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE }}",
+                                            color = com.example.ui.theme.TextSecondary,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+
+                                // 🗑️ Delete from Circle
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showCircleSwitcher = false
+                                            addDeviceInitialTab = 2
+                                            showAddDeviceDialog = true
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFE53935).copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("🗑️", fontSize = 11.sp)
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Delete from Circle",
+                                            color = Color(0xFFFF5252),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Remove devices or members",
+                                            color = com.example.ui.theme.TextSecondary,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── RIGHT GROUP: Map Theme, Digest & Offline Cache ──
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Settings trigger button
-                    Surface(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable { onSettingsClick() },
-                        color = Color.White,
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, SlateBorder),
-                        shadowElevation = 6.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("⚙️", fontSize = 16.sp)
-                        }
-                    }
-
-                    // Circle Digest trigger button
-                    Surface(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable { isDigestOpen = true }
-                            .testTag("weekly_digest_button"),
-                        color = Color.White,
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, SlateBorder),
-                        shadowElevation = 6.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("📊", fontSize = 16.sp)
-                        }
-                    }
-
-                    // Dedicated Map Layer / Theme Trigger Button
+                    // Map Theme Trigger Button
                     Box {
                         Surface(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(34.dp)
                                 .clickable { showMapStyleMenu = !showMapStyleMenu },
                             color = Color.White,
                             shape = CircleShape,
                             border = BorderStroke(1.dp, SlateBorder),
-                            shadowElevation = 6.dp
+                            shadowElevation = 4.dp
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Text(
@@ -792,7 +1275,7 @@ fun RadarMap(
                                         "radar" -> "🟢"
                                         else -> "🗺️"
                                     },
-                                    fontSize = 16.sp
+                                    fontSize = 14.sp
                                 )
                             }
                         }
@@ -801,7 +1284,7 @@ fun RadarMap(
                         if (showMapStyleMenu) {
                             Surface(
                                 modifier = Modifier
-                                    .padding(top = 44.dp)
+                                    .padding(top = 40.dp)
                                     .widthIn(min = 180.dp, max = 220.dp)
                                     .zIndex(150f),
                                 color = Color(0xF5121218),
@@ -857,230 +1340,335 @@ fun RadarMap(
                             }
                         }
                     }
-                }
 
-                // ---- CENTRE: Circle Switcher Pill (Height 38dp, same level as other buttons!) ----
-                Box(contentAlignment = Alignment.TopCenter) {
+                    // Circle Digest trigger button
                     Surface(
                         modifier = Modifier
-                            .height(38.dp)
-                            .widthIn(min = 120.dp, max = 200.dp)
-                            .clickable { showCircleSwitcher = !showCircleSwitcher },
-                        color = Color(0xF0121218),
-                        shape = RoundedCornerShape(19.dp),
-                        border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
-                        shadowElevation = 8.dp
+                            .size(34.dp)
+                            .clickable { isDigestOpen = true }
+                            .testTag("weekly_digest_button"),
+                        color = Color.White,
+                        shape = CircleShape,
+                        border = BorderStroke(1.dp, SlateBorder),
+                        shadowElevation = 4.dp
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .fillMaxSize(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "👥",
-                                fontSize = 13.sp
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = if (activeGroupPinCode.isNotBlank()) "PIN $activeGroupPinCode"
-                                       else if (groupPinMappings.isNotEmpty()) groupPinMappings.first().groupName.ifBlank { "Family Circle" }
-                                       else "Family Circle",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (showCircleSwitcher) "▲" else "▼",
-                                color = RadarCyan,
-                                fontSize = 9.sp
-                            )
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text("📊", fontSize = 14.sp)
                         }
                     }
 
-                    // Dropdown list of circles + Add Device action (Floats on top of all layers with zIndex 150f)
-                    if (showCircleSwitcher) {
-                        Surface(
-                            modifier = Modifier
-                                .padding(top = 44.dp)
-                                .widthIn(min = 210.dp, max = 270.dp)
-                                .zIndex(150f),
-                            color = Color(0xF8121218),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
-                            shadowElevation = 20.dp
-                        ) {
-                            Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                                if (groupPinMappings.isNotEmpty()) {
-                                    groupPinMappings.forEach { circle ->
-                                        val isActive = circle.pinCode == activeGroupPinCode
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    onSwitchCircle(circle.pinCode)
-                                                    showCircleSwitcher = false
-                                                }
-                                                .background(
-                                                    if (isActive) RadarCyan.copy(alpha = 0.12f)
-                                                    else Color.Transparent
-                                                )
-                                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
-                                                    color = if (isActive) RadarCyan else Color.White,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-                                                )
-                                                Text(
-                                                    text = "PIN ${circle.pinCode}",
-                                                    color = com.example.ui.theme.TextSecondary,
-                                                    fontSize = 10.sp
-                                                )
-                                            }
-                                            if (isActive) {
-                                                Text("●", color = RadarCyan, fontSize = 10.sp)
-                                            }
-                                        }
-                                    }
-                                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
-                                }
-
-                                // ➕ Add Device / Member to Circle Button
-                                Row(
+                    // OFFLINE MAP CACHE STATUS
+                    var showOfflineInfoDialog by remember { mutableStateOf(false) }
+                    Surface(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clickable { showOfflineInfoDialog = true }
+                            .testTag("offline_cache_badge"),
+                        color = Color(0xE81A2F1D),
+                        shape = CircleShape,
+                        border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
+                        shadowElevation = 4.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showCircleSwitcher = false
-                                            showAddDeviceDialog = true
-                                        }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        .size(4.dp)
+                                        .background(Color(0xFF00FF87), CircleShape)
+                                )
+                                Spacer(modifier = Modifier.height(1.dp))
+                                Text("✅", fontSize = 9.sp, lineHeight = 10.sp)
+                            }
+                        }
+                    }
+
+                    if (showOfflineInfoDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showOfflineInfoDialog = false },
+                            title = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(RadarCyan.copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("➕", fontSize = 11.sp)
-                                    }
+                                    Text("🗺️", fontSize = 18.sp)
+                                    Text(
+                                        text = "Offline Map Storage Active",
+                                        color = TextPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
+                                        color = Color(0xFF00FF87),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showOfflineInfoDialog = false }) {
+                                    Text("OK", color = RadarCyan)
+                                }
+                            },
+                            containerColor = CosmicSlateCard,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                    }
+                }
+            }
+
+            // 1c. FLOATING PAUSED DEVICES BANNER (Temporarily removed from screen until un-pause)
+            val pausedMembers = members.filter {
+                it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true)
+            }
+            AnimatedVisibility(
+                visible = pausedMembers.isNotEmpty(),
+                enter = fadeIn() + slideInVertically(),
+                exit = fadeOut() + slideOutVertically()
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    color = Color(0xF21C1917),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, ActiveAmber.copy(alpha = 0.7f)),
+                    shadowElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        pausedMembers.forEach { pMember ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("⏸️", fontSize = 16.sp)
                                     Column {
                                         Text(
-                                            text = "Add Device to Circle",
-                                            color = RadarCyan,
-                                            fontSize = 12.sp,
+                                            text = "${pMember.name} is Paused",
+                                            color = ActiveAmber,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = "PIN ${activeGroupPinCode.ifBlank { "8156" }}",
+                                            text = "Temporarily removed from screen",
                                             color = com.example.ui.theme.TextSecondary,
                                             fontSize = 9.sp
                                         )
                                     }
                                 }
+                                Button(
+                                    onClick = {
+                                        if (pMember.id == "me") {
+                                            onToggleLocationPaused(false)
+                                        } else {
+                                            onToggleMemberTracking(pMember.id)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(28.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Un-pause",
+                                        color = Color.Black,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
-                }
-
-                // 1b. OFFLINE MAP CACHE STATUS — compact circle (38dp, same level!)
-                var showOfflineInfoDialog by remember { mutableStateOf(false) }
-                Surface(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clickable { showOfflineInfoDialog = true }
-                        .testTag("offline_cache_badge"),
-                    color = Color(0xE81A2F1D),
-                    shape = CircleShape,
-                    border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
-                    shadowElevation = 6.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(5.dp)
-                                    .background(Color(0xFF00FF87), CircleShape)
-                            )
-                            Spacer(modifier = Modifier.height(1.dp))
-                            Text("✅", fontSize = 10.sp, lineHeight = 11.sp)
-                        }
-                    }
-                }
-
-                if (showOfflineInfoDialog) {
-                    AlertDialog(
-                        onDismissRequest = { showOfflineInfoDialog = false },
-                        title = {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("🗺️", fontSize = 18.sp)
-                                Text(
-                                    text = "Offline Map Storage Active",
-                                    color = TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
-                                    color = Color(0xFF00FF87),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(onClick = { showOfflineInfoDialog = false }) {
-                                Text("OK", color = RadarCyan)
-                            }
-                        },
-                        containerColor = CosmicSlateCard,
-                        shape = RoundedCornerShape(16.dp)
-                    )
                 }
             }
 
-            // 2. LIVE WEATHER STATUS PILL (Floats cleanly at the top of the map below action bar)
+            // 2. LIVE MEMBER FOLLOW & ROUTE TRAIL HUD (Cleanly stacked below action bar without any overlap)
+            AnimatedVisibility(
+                visible = selectedMember != null && !pausedMembers.any { it.id == selectedMember.id },
+
+                enter = fadeIn() + slideInVertically(),
+                exit = fadeOut() + slideOutVertically()
+            ) {
+                if (selectedMember != null) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Live Follow Pill — Box with weight(1f) in RowScope, Surface fills it
+                            Box(modifier = Modifier.weight(1f)) {
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable {
+                                            isFollowingSelectedMember = true
+                                            if (selectedMember.x != 0.0 && selectedMember.y != 0.0) {
+                                                mapViewRef?.let { map ->
+                                                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                                                    map.controller.animateTo(targetGeo)
+                                                    map.controller.setZoom(16.0)
+                                                }
+                                            }
+                                        },
+                                    color = Color(0xF012121A),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.2.dp, if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300)),
+                                    shadowElevation = 8.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300), CircleShape)
+                                        )
+                                        val transitMode = classifyTransitMode(selectedMember.speedMph, selectedMember.statusText, selectedMember.id)
+                                        val transitBadge = formatTransitBadge(selectedMember.speedMph, selectedMember.statusText, selectedMember.locationSince, selectedMember.id)
+                                        if (transitMode != TransitMode.STATIONARY) {
+                                            AnimatedTransitIcon(mode = transitMode, size = 12.dp)
+                                        }
+                                        val detailsText = if (transitBadge.isNotBlank()) {
+                                            if (transitMode != TransitMode.STATIONARY) " • ${transitBadge.drop(2).trim()}" else " • $transitBadge"
+                                        } else ""
+                                        Text(
+                                            text = if (isFollowingSelectedMember) "🎯 Following ${selectedMember.name}$detailsText" else "🎯 Re-center on ${selectedMember.name}",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Surface(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .clickable { onSelectMember(null) },
+                                            color = Color(0x33FFFFFF),
+                                            shape = CircleShape
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                                Text("✕", color = Color(0xFFECEFF1), fontSize = 10.sp, fontWeight = FontWeight.Black)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Route Trail Button — compact, no weight needed
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable { isRouteTrailEnabled = !isRouteTrailEnabled },
+                                color = if (isRouteTrailEnabled) PrimaryCosmic else Color(0xF01E1E28),
+                                shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(1.dp, if (isRouteTrailEnabled) RadarCyan else SlateBorder),
+                                shadowElevation = 6.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text("🛤️", fontSize = 12.sp)
+                                    Text(
+                                        text = if (isRouteTrailEnabled) "Trail: ON" else "Trail: OFF",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Time window filter chips: Today, 7 Days, 30 Days (when trail is active)
+                        if (isRouteTrailEnabled) {
+                            Surface(
+                                color = Color(0xF0161622),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.6f)),
+                                shadowElevation = 4.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    listOf(
+                                        Pair("today", "Today"),
+                                        Pair("7days", "7 Days"),
+                                        Pair("30days", "30 Days")
+                                    ).forEach { (filterKey, label) ->
+                                        val isSelectedFilter = routeTimeFilter == filterKey
+                                        Surface(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { onSelectRouteTimeFilter(filterKey) },
+                                            color = if (isSelectedFilter) RadarCyan.copy(alpha = 0.25f) else Color.Transparent,
+                                            border = if (isSelectedFilter) BorderStroke(1.dp, RadarCyan) else null,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (isSelectedFilter) RadarCyan else TextSecondary,
+                                                fontSize = 10.sp,
+                                                fontWeight = if (isSelectedFilter) FontWeight.Bold else FontWeight.Medium,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. LIVE WEATHER STATUS PILL (Floats cleanly below action bar and follow banner)
             WeatherHudOverlay(
                 members = members,
                 selectedMemberId = selectedMemberId,
-                memberWeatherDetailed = memberWeatherDetailed,
-                modifier = Modifier.padding(top = 4.dp)
+                memberWeatherDetailed = memberWeatherDetailed
             )
 
-            // 3. SLIM SHOPPING LIST MARQUEE TICKER (Positioned cleanly below top action bar)
+            // 4. SLIM SHOPPING LIST MARQUEE TICKER (Positioned cleanly at bottom of top HUD stack)
             val activeItemsText = remember(shoppingItems) {
                 shoppingItems.filter { !it.isChecked }.joinToString("   •   ") { it.name }
             }
             if (activeItemsText.isNotBlank()) {
                 Surface(
                     modifier = Modifier
-                        .padding(top = 8.dp)
                         .fillMaxWidth(0.94f)
                         .height(34.dp)
                         .clip(RoundedCornerShape(17.dp))
@@ -1108,138 +1696,6 @@ fun RadarMap(
                                 .weight(1f)
                                 .basicMarquee(iterations = Int.MAX_VALUE)
                         )
-                    }
-                }
-            }
-        }
-
-        // 1c. FLOATING FOLLOW STATUS & ROUTE TRAIL HUD (Visible when a member is selected)
-        if (selectedMember != null) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 58.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Live Follow Pill
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable {
-                            isFollowingSelectedMember = true
-                            if (selectedMember.x != 0.0 && selectedMember.y != 0.0) {
-                                mapViewRef?.let { map ->
-                                    map.controller.animateTo(GeoPoint(selectedMember.y, selectedMember.x))
-                                    map.controller.setZoom(16.0)
-                                }
-                            }
-                        },
-                    color = Color(0xF012121A),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.2.dp, if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300)),
-                    shadowElevation = 8.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300), CircleShape)
-                        )
-                        val transitMode = classifyTransitMode(selectedMember.speedMph, selectedMember.statusText)
-                        val transitBadge = formatTransitBadge(selectedMember.speedMph, selectedMember.statusText, selectedMember.locationSince)
-                        if (transitMode != TransitMode.STATIONARY) {
-                            AnimatedTransitIcon(mode = transitMode, size = 12.dp)
-                        }
-                        val detailsText = if (transitBadge.isNotBlank()) {
-                            if (transitMode != TransitMode.STATIONARY) " • ${transitBadge.drop(2).trim()}" else " • $transitBadge"
-                        } else ""
-                        Text(
-                            text = if (isFollowingSelectedMember) "🎯 Following ${selectedMember.name}$detailsText" else "🎯 Re-center on ${selectedMember.name}",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Surface(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .clickable { onSelectMember(null) },
-                            color = Color(0x33FFFFFF),
-                            shape = CircleShape
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Text("✕", color = Color(0xFFECEFF1), fontSize = 10.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable { isRouteTrailEnabled = !isRouteTrailEnabled },
-                    color = if (isRouteTrailEnabled) PrimaryCosmic else Color(0xF01E1E28),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, if (isRouteTrailEnabled) RadarCyan else SlateBorder),
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("🛤️", fontSize = 12.sp)
-                        Text(
-                            text = if (isRouteTrailEnabled) "Route Trail: ON" else "Route Trail: OFF",
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                // Time window filter chips: Today, 7 Days, 30 Days
-                if (isRouteTrailEnabled) {
-                    Surface(
-                        color = Color(0xF0161622),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.6f)),
-                        shadowElevation = 4.dp
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(
-                                Pair("today", "Today"),
-                                Pair("7days", "7 Days"),
-                                Pair("30days", "30 Days")
-                            ).forEach { (filterKey, label) ->
-                                val isSelectedFilter = routeTimeFilter == filterKey
-                                Surface(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable { onSelectRouteTimeFilter(filterKey) },
-                                    color = if (isSelectedFilter) RadarCyan.copy(alpha = 0.25f) else Color.Transparent,
-                                    border = if (isSelectedFilter) BorderStroke(1.dp, RadarCyan) else null,
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Text(
-                                        text = label,
-                                        color = if (isSelectedFilter) RadarCyan else TextSecondary,
-                                        fontSize = 10.sp,
-                                        fontWeight = if (isSelectedFilter) FontWeight.Bold else FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -1326,6 +1782,7 @@ fun RadarMap(
                 onTriggerSOS = onTriggerSOS,
                 onSendReaction = onSendReaction,
                 onTriggerAlarm = onTriggerAlarm,
+                onToggleTracking = onToggleMemberTracking,
                 onKickMember = onKickMember,
                 onEditMember = { memberToEdit = it },
                 onDeleteMember = { memberToDelete = it }
@@ -1503,6 +1960,11 @@ fun RadarMap(
         AddDeviceDialog(
             activeGroupPinCode = activeGroupPinCode,
             activeGroupName = activeCircleName,
+            members = members,
+            onJoinGroupWithPin = onJoinGroupWithPin,
+            onCreateGroupWithPin = onCreateGroupWithPin,
+            onDeleteMemberFromCircle = { member -> onDeleteMember(member.id) },
+            initialTab = addDeviceInitialTab,
             onDismiss = { showAddDeviceDialog = false }
         )
     }

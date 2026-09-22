@@ -1,0 +1,29 @@
+{
+  "name": "kin-tracker-server",
+  "version": "2.0.0",
+  "description": "High-performance, sovereign VPS backend for Kin-Tracker family safety radar",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node test/server.test.js"
+  },
+  "keywords": [
+    "kin-tracker",
+    "life360-alternative",
+    "family-tracker",
+    "gps-radar",
+    "sovereign"
+  ],
+  "author": "Kin-Tracker Team",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {}
+}

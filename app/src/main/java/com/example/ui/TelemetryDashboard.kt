@@ -57,12 +57,13 @@ fun TelemetryDashboard(
     onDeleteMember: (String) -> Unit,
     onTriggerAlarm: (String) -> Unit = {},
     activeRingingMembers: Set<String> = emptySet(),
+    onToggleTracking: (String) -> Unit = {},
     onOpenWhatsApp: (FamilyMember) -> Unit = {},
     onTriggerSOS: () -> Unit = {},
     onSendReaction: (String, String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
-    homeLat: Double = 51.332308,
-    homeLng: Double = -0.117188
+    homeLat: Double = com.example.data.AppConfig.DEFAULT_HOME_LAT,
+    homeLng: Double = com.example.data.AppConfig.DEFAULT_HOME_LNG
 ) {
     var memberToEdit by remember { mutableStateOf<FamilyMember?>(null) }
     var memberToDelete by remember { mutableStateOf<FamilyMember?>(null) }
@@ -141,6 +142,7 @@ fun TelemetryDashboard(
                     onDeleteMember = { memberToDelete = it },
                     onTriggerAlarm = onTriggerAlarm,
                     isRinging = activeRingingMembers.contains(member.id) || activeRingingMembers.contains(member.name),
+                    onToggleTracking = onToggleTracking,
                     onOpenWhatsApp = onOpenWhatsApp,
                     onTriggerSOS = onTriggerSOS,
                     onSendReaction = onSendReaction

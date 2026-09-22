@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.AppConfig
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,10 +65,10 @@ fun CloudSyncControls(
     onSelectActiveCircle: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var tokenInput by remember { mutableStateOf(groupSyncToken) }
-    var nameInput by remember { mutableStateOf(myDeviceName) }
-    var phoneInput by remember { mutableStateOf(myDevicePhone) }
-    var selectedColorHex by remember { mutableStateOf(myDeviceColorHex) }
+    var tokenInput by remember(groupSyncToken) { mutableStateOf(groupSyncToken) }
+    var nameInput by remember(myDeviceName) { mutableStateOf(myDeviceName) }
+    var phoneInput by remember(myDevicePhone) { mutableStateOf(myDevicePhone) }
+    var selectedColorHex by remember(myDeviceColorHex) { mutableStateOf(myDeviceColorHex) }
     var selectedEmoji by remember(myDeviceEmoji) { mutableStateOf(myDeviceEmoji) }
     var expandedSetup by remember { mutableStateOf(false) }
     var showAddDeviceDialog by remember { mutableStateOf(false) }
@@ -424,16 +426,16 @@ fun CloudSyncControls(
                         ) {
                             Column {
                                 Text(
-                                    text = "ACTIVE GROUP PIN",
+                                    text = "CIRCLE INVITE CODE",
                                     color = SecondarySlate,
                                     fontSize = 8.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    text = activeGroupPinCode,
+                                    text = activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE },
                                     color = RadarCyan,
-                                    fontSize = 24.sp,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -443,11 +445,12 @@ fun CloudSyncControls(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                val currentCode = activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE }
                                 Button(
                                     onClick = {
                                         try {
-                                            clipboardManager.setText(AnnotatedString(activeGroupPinCode))
-                                            val inviteText = "Hey! I've set up Pulse Tracker so we can see each other on a live map. Download the app, tap \"Join Group with PIN\" and enter this 4-digit PIN:\n\n$activeGroupPinCode"
+                                            val inviteText = "Hey! Join our family circle on Kin-Tracker so we can stay connected on the live map.\n\n1. Download and open Kin-Tracker\n2. Tap 'Join a Circle'\n3. Enter Circle Code: $currentCode"
+                                            clipboardManager.setText(AnnotatedString(inviteText))
                                             val intent = android.content.Intent(
                                                 android.content.Intent.ACTION_VIEW,
                                                 android.net.Uri.parse("https://api.whatsapp.com/send?text=" + android.net.Uri.encode(inviteText))
@@ -455,7 +458,7 @@ fun CloudSyncControls(
                                             intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
                                             context.startActivity(intent)
                                         } catch (_: Exception) {
-                                            clipboardManager.setText(AnnotatedString(activeGroupPinCode))
+                                            clipboardManager.setText(AnnotatedString(currentCode))
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
@@ -463,7 +466,7 @@ fun CloudSyncControls(
                                     modifier = Modifier.height(34.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                 ) {
-                                    Text("💬 Share PIN", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("💬 Share Code", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 IconButton(
@@ -930,6 +933,21 @@ fun CloudSyncControls(
                         value = nameInput,
                         onValueChange = { nameInput = it },
                         label = { Text("My Device Name on Map List") },
+                        trailingIcon = {
+                            if (nameInput.trim().isNotBlank() && nameInput.trim() != myDeviceName) {
+                                IconButton(
+                                    onClick = {
+                                        onToggleCloudSync(true, tokenInput, nameInput.trim(), selectedColorHex, selectedEmoji, phoneInput)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = "Save Device Name",
+                                        tint = RadarCyan
+                                    )
+                                }
+                            }
+                        },
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()

@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  kin-tracker-server:
+    build: .
+    container_name: kin-tracker-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data

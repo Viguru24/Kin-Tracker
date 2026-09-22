@@ -161,6 +161,13 @@ class BackgroundLocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val prefs = getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+        val isPaused = prefs.getBoolean("isLocationPaused", false)
+        if (isPaused || intent?.action == "ACTION_STOP") {
+            stopForegroundServiceAndSelf()
+            return START_NOT_STICKY
+        }
+
         intent?.action?.let { action ->
             when (action) {
                 "ACTION_FOREGROUND" -> {
@@ -178,6 +185,39 @@ class BackgroundLocationService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun stopForegroundServiceAndSelf() {
+        try {
+            locationManager?.removeUpdates(getReceiverPendingIntent())
+            locationManager?.removeUpdates(directLocationListener)
+        } catch (e: Exception) {}
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {}
+        try {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            val intent = Intent(this, SyncAlarmReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                this,
+                2,
+                intent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            alarmManager?.cancel(pendingIntent)
+        } catch (e: Exception) {}
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {}
+        serviceJob.cancel()
+        stopSelf()
     }
 
     private fun getReceiverPendingIntent(): PendingIntent {
@@ -413,6 +453,13 @@ class BackgroundLocationService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        val prefs = getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+        val isPaused = prefs.getBoolean("isLocationPaused", false)
+        if (isPaused) {
+            super.onTaskRemoved(rootIntent)
+            return
+        }
+
         val restartServiceIntent = Intent(applicationContext, this.javaClass).also {
             it.setPackage(packageName)
         }
@@ -436,4 +483,28 @@ class BackgroundLocationService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    companion object {
+        fun stopService(context: Context) {
+            try {
+                val intent = Intent(context, BackgroundLocationService::class.java).apply {
+                    action = "ACTION_STOP"
+                }
+                context.startService(intent)
+            } catch (e: Exception) {}
+        }
+
+        fun startService(context: Context) {
+            try {
+                val intent = Intent(context, BackgroundLocationService::class.java).apply {
+                    action = "ACTION_BACKGROUND"
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {}
+        }
+    }
 }

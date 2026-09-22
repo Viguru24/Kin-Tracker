@@ -56,12 +56,20 @@ enum class TransitMode(val icon: String, val label: String) {
 }
 
 /**
- * Accurately determines the transit mode based on speed and explicit status text.
+ * Accurately determines the transit mode based on speed, railway corridor detection, and explicit status text.
  */
-fun classifyTransitMode(speedMph: Double, statusText: String = ""): TransitMode {
+fun classifyTransitMode(speedMph: Double, statusText: String = "", memberId: String = ""): TransitMode {
+    // 1. Check for manual user override if set
+    if (memberId.isNotBlank()) {
+        RailwayTransitDetector.getManualOverride(memberId)?.let { return it }
+    }
+
     val statusLower = statusText.lowercase()
     return when {
         statusLower.contains("train") || statusLower.contains("transit") || statusLower.contains("rail") || statusLower.contains("metro") || statusLower.contains("subway") || statusLower.contains("tube") -> {
+            TransitMode.TRAIN
+        }
+        memberId.isNotBlank() && RailwayTransitDetector.isMemberOnRailway(memberId) && speedMph >= 1.0 -> {
             TransitMode.TRAIN
         }
         statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycling") || statusLower.contains("cycle") -> {
@@ -95,8 +103,8 @@ fun classifyTransitMode(speedMph: Double, statusText: String = ""): TransitMode 
  * Formats a live badge string for map markers and member cards.
  * Shows activity emoji & speed when moving, or stationary location duration when stopped.
  */
-fun formatTransitBadge(speedMph: Double, statusText: String, locationSince: Long): String {
-    val mode = classifyTransitMode(speedMph, statusText)
+fun formatTransitBadge(speedMph: Double, statusText: String, locationSince: Long, memberId: String = ""): String {
+    val mode = classifyTransitMode(speedMph, statusText, memberId)
     return when (mode) {
         TransitMode.WALKING -> {
             if (speedMph >= 0.6) "👣 ${String.format(java.util.Locale.US, "%.1f", speedMph)} mph" else "👣 Walking"
@@ -118,3 +126,4 @@ fun formatTransitBadge(speedMph: Double, statusText: String, locationSince: Long
         }
     }
 }
+

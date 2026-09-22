@@ -20,5 +20,6 @@ data class FamilyMember(
     val phoneNumber: String = "",  // International format e.g. +447911123456
     val photoPath: String = "",    // Local file path to profile photo
     val lastActive: Long = 0L,     // Unix ms timestamp of last cloud update
-    val locationSince: Long = 0L   // Unix ms timestamp of when member arrived at current location
+    val locationSince: Long = 0L,  // Unix ms timestamp of when member arrived at current location
+    val isLocationPaused: Boolean = false
 )

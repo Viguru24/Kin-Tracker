@@ -179,6 +179,11 @@ class MainActivity : ComponentActivity() {
 
             checkBatteryOptimization()
 
+            if (viewModel.isLocationPaused.value) {
+                stopLocationTracking()
+                return
+            }
+
             val isGpsEnabled = try {
                 if (hasFine) {
                     locationManager?.isProviderEnabled(LocationManager.GPS_PROVIDER) ?: false
@@ -264,13 +269,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun stopLocationTracking() {
+        try {
+            locationManager?.removeUpdates(locationListener)
+        } catch (e: Exception) {}
+        try {
+            val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java).apply {
+                action = "ACTION_STOP"
+            }
+            startService(serviceIntent)
+        } catch (e: Exception) {}
+    }
+
+    private fun resumeLocationTracking() {
+        if (!viewModel.isLocationPaused.value) {
+            startLocationUpdates()
+        }
+    }
+
     override fun onStart() {
         super.onStart()
-        checkAndRequestLocationPermissions()
+        if (!viewModel.isLocationPaused.value) {
+            checkAndRequestLocationPermissions()
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        if (viewModel.isLocationPaused.value) return
         try {
             val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java).apply {
                 action = "ACTION_FOREGROUND"
@@ -285,6 +311,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
+        if (viewModel.isLocationPaused.value) return
         try {
             val serviceIntent = Intent(this, com.example.data.BackgroundLocationService::class.java).apply {
                 action = "ACTION_BACKGROUND"
@@ -367,6 +394,16 @@ class MainActivity : ComponentActivity() {
             com.example.data.HeartbeatManager.sendDailyHeartbeatIfDue(applicationContext)
         }
 
+        lifecycleScope.launch {
+            viewModel.isLocationPaused.collect { isPaused ->
+                if (isPaused) {
+                    stopLocationTracking()
+                } else {
+                    resumeLocationTracking()
+                }
+            }
+        }
+
         setContent {
             MyApplicationTheme {
                 val hasOnboarded by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
@@ -426,6 +463,7 @@ fun MainScreen(
     val activeRingingMembers by viewModel.activeRingingMembers.collectAsStateWithLifecycle()
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsStateWithLifecycle()
+    val isLocationPaused by viewModel.isLocationPaused.collectAsStateWithLifecycle()
     val groupSyncToken by viewModel.groupSyncToken.collectAsStateWithLifecycle()
     val myDeviceName by viewModel.myDeviceName.collectAsStateWithLifecycle()
     val myDeviceColor by viewModel.myDeviceColor.collectAsStateWithLifecycle()
@@ -612,6 +650,7 @@ fun MainScreen(
             onUpdateMember = { viewModel.updateFamilyMember(it) },
             onDeleteMember = { viewModel.deleteFamilyMember(it) },
             onTriggerAlarm = { viewModel.toggleFindMyPhone(it) },
+            onToggleMemberTracking = { viewModel.toggleMemberTracking(it) },
             activeRingingMembers = activeRingingMembers,
             activeGroupCreatorId = activeGroupCreatorId,
             myDeviceUUID = myDeviceUUID,
@@ -634,6 +673,10 @@ fun MainScreen(
             onSelectRouteTimeFilter = { filter -> viewModel.setRouteTimeFilter(filter) },
             shoppingItems = shoppingItems,
             onOpenShoppingList = { isShoppingListPopupOpen = true },
+            onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+            onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
+            isLocationPaused = isLocationPaused,
+            onToggleLocationPaused = { viewModel.toggleLocationPaused(it) },
             bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
@@ -764,8 +807,8 @@ fun MainScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Text("➕", fontSize = 11.sp)
-                                    Text("Add Device", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("👥", fontSize = 11.sp)
+                                    Text("Circles & Devices", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -912,109 +955,58 @@ fun MainScreen(
                             .verticalScroll(settingsScrollState),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        CloudSyncControls(
-                            isCloudSyncEnabled = isCloudSyncEnabled,
-                            groupSyncToken = groupSyncToken,
+                        SettingsHub(
                             myDeviceName = myDeviceName,
                             myDeviceColorHex = myDeviceColor,
                             myDeviceEmoji = myDeviceEmoji,
                             myDevicePhone = myDevicePhone,
-                            cloudStatusText = cloudStatusText,
-                            onToggleCloudSync = { enabled, token, name, color, emoji, phone ->
-                                viewModel.toggleCloudSync(enabled, token, name, color, emoji, phone)
+                            onUpdateProfile = { name, color, emoji, phone ->
+                                viewModel.toggleCloudSync(isCloudSyncEnabled, groupSyncToken, name, color, emoji, phone)
                             },
-                            onGenerateGroupKey = { viewModel.generateNewGroupKey() },
-                            isUserSignedIn = isUserSignedIn,
-                            userDisplayName = userDisplayName,
-                            userEmail = userEmail,
-                            onSignIn = { name, email -> viewModel.signInUser(name, email) },
-                            onSignOut = { viewModel.signOutUser() },
                             ghostModeExpiryTime = ghostModeExpiryTime,
                             onToggleGhostMode = { enabled -> viewModel.toggleGhostMode(enabled) },
-                            groupPinMappings = groupPinMappings,
                             activeGroupPinCode = activeGroupPinCode,
-                            onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
-                            onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
-                            onDeleteGroupPinFromHistory = { mapping -> viewModel.deleteGroupPinFromHistory(mapping) },
+                            groupPinMappings = groupPinMappings,
                             members = members,
-                            activeGroupCreatorId = activeGroupCreatorId,
                             myDeviceUUID = myDeviceUUID,
+                            activeGroupCreatorId = activeGroupCreatorId,
+                            onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+                            onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
+                            onDeleteGroupPinFromHistory = { mapping -> viewModel.deleteGroupPinFromHistory(mapping) },
                             onKickMember = { memberId -> viewModel.kickGroupMember(memberId) },
                             onUpdateActiveGroupSettings = { newName, newPin -> viewModel.updateActiveGroupSettings(newName, newPin) },
-                            onSelectActiveCircle = { pin -> viewModel.selectActiveCircle(pin) }
-                        )
-
-                        SettingsControls(
-                            onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
+                            onSelectActiveCircle = { pin -> viewModel.selectActiveCircle(pin) },
+                            onOpenAddDevice = { showAddDeviceDialog = true },
                             homeLat = homeLat,
                             homeLng = homeLng,
                             homeRadiusMeters = homeRadiusMeters,
                             onUpdateHomeRadius = { viewModel.updateHomeRadius(it) },
-                            onCalibrateWork = { viewModel.setWorkToCurrentLocation() },
-                            onClearWork = { viewModel.clearWorkLocation() },
+                            onCalibrateHome = { viewModel.setHomeToCurrentLocation() },
                             workLat = workLat,
                             workLng = workLng,
                             isWorkCalibrated = isWorkCalibrated,
                             workRadiusMeters = workRadiusMeters,
                             onUpdateWorkRadius = { viewModel.updateWorkRadius(it) },
+                            onCalibrateWork = { viewModel.setWorkToCurrentLocation() },
+                            onClearWork = { viewModel.clearWorkLocation() },
                             isDepartureAlertsEnabled = isDepartureAlertsEnabled,
                             onToggleDepartureAlerts = { viewModel.toggleDepartureAlerts(it) },
                             isVoiceAnnouncementsEnabled = isVoiceAnnouncementsEnabled,
                             onToggleVoiceAnnouncements = { viewModel.toggleVoiceAnnouncements(it) },
                             proximityAlertDistanceMeters = proximityAlertDistanceMeters,
-                            onUpdateProximityAlertDistance = { viewModel.updateProximityAlertDistance(it) }
+                            onUpdateProximityAlertDistance = { viewModel.updateProximityAlertDistance(it) },
+                            isLocationPaused = isLocationPaused,
+                            onToggleLocationPaused = { viewModel.toggleLocationPaused(it) },
+                            isCloudSyncEnabled = isCloudSyncEnabled,
+                            groupSyncToken = groupSyncToken,
+                            cloudStatusText = cloudStatusText,
+                            onToggleCloudSync = { enabled ->
+                                viewModel.toggleCloudSync(enabled, groupSyncToken, myDeviceName, myDeviceColor, myDeviceEmoji, myDevicePhone)
+                            },
+                            activityLogs = logs,
+                            onClearLogs = { viewModel.clearLogHistory() },
+                            onOpenFeedback = { isFeedbackOpen = true }
                         )
-
-                        RoomAudioMonitorControls(members = members)
-
-                        ShoppingListControls(
-                            shoppingItems = shoppingItems,
-                            familyMembers = members,
-                            onAddItem = { name, memberId, memberName -> viewModel.addShoppingItem(name, memberId, memberName) },
-                            onToggleItem = { item -> viewModel.toggleShoppingItem(item) },
-                            onDeleteItem = { item -> viewModel.deleteShoppingItem(item) }
-                        )
-
-                        TimelineLogs(
-                            logs = logs,
-                            onClearLogs = { viewModel.clearLogHistory() }
-                        )
-
-
-                        Button(
-                            onClick = { isFeedbackOpen = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E6FF2)),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp)
-                        ) {
-                            Text("💬 Send Feedback & Suggestions", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 16.dp, bottom = 32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Pulse Tracker Telemetry Version v2.5 - Secure Client-Side SQL Database",
-                                    color = SecondarySlate.copy(alpha = 0.5f),
-                                    fontSize = 8.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "Encrypted Family Location Service. No central server location tracking.",
-                                    color = SecondarySlate.copy(alpha = 0.4f),
-                                    fontSize = 8.sp
-                                )
-                            }
-                        }
                     }
                 }
             }
@@ -1035,6 +1027,10 @@ fun MainScreen(
             com.example.ui.AddDeviceDialog(
                 activeGroupPinCode = activeGroupPinCode,
                 activeGroupName = activeCircleName,
+                members = members,
+                onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+                onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
+                onDeleteMemberFromCircle = { member -> viewModel.deleteFamilyMember(member.id) },
                 onDismiss = { showAddDeviceDialog = false }
             )
         }

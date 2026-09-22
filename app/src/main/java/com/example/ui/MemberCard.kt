@@ -34,6 +34,7 @@ import com.example.data.formatExactTime
 import com.example.data.formatTransitBadge
 import com.example.data.classifyTransitMode
 import com.example.data.TransitMode
+import com.example.data.RailwayTransitDetector
 import com.example.data.RoomAudioStreamManager
 import com.example.ui.theme.*
 import java.io.File
@@ -54,6 +55,7 @@ fun MemberCard(
     onDeleteMember: (FamilyMember) -> Unit,
     onTriggerAlarm: (String) -> Unit,
     isRinging: Boolean = false,
+    onToggleTracking: (String) -> Unit = {},
     onOpenWhatsApp: (FamilyMember) -> Unit,
     onTriggerSOS: () -> Unit,
     onSendReaction: (String, String) -> Unit
@@ -325,23 +327,34 @@ fun MemberCard(
                         )
                     }
 
-                    val transitMode = classifyTransitMode(member.speedMph, member.statusText)
-                    val transportInfo = getTransportInfo(member.speedMph, member.statusText)
+                    val transitMode = classifyTransitMode(member.speedMph, member.statusText, member.id)
+                    val transportInfo = getTransportInfo(member.speedMph, member.statusText, member.id)
+                    val manualOverride = RailwayTransitDetector.getManualOverride(member.id)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .background(transportInfo.color.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                            .clickable {
+                                val nextMode = when (manualOverride) {
+                                    null -> if (transitMode == TransitMode.TRAIN) TransitMode.DRIVING else TransitMode.TRAIN
+                                    TransitMode.TRAIN -> TransitMode.DRIVING
+                                    TransitMode.DRIVING -> null
+                                    else -> null
+                                }
+                                RailwayTransitDetector.setManualOverride(member.id, nextMode)
+                            }
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         AnimatedTransitIcon(mode = transitMode, size = 13.dp)
                         Text(
-                            text = if (member.speedMph >= 0.6) "${String.format(java.util.Locale.US, "%.1f", member.speedMph)} mph (${transportInfo.label})" else "Stationary",
+                            text = if (member.speedMph >= 0.6) "${String.format(java.util.Locale.US, "%.1f", member.speedMph)} mph (${transportInfo.label}${if (manualOverride != null) " • set" else ""})" else "Stationary",
                             color = transportInfo.color,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
+
 
                     val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
                     val isAtHome = dist <= 0.12 || member.statusText.contains("At Home", ignoreCase = true) || member.statusText.contains("at Home")
@@ -511,10 +524,63 @@ fun MemberCard(
                                 }
                             }
                         }
+
+                        // Transit Mode Quick Selector (Auto / Train / Car)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Transit:", fontSize = 10.sp, color = SecondarySlate, fontWeight = FontWeight.SemiBold)
+                            val currentOverride = RailwayTransitDetector.getManualOverride(member.id)
+
+                            FilterChip(
+                                selected = currentOverride == null,
+                                onClick = { RailwayTransitDetector.setManualOverride(member.id, null) },
+                                label = { Text("🔄 Auto", fontSize = 9.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = PrimaryCosmic,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.height(26.dp)
+                            )
+                            FilterChip(
+                                selected = currentOverride == TransitMode.TRAIN,
+                                onClick = {
+                                    RailwayTransitDetector.setManualOverride(
+                                        member.id,
+                                        if (currentOverride == TransitMode.TRAIN) null else TransitMode.TRAIN
+                                    )
+                                },
+                                label = { Text("🚆 On Train", fontSize = 9.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFAB47BC),
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.height(26.dp)
+                            )
+                            FilterChip(
+                                selected = currentOverride == TransitMode.DRIVING,
+                                onClick = {
+                                    RailwayTransitDetector.setManualOverride(
+                                        member.id,
+                                        if (currentOverride == TransitMode.DRIVING) null else TransitMode.DRIVING
+                                    )
+                                },
+                                label = { Text("🚗 In Car", fontSize = 9.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = ActiveAmber,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.height(26.dp)
+                            )
+                        }
                     }
                 }
             }
         }
+
 
         DropdownMenu(
             expanded = showContextMenu,
@@ -623,6 +689,29 @@ fun MemberCard(
                     onSendReaction(member.id, "Slow down 🐢")
                 }
             )
+            val isMemberPaused = member.isLocationPaused || member.statusText.contains("Paused", ignoreCase = true)
+            HorizontalDivider(color = DividerGray)
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(if (isMemberPaused) "👁️" else "⏸️", fontSize = 14.sp)
+                        Text(
+                            text = if (isMemberPaused) "Un-pause & Show on Screen" else "Pause & Remove from Screen",
+                            color = if (isMemberPaused) Color(0xFF00FF87) else TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                onClick = {
+                    showContextMenu = false
+                    onToggleTracking(member.id)
+                }
+            )
+
             if (member.id != "me") {
                 val isRingingNow = isRinging || member.statusText == "🚨 ALARM"
                 HorizontalDivider(color = DividerGray)
@@ -687,8 +776,8 @@ data class TransportDisplayInfo(
 )
 
 @Composable
-fun getTransportInfo(speedMph: Double, statusText: String): TransportDisplayInfo {
-    val mode = classifyTransitMode(speedMph, statusText)
+fun getTransportInfo(speedMph: Double, statusText: String, memberId: String = ""): TransportDisplayInfo {
+    val mode = classifyTransitMode(speedMph, statusText, memberId)
     return when (mode) {
         TransitMode.WALKING -> TransportDisplayInfo("Walking", "👣", Icons.AutoMirrored.Filled.DirectionsWalk, GlowingEmerald)
         TransitMode.CYCLING -> TransportDisplayInfo("Cycling", "🚲", Icons.AutoMirrored.Filled.DirectionsBike, RadarCyan)
@@ -697,6 +786,7 @@ fun getTransportInfo(speedMph: Double, statusText: String): TransportDisplayInfo
         TransitMode.STATIONARY -> TransportDisplayInfo("Stationary", "📍", Icons.Filled.Person, SecondarySlate)
     }
 }
+
 
 @Composable
 fun AnimatedTransitIcon(

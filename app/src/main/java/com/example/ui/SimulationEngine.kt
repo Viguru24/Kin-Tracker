@@ -25,6 +25,7 @@ class SimulationEngine(
     private var simulationJob: Job? = null
     private var simulatedWifeJob: Job? = null
     private var simulatedWifeAngle = 0.0
+    private val simulatedHeadings = java.util.concurrent.ConcurrentHashMap<String, Double>()
     private val triggeredApproachingHomeAlerts = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     fun start() {
@@ -120,11 +121,20 @@ class SimulationEngine(
                         val distanceKm = distanceInDegrees * 111.0
                         
                         if (distanceKm > 0.05) {
-                            val deltaX = Random.nextDouble(-0.0001, 0.0001)
-                            val deltaY = Random.nextDouble(-0.0001, 0.0001)
-                            newX = (newX + deltaX).coerceIn(homeLng - 0.08, homeLng + 0.08)
-                            newY = (newY + deltaY).coerceIn(homeLat - 0.08, homeLat + 0.08)
-                            newSpeed = (member.speedMph + Random.nextDouble(-0.8, 0.8)).coerceIn(1.0, 8.0)
+                            val curAngle = simulatedHeadings.getOrPut(member.id) { Random.nextDouble(0.0, 2.0 * Math.PI) }
+                            // Gentle natural road curvature (steering ±2 degrees)
+                            var nextAngle = curAngle + Random.nextDouble(-0.04, 0.04)
+                            // If approaching bounding boundary, gently steer back toward center
+                            if (newX < homeLng - 0.06 || newX > homeLng + 0.06 || newY < homeLat - 0.06 || newY > homeLat + 0.06) {
+                                nextAngle = kotlin.math.atan2(homeLat - newY, (homeLng - newX) * kotlin.math.cos(Math.toRadians(homeLat)))
+                            }
+                            simulatedHeadings[member.id] = nextAngle
+                            val stepDeg = 0.00008 // ~8 meters per second (~18 mph)
+                            val deltaLng = stepDeg * kotlin.math.cos(nextAngle) / kotlin.math.cos(Math.toRadians(homeLat))
+                            val deltaLat = stepDeg * kotlin.math.sin(nextAngle)
+                            newX = (newX + deltaLng).coerceIn(homeLng - 0.08, homeLng + 0.08)
+                            newY = (newY + deltaLat).coerceIn(homeLat - 0.08, homeLat + 0.08)
+                            newSpeed = (member.speedMph + Random.nextDouble(-0.4, 0.4)).coerceIn(12.0, 32.0)
                             updated = true
                         } else {
                             if (newSpeed > 0.0) {

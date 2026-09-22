@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +52,8 @@ fun SettingsControls(
     onToggleVoiceAnnouncements: (Boolean) -> Unit = {},
     proximityAlertDistanceMeters: Int = 400,
     onUpdateProximityAlertDistance: (Int) -> Unit = {},
+    isLocationPaused: Boolean = false,
+    onToggleLocationPaused: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -61,6 +64,76 @@ fun SettingsControls(
         border = BorderStroke(1.dp, SlateBorder)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+
+            // ── Device Location Tracking Master Toggle (Battery Saver for Tablets) ──
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = if (isLocationPaused) ActiveAmber.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.03f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(
+                    1.dp,
+                    if (isLocationPaused) ActiveAmber.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.08f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    ) {
+                        Text(if (isLocationPaused) "⏸️" else "🛰️", fontSize = 22.sp)
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Device Location Tracking",
+                                    color = TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isLocationPaused) "PAUSED" else "ACTIVE",
+                                    color = if (isLocationPaused) ActiveAmber else Color(0xFF00E676),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(
+                                text = if (isLocationPaused)
+                                    "GPS & background services stopped • 0% battery drain (Home mode)"
+                                else
+                                    "Broadcasting live GPS coordinates to family circle",
+                                color = if (isLocationPaused) ActiveAmber else SecondarySlate,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = !isLocationPaused,
+                        onCheckedChange = { isTracking -> onToggleLocationPaused(!isTracking) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF00E676),
+                            uncheckedThumbColor = ActiveAmber,
+                            uncheckedTrackColor = SlateBorder
+                        ),
+                        modifier = Modifier.testTag("location_tracking_switch")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // ── Building Departure Warnings Master Toggle ──────────────────────────
             Row(

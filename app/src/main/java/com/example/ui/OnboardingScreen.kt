@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.AppConfig
 import com.example.ui.theme.*
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
@@ -456,14 +457,14 @@ fun OnboardingScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Text(
-                                    "Your 4-Digit PIN Code",
+                                    "Your Circle Invite Code",
                                     color = SecondarySlate,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Text(
-                                    activeGroupPinCode.ifBlank { "----" },
+                                    activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE },
                                     color = Color(0xFFB39DDB),
                                     fontSize = 32.sp,
                                     fontWeight = FontWeight.Black,
@@ -474,18 +475,19 @@ fun OnboardingScreen(
                         }
 
                         // Share via WhatsApp
+                        val onboardCode = activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE }
                         Button(
                             onClick = {
                                 try {
-                                    clipboard.setText(AnnotatedString(activeGroupPinCode))
-                                    val inviteText = "Hey! I've set up Pulse Tracker so we can see each other on a live map. Download the app, tap \"Join a Family Circle\" and enter this 4-digit PIN:\n\n$activeGroupPinCode"
+                                    val inviteText = "Hey! Join our family circle on Kin-Tracker so we can stay connected on the live map.\n\n1. Download and open Kin-Tracker\n2. Tap 'Join a Circle'\n3. Enter Circle Code: $onboardCode"
+                                    clipboard.setText(AnnotatedString(inviteText))
                                     val intent = android.content.Intent(
                                         android.content.Intent.ACTION_VIEW,
                                         android.net.Uri.parse("https://api.whatsapp.com/send?text=" + android.net.Uri.encode(inviteText))
                                     )
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
-                                    clipboard.setText(AnnotatedString(activeGroupPinCode))
+                                    clipboard.setText(AnnotatedString(onboardCode))
                                 }
                             },
                             shape = RoundedCornerShape(14.dp),
@@ -497,18 +499,18 @@ fun OnboardingScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("💬", fontSize = 16.sp)
-                                Text("Share PIN via WhatsApp", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Share Code via WhatsApp", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
 
                         // Copy only
                         OutlinedButton(
-                            onClick = { clipboard.setText(AnnotatedString(activeGroupPinCode)) },
+                            onClick = { clipboard.setText(AnnotatedString(onboardCode)) },
                             shape = RoundedCornerShape(14.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, SlateBorder),
                             modifier = Modifier.fillMaxWidth().height(44.dp)
                         ) {
-                            Text("📋  Copy PIN Only", fontSize = 13.sp, color = SecondarySlate)
+                            Text("📋  Copy Code Only", fontSize = 13.sp, color = SecondarySlate)
                         }
 
                         Spacer(Modifier.height(8.dp))

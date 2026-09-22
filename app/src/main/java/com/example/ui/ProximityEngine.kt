@@ -74,6 +74,7 @@ class ProximityEngine(
             ).trim()
 
             // ── Case 1: Member Approaching Home Base (Trigger ONLY ONCE per journey) ──
+            val isWithMe = hasMyGps && distToMeKm in 0.0..0.25
             if (state.prevDistToHomeKm > 0.0) {
                 val deltaHome = distToHomeKm - state.prevDistToHomeKm
                 val isGettingCloserToHome = deltaHome < -0.015
@@ -84,7 +85,8 @@ class ProximityEngine(
                     state.hasAlertedApproachingHomeThisTrip = false
                 } else if (distToHomeKm <= thresholdKm && !state.hasAlertedApproachingHomeThisTrip && distToHomeKm > 0.12 && isMemberMoving && isGettingCloserToHome) {
                     // Trigger ONCE per journey with a minimum 20-minute safety latch
-                    if (now - state.lastAlertTimestamp > 20 * 60 * 1000L) {
+                    // Only alert user if user is actually at Home waiting, and member is not traveling with user!
+                    if (isMeAtHome && !isWithMe && now - state.lastAlertTimestamp > 20 * 60 * 1000L) {
                         state.hasAlertedApproachingHomeThisTrip = true
                         state.wasConfirmedAtHome = false
                         state.lastAlertTimestamp = now

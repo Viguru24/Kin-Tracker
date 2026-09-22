@@ -15,6 +15,11 @@ class SyncAlarmReceiver : BroadcastReceiver() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onReceive(context: Context, intent: Intent) {
+        val prefs = context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("isLocationPaused", false)) {
+            return
+        }
+
         val pendingResult = goAsync()
         
         scope.launch {

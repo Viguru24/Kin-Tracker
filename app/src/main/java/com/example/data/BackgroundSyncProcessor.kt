@@ -84,6 +84,10 @@ object BackgroundSyncProcessor {
             longitude = if (isAtHome) homeLng else location.longitude,
             speedMph = if (isAtHome) 0.0 else speedMph
         )
+        if (!isAtHome) {
+            RailwayTransitDetector.checkRailwayCorridorAsync("me", location.latitude, location.longitude, speedMph)
+        }
+
 
         // 3. Sync and merge in background
         backgroundCloudSync(context, repository, prefs, location, batteryPct, isCharging, speedMph, status)
@@ -153,6 +157,15 @@ object BackgroundSyncProcessor {
                 AlarmHelper.stopAlarm()
             }
 
+            val myEntry = payload?.members?.values?.firstOrNull {
+                it.id == myCloudId || it.name.trim().equals(myName.trim(), ignoreCase = true)
+            }
+            if (myEntry != null && myEntry.isLocationPaused) {
+                prefs.edit().putBoolean("is_location_paused", true).apply()
+                BackgroundLocationService.stopService(context)
+                return
+            }
+
             val prefsHomeLat = prefs.getFloat("homeLat", AppConfig.DEFAULT_HOME_LAT.toFloat()).toDouble()
             val prefsHomeLng = prefs.getFloat("homeLng", AppConfig.DEFAULT_HOME_LNG.toFloat()).toDouble()
             val xDist = (location.longitude - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat))
@@ -208,6 +221,7 @@ object BackgroundSyncProcessor {
             val ghostExpiry = prefs.getLong("ghostModeExpiryTime", 0L)
             val isGhostMode = System.currentTimeMillis() < ghostExpiry
 
+            val isLocPaused = prefs.getBoolean("is_location_paused", false)
             val myCloudMember = CloudMember(
                 id = myCloudId,
                 name = myName,
@@ -216,13 +230,14 @@ object BackgroundSyncProcessor {
                 y = if (isGhostMode) 0.0 else targetY,
                 batteryPercentage = batteryPct,
                 isCharging = isCharging,
-                speedMph = if (isGhostMode || isAtHome) 0.0 else speedMph,
-                statusText = if (isGhostMode) "Ghost Mode Active (Location Paused)" else status,
+                speedMph = if (isGhostMode || isAtHome || isLocPaused) 0.0 else speedMph,
+                statusText = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else status,
                 isComingHome = false,
                 etaMinutes = 0,
                 lastActive = lastActiveTimestamp,
                 avatarEmoji = myEmoji,
-                locationSince = resolvedLocationSince
+                locationSince = resolvedLocationSince,
+                isLocationPaused = isLocPaused
             )
 
             // 3. Sync and Merge Shopping items in background with cloud tombstones
@@ -332,19 +347,8 @@ object BackgroundSyncProcessor {
 
             val keysToRemove = updatedMembers.filter { entry ->
                 val entryId = entry.key
-                val entryName = entry.value.name.lowercase().trim()
-                val entryCleanNameNoRole = entryName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
-                val isStale = (System.currentTimeMillis() - entry.value.lastActive) > 5 * 60 * 1000L
-                
-                entryId != myCloudId && isStale && (
-                    entryCleanNameNoRole == myCleanNameNoRole ||
-                    (myCleanNameNoRole.contains("louis") && entryCleanNameNoRole.contains("louis")) ||
-                    (myCleanNameNoRole.contains("dad") && entryCleanNameNoRole.contains("dad")) ||
-                    (myCleanNameNoRole.contains("annette") && entryCleanNameNoRole.contains("annette")) ||
-                    (myCleanNameNoRole.contains("wife") && entryCleanNameNoRole.contains("wife")) ||
-                    (myCleanNameNoRole.contains("isabel") && entryCleanNameNoRole.contains("isabel")) ||
-                    (myCleanNameNoRole.contains("eloise") && entryCleanNameNoRole.contains("eloise"))
-                )
+                val isStale = (System.currentTimeMillis() - entry.value.lastActive) > 30 * 60 * 1000L
+                entryId != myCloudId && isStale && entryId.endsWith("_" + dUuid)
             }.keys
             for (k in keysToRemove) {
                 updatedMembers.remove(k)

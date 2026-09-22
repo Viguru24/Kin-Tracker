@@ -12,7 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             val isCloudSyncEnabled = prefs.getBoolean("isCloudSyncEnabled", true)
             val isLocationPaused = prefs.getBoolean("isLocationPaused", false)
 
-            if (isCloudSyncEnabled) {
+            if (isCloudSyncEnabled && !isLocationPaused) {
                 val serviceIntent = Intent(context, BackgroundLocationService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
