@@ -3,11 +3,14 @@ package com.example.data
 import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.text.format.Formatter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -317,9 +320,11 @@ object RoomAudioStreamManager {
 
     private suspend fun connectAndStream(context: Context?, hostIp: String, port: Int, memberName: String) = withContext(Dispatchers.IO) {
         var audioTrack: AudioTrack? = null
-        var audioManager: android.media.AudioManager? = null
-        var previousMode = android.media.AudioManager.MODE_NORMAL
+        var audioManager: AudioManager? = null
+        var audioFocusRequest: AudioFocusRequest? = null
         var previousSpeaker = false
+        var previousMode = AudioManager.MODE_NORMAL
+
         try {
             _statusMessage.value = "Connecting to ${memberName.substringBefore(" ")}..."
             val socket = Socket()
@@ -333,11 +338,12 @@ object RoomAudioStreamManager {
             val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
             val buffer = ByteArray(bufferSize)
 
-            // Force speaker output — USAGE_MEDIA can silently route to earpiece on many phones
-            // when there is no active media session. VOICE_COMMUNICATION + speakerphone on
-            // guarantees the audio comes through the loudspeaker every time.
+            // STREAM_MUSIC = what the hardware volume buttons control.
+            // USAGE_VOICE_COMMUNICATION maps to STREAM_VOICE_CALL which has its own
+            // separate volume level that is 0 when not in a phone call — that is why
+            // the volume HUD was not showing and nothing was audible.
             val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
 
@@ -354,14 +360,41 @@ object RoomAudioStreamManager {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
-            // Explicitly route to loudspeaker — essential for VOICE_COMMUNICATION mode
+            // Request audio focus — this registers the app as an active audio producer
+            // so Android shows the correct volume HUD when the user presses the buttons.
             if (context != null) {
-                audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-                audioManager?.let {
-                    previousMode = it.mode
-                    previousSpeaker = it.isSpeakerphoneOn
-                    it.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-                    it.isSpeakerphoneOn = true
+                audioManager = context.applicationContext
+                    .getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+                audioManager?.let { am ->
+                    previousMode = am.mode
+                    previousSpeaker = am.isSpeakerphoneOn
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                            .setAudioAttributes(audioAttributes)
+                            .setAcceptsDelayedFocusGain(false)
+                            .setOnAudioFocusChangeListener {}
+                            .build()
+                        audioFocusRequest = focusReq
+                        am.requestAudioFocus(focusReq)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+                    }
+
+                    // MODE_NORMAL + speakerphone routes STREAM_MUSIC through the loudspeaker.
+                    // Do NOT use MODE_IN_COMMUNICATION — that mode is for VoIP calls and
+                    // routes audio to the earpiece even with isSpeakerphoneOn=true on some OEMs.
+                    am.mode = AudioManager.MODE_NORMAL
+                    am.isSpeakerphoneOn = true
+
+                    // Ensure media volume is not at zero — set to at least 80% of max
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    if (curVol == 0) {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.8f).toInt(), 0)
+                    }
                 }
             }
 
@@ -372,9 +405,7 @@ object RoomAudioStreamManager {
                 val bytesRead = inputStream.read(buffer, 0, buffer.size)
                 if (bytesRead > 0) {
                     audioTrack.write(buffer, 0, bytesRead)
-
-                    val db = calculateDecibels(buffer, bytesRead)
-                    _currentDecibels.value = db
+                    _currentDecibels.value = calculateDecibels(buffer, bytesRead)
                 } else if (bytesRead < 0) {
                     break
                 }
@@ -382,20 +413,21 @@ object RoomAudioStreamManager {
         } catch (e: Exception) {
             _statusMessage.value = "Connection ended: ${e.localizedMessage ?: "Disconnected"}"
         } finally {
-            // Restore audio mode so calls and media work normally again
+            // Restore audio state so normal calls and media work afterwards
             try {
-                audioManager?.let {
-                    it.isSpeakerphoneOn = previousSpeaker
-                    it.mode = previousMode
+                audioManager?.let { am ->
+                    am.isSpeakerphoneOn = previousSpeaker
+                    am.mode = previousMode
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        am.abandonAudioFocus(null)
+                    }
                 }
             } catch (_: Exception) {}
-            try {
-                audioTrack?.stop()
-                audioTrack?.release()
-            } catch (_: Exception) {}
-            try {
-                listenerSocket?.close()
-            } catch (_: Exception) {}
+            try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
+            try { listenerSocket?.close() } catch (_: Exception) {}
             listenerSocket = null
             _isListening.value = false
             _activeListeningMemberId.value = null
