@@ -66,9 +66,126 @@ object RoomAudioStreamManager {
     private val _activeTransmittingMembers = MutableStateFlow<Set<String>>(emptySet())
     val activeTransmittingMembers = _activeTransmittingMembers.asStateFlow()
 
+    // ── Diagnostics ──────────────────────────────────────────────
+    private val _bytesReceived = MutableStateFlow(0L)
+    val bytesReceived = _bytesReceived.asStateFlow()
+
+    private val _lastError = MutableStateFlow("")
+    val lastError = _lastError.asStateFlow()
+
+    private val _diagnosticLog = MutableStateFlow<List<String>>(emptyList())
+    val diagnosticLog = _diagnosticLog.asStateFlow()
+
+    private val _isToneTestActive = MutableStateFlow(false)
+    val isToneTestActive = _isToneTestActive.asStateFlow()
+
+    private fun appendLog(msg: String) {
+        val ts = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.UK)
+            .format(java.util.Date())
+        val line = "[$ts] $msg"
+        _diagnosticLog.value = (_diagnosticLog.value + line).takeLast(20)
+    }
+
     var onTransmitterToggled: ((Boolean) -> Unit)? = null
 
     private val memberIpRegistry = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Plays a 440 Hz sine wave for 2 seconds through STREAM_MUSIC using the exact same
+     * AudioTrack configuration as the live stream. If you hear the beep, the speaker
+     * pipeline is working and the problem is network/connection. If silent, the audio
+     * routing itself is broken on this device.
+     */
+    fun playTestTone(context: Context) {
+        if (_isToneTestActive.value) return
+        _isToneTestActive.value = true
+        appendLog("TEST TONE started — 440 Hz for 2s")
+        scope.launch(Dispatchers.IO) {
+            var audioTrack: AudioTrack? = null
+            var audioManager: AudioManager? = null
+            var audioFocusRequest: AudioFocusRequest? = null
+            try {
+                val durationMs = 2000
+                val numSamples = SAMPLE_RATE * durationMs / 1000
+                val buffer = ShortArray(numSamples)
+                val freq = 440.0
+                for (i in 0 until numSamples) {
+                    buffer[i] = (Short.MAX_VALUE * kotlin.math.sin(2 * Math.PI * i * freq / SAMPLE_RATE)).toInt().toShort()
+                }
+
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+
+                val audioFormat = AudioFormat.Builder()
+                    .setSampleRate(SAMPLE_RATE)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+
+                val minBuf = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(minBuf * 2)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+
+                val am = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                audioManager = am
+                am?.let {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                            .setAudioAttributes(audioAttributes)
+                            .setOnAudioFocusChangeListener {}
+                            .build()
+                        audioFocusRequest = req
+                        it.requestAudioFocus(req)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        it.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    }
+                    val maxVol = it.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val curVol = it.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    appendLog("STREAM_MUSIC vol: $curVol / $maxVol | mode=${it.mode} | speaker=${it.isSpeakerphoneOn}")
+                    if (curVol == 0) {
+                        it.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.8f).toInt(), 0)
+                        appendLog("Volume was 0 — raised to ${(maxVol * 0.8f).toInt()}")
+                    }
+                }
+
+                appendLog("AudioTrack state=${audioTrack.state} (1=INIT OK)")
+                audioTrack.play()
+                appendLog("AudioTrack playing — writing ${buffer.size} samples")
+
+                // Write in chunks matching the real stream
+                val chunkSize = minBuf / 2
+                var offset = 0
+                while (offset < buffer.size) {
+                    val end = minOf(offset + chunkSize, buffer.size)
+                    audioTrack.write(buffer, offset, end - offset)
+                    offset = end
+                }
+                audioTrack.stop()
+                appendLog("TEST TONE complete — did you hear it?")
+            } catch (e: Exception) {
+                appendLog("TEST TONE error: ${e.message}")
+                _lastError.value = "Tone test error: ${e.message}"
+            } finally {
+                try { audioTrack?.release() } catch (_: Exception) {}
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        audioManager?.abandonAudioFocus(null)
+                    }
+                } catch (_: Exception) {}
+                _isToneTestActive.value = false
+            }
+        }
+    }
 
     fun registerMemberIp(memberId: String, ip: String, memberName: String = "") {
         if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1") {
@@ -324,12 +441,15 @@ object RoomAudioStreamManager {
         var audioFocusRequest: AudioFocusRequest? = null
         var previousSpeaker = false
         var previousMode = AudioManager.MODE_NORMAL
+        _bytesReceived.value = 0L
 
         try {
+            appendLog("Connecting to $hostIp:$port")
             _statusMessage.value = "Connecting to ${memberName.substringBefore(" ")}..."
             val socket = Socket()
             listenerSocket = socket
             socket.connect(InetSocketAddress(hostIp, port), 5000)
+            appendLog("Socket connected ✓")
 
             _isListening.value = true
             _statusMessage.value = "Listening Live to ${memberName.substringBefore(" ")}"
@@ -337,11 +457,8 @@ object RoomAudioStreamManager {
             val minBufSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_OUT, AUDIO_FORMAT)
             val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
             val buffer = ByteArray(bufferSize)
+            appendLog("Buffer size: $bufferSize bytes")
 
-            // STREAM_MUSIC = what the hardware volume buttons control.
-            // USAGE_VOICE_COMMUNICATION maps to STREAM_VOICE_CALL which has its own
-            // separate volume level that is 0 when not in a phone call — that is why
-            // the volume HUD was not showing and nothing was audible.
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -360,8 +477,8 @@ object RoomAudioStreamManager {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
-            // Request audio focus — this registers the app as an active audio producer
-            // so Android shows the correct volume HUD when the user presses the buttons.
+            appendLog("AudioTrack state=${audioTrack.state} (1=OK)")
+
             if (context != null) {
                 audioManager = context.applicationContext
                     .getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -369,6 +486,9 @@ object RoomAudioStreamManager {
                 audioManager?.let { am ->
                     previousMode = am.mode
                     previousSpeaker = am.isSpeakerphoneOn
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    appendLog("Vol: $curVol/$maxVol | mode=${am.mode} | spk=${am.isSpeakerphoneOn}")
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -377,43 +497,53 @@ object RoomAudioStreamManager {
                             .setOnAudioFocusChangeListener {}
                             .build()
                         audioFocusRequest = focusReq
-                        am.requestAudioFocus(focusReq)
+                        val result = am.requestAudioFocus(focusReq)
+                        appendLog("AudioFocus result=$result (1=GRANTED)")
                     } else {
                         @Suppress("DEPRECATION")
                         am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
                     }
 
-                    // MODE_NORMAL + speakerphone routes STREAM_MUSIC through the loudspeaker.
-                    // Do NOT use MODE_IN_COMMUNICATION — that mode is for VoIP calls and
-                    // routes audio to the earpiece even with isSpeakerphoneOn=true on some OEMs.
                     am.mode = AudioManager.MODE_NORMAL
                     am.isSpeakerphoneOn = true
+                    appendLog("Set mode=NORMAL speakerphone=true")
 
-                    // Ensure media volume is not at zero — set to at least 80% of max
-                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
                     if (curVol == 0) {
                         am.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.8f).toInt(), 0)
+                        appendLog("Volume was 0 — raised to ${(maxVol * 0.8f).toInt()}")
                     }
                 }
             }
 
             audioTrack.play()
+            appendLog("AudioTrack.play() called — reading stream...")
             val inputStream: InputStream = socket.getInputStream()
+            var totalBytes = 0L
+            var firstChunkLogged = false
 
             while (isActive && !socket.isClosed && socket.isConnected) {
                 val bytesRead = inputStream.read(buffer, 0, buffer.size)
                 if (bytesRead > 0) {
                     audioTrack.write(buffer, 0, bytesRead)
+                    totalBytes += bytesRead
+                    _bytesReceived.value = totalBytes
                     _currentDecibels.value = calculateDecibels(buffer, bytesRead)
+                    if (!firstChunkLogged) {
+                        appendLog("First chunk received: $bytesRead bytes ✓")
+                        firstChunkLogged = true
+                    }
                 } else if (bytesRead < 0) {
+                    appendLog("Stream ended (bytesRead=$bytesRead)")
                     break
                 }
             }
         } catch (e: Exception) {
-            _statusMessage.value = "Connection ended: ${e.localizedMessage ?: "Disconnected"}"
+            val msg = e.localizedMessage ?: "Unknown error"
+            appendLog("ERROR: $msg")
+            _lastError.value = msg
+            _statusMessage.value = "Connection ended: $msg"
         } finally {
-            // Restore audio state so normal calls and media work afterwards
+            appendLog("Cleaning up. Total bytes received: ${_bytesReceived.value}")
             try {
                 audioManager?.let { am ->
                     am.isSpeakerphoneOn = previousSpeaker

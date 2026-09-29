@@ -42,6 +42,10 @@ fun RoomAudioMonitorControls(
     val decibels by RoomAudioStreamManager.currentDecibels.collectAsState()
     val statusMessage by RoomAudioStreamManager.statusMessage.collectAsState()
     val activeTransmitters by RoomAudioStreamManager.activeTransmittingMembers.collectAsState()
+    val bytesReceived by RoomAudioStreamManager.bytesReceived.collectAsState()
+    val lastError by RoomAudioStreamManager.lastError.collectAsState()
+    val diagnosticLog by RoomAudioStreamManager.diagnosticLog.collectAsState()
+    val isToneTestActive by RoomAudioStreamManager.isToneTestActive.collectAsState()
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -346,6 +350,119 @@ fun RoomAudioMonitorControls(
                             uncheckedTrackColor = Color(0xFFCBD5E1)
                         )
                     )
+                }
+            }
+
+            // ─────────────────────────────────────────────────────────────
+            // 3. AUDIO DIAGNOSTICS PANEL
+            // ─────────────────────────────────────────────────────────────
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFFF0F4FF),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFFCDD6F4))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Header row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🔬 Audio Diagnostics",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1E2430)
+                        )
+                        if (isListening) {
+                            Text(
+                                text = "${bytesReceived / 1024} KB received",
+                                fontSize = 11.sp,
+                                color = if (bytesReceived > 0) Color(0xFF16A34A) else Color(0xFFDC2626),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // Test tone button — isolates speaker vs network issues
+                    Button(
+                        onClick = { RoomAudioStreamManager.playTestTone(context) },
+                        enabled = !isToneTestActive,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isToneTestActive) Color(0xFF6B7280) else Color(0xFF4F46E5)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(if (isToneTestActive) "⏳" else "🔊", fontSize = 14.sp)
+                            Column {
+                                Text(
+                                    text = if (isToneTestActive) "Playing 440 Hz tone..." else "Test Speaker (440 Hz beep)",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    text = if (isToneTestActive) "Listen — if silent, routing is broken" else "Tap to confirm speaker works independently",
+                                    color = Color.White.copy(alpha = 0.75f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Last error
+                    if (lastError.isNotBlank()) {
+                        Surface(
+                            color = Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+                        ) {
+                            Text(
+                                text = "⚠️ $lastError",
+                                fontSize = 10.sp,
+                                color = Color(0xFFDC2626),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Live log
+                    if (diagnosticLog.isNotEmpty()) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF0F172A),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                diagnosticLog.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        fontSize = 9.sp,
+                                        color = when {
+                                            line.contains("ERROR") || line.contains("error") -> Color(0xFFFC8181)
+                                            line.contains("✓") || line.contains("GRANTED") -> Color(0xFF86EFAC)
+                                            line.contains("TEST TONE") -> Color(0xFFFBBF24)
+                                            else -> Color(0xFF94A3B8)
+                                        },
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
