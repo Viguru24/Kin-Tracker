@@ -71,7 +71,11 @@ fun MemberCard(
     val isListening by RoomAudioStreamManager.isListening.collectAsState()
     val activeListeningId by RoomAudioStreamManager.activeListeningMemberId.collectAsState()
     val decibels by RoomAudioStreamManager.currentDecibels.collectAsState()
+    val activeTransmitters by RoomAudioStreamManager.activeTransmittingMembers.collectAsState()
     val isListeningToThisMember = isListening && activeListeningId == member.id
+    val isTransmitting = remember(activeTransmitters, member.id, member.name) {
+        RoomAudioStreamManager.isMemberTransmitting(member.id, member.name)
+    }
 
     if (showBatteryDialog) {
         BatteryStatusDialog(
@@ -202,6 +206,32 @@ fun MemberCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         if (member.id != "me") {
+                            val buttonBg = when {
+                                isListeningToThisMember -> Color(0xFFE53935)
+                                isTransmitting -> Color(0xFFE8F5E9)
+                                else -> Color(0xFFF1F3F8)
+                            }
+                            val buttonBorder = when {
+                                isListeningToThisMember -> Color(0xFFFF5252)
+                                isTransmitting -> GlowingEmerald.copy(alpha = 0.6f)
+                                else -> SlateBorder
+                            }
+                            val buttonTextColor = when {
+                                isListeningToThisMember -> Color.White
+                                isTransmitting -> GlowingEmerald
+                                else -> Color(0xFF1E2430)
+                            }
+                            val buttonText = when {
+                                isListeningToThisMember -> "Stop"
+                                isTransmitting -> "Live"
+                                else -> "Audio"
+                            }
+                            val buttonIcon = when {
+                                isListeningToThisMember -> "⏹️"
+                                isTransmitting -> "🟢"
+                                else -> "🎧"
+                            }
+
                             Surface(
                                 onClick = {
                                     if (isListeningToThisMember) {
@@ -211,8 +241,8 @@ fun MemberCard(
                                     }
                                 },
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (isListeningToThisMember) Color(0xFFE53935) else Color(0xFF202534),
-                                border = BorderStroke(1.dp, if (isListeningToThisMember) Color(0xFFFF5252) else SlateBorder),
+                                color = buttonBg,
+                                border = BorderStroke(1.dp, buttonBorder),
                                 modifier = Modifier.height(28.dp)
                             ) {
                                 Row(
@@ -220,10 +250,10 @@ fun MemberCard(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(if (isListeningToThisMember) "⏹️" else "🎧", fontSize = 10.sp)
+                                    Text(buttonIcon, fontSize = 10.sp)
                                     Text(
-                                        text = if (isListeningToThisMember) "Stop" else "Audio",
-                                        color = Color.White,
+                                        text = buttonText,
+                                        color = buttonTextColor,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -279,24 +309,25 @@ fun MemberCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF0F121C), RoundedCornerShape(6.dp))
+                            .background(Color(0xFFF1F4F9), RoundedCornerShape(6.dp))
+                            .border(BorderStroke(1.dp, Color(0xFFE2E6EF)), RoundedCornerShape(6.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Box(modifier = Modifier.size(6.dp).background(if (decibels > 65f) ActiveAmber else GlowingEmerald, CircleShape))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Box(modifier = Modifier.size(7.dp).background(if (decibels > 65f) ActiveAmber else GlowingEmerald, CircleShape))
                             Text(
                                 text = "Live Audio (${member.name.substringBefore(" ")})",
-                                color = TextPrimary,
-                                fontSize = 10.sp,
+                                color = Color(0xFF1E2430),
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
                             text = "${decibels.toInt()} dB",
                             color = RadarCyan,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )

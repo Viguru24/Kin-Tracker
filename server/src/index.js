@@ -142,10 +142,37 @@ app.put('/sync/:token', (req, res) => {
 
     // If members map provided
     if (body.members && typeof body.members === 'object') {
-        Object.values(body.members).forEach(m => {
-            if (m && m.id) {
-                db.saveMember({ ...m, circleId: circle.id });
+        const incomingMembers = Object.values(body.members).filter(m => m && m.id);
+
+        // Deduplicate devices by UUID suffix so renaming doesn't leave ghost members in server DB
+        const incomingUuids = new Set();
+        incomingMembers.forEach(m => {
+            const parts = m.id.split('_');
+            if (parts.length >= 3) {
+                const uuid = parts[parts.length - 1];
+                if (uuid.length >= 4) incomingUuids.add(uuid);
             }
+        });
+
+        // Clean up any existing circle member that has the same UUID suffix but a different ID
+        if (circle.memberIds && circle.memberIds.length > 0) {
+            const obsoleteIds = [];
+            circle.memberIds.forEach(existingId => {
+                const parts = existingId.split('_');
+                if (parts.length >= 3) {
+                    const uuid = parts[parts.length - 1];
+                    if (incomingUuids.has(uuid) && !body.members[existingId]) {
+                        obsoleteIds.push(existingId);
+                    }
+                }
+            });
+            obsoleteIds.forEach(oldId => {
+                db.removeMemberFromCircle(circle.id, oldId);
+            });
+        }
+
+        incomingMembers.forEach(m => {
+            db.saveMember({ ...m, circleId: circle.id });
         });
     }
 

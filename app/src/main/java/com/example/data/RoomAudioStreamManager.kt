@@ -60,6 +60,11 @@ object RoomAudioStreamManager {
     private val _activeListeningMemberId = MutableStateFlow<String?>(null)
     val activeListeningMemberId = _activeListeningMemberId.asStateFlow()
 
+    private val _activeTransmittingMembers = MutableStateFlow<Set<String>>(emptySet())
+    val activeTransmittingMembers = _activeTransmittingMembers.asStateFlow()
+
+    var onTransmitterToggled: ((Boolean) -> Unit)? = null
+
     private val memberIpRegistry = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun registerMemberIp(memberId: String, ip: String, memberName: String = "") {
@@ -70,6 +75,28 @@ object RoomAudioStreamManager {
                 memberIpRegistry[clean] = ip
             }
         }
+    }
+
+    fun registerMemberAudioState(memberId: String, ip: String, isTransmitting: Boolean, memberName: String = "") {
+        if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1") {
+            registerMemberIp(memberId, ip, memberName)
+        }
+        val cleanName = memberName.lowercase().replace(Regex("\\s*\\(.*?\\)"), "").trim()
+        val currentSet = _activeTransmittingMembers.value.toMutableSet()
+        if (isTransmitting) {
+            currentSet.add(memberId)
+            if (cleanName.isNotBlank()) currentSet.add(cleanName)
+        } else {
+            currentSet.remove(memberId)
+            if (cleanName.isNotBlank()) currentSet.remove(cleanName)
+        }
+        _activeTransmittingMembers.value = currentSet
+    }
+
+    fun isMemberTransmitting(memberId: String, memberName: String = ""): Boolean {
+        val cleanName = memberName.lowercase().replace(Regex("\\s*\\(.*?\\)"), "").trim()
+        val set = _activeTransmittingMembers.value
+        return set.contains(memberId) || (cleanName.isNotBlank() && set.contains(cleanName))
     }
 
     fun getMemberIp(memberId: String, memberName: String = ""): String? {
@@ -97,6 +124,7 @@ object RoomAudioStreamManager {
                 }
                 _isTransmitterActive.value = true
                 _statusMessage.value = "Room Transmitter Active on port $port"
+                onTransmitterToggled?.invoke(true)
 
                 while (isActive && serverSocket?.isClosed == false) {
                     val clientSocket = try {
@@ -188,6 +216,7 @@ object RoomAudioStreamManager {
         _activeConnectionsCount.value = 0
         _currentDecibels.value = 0f
         _statusMessage.value = "Transmitter Stopped"
+        onTransmitterToggled?.invoke(false)
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -361,12 +390,13 @@ object RoomAudioStreamManager {
             if (wifiInfo != null && wifiInfo.ipAddress != 0) {
                 @Suppress("DEPRECATION")
                 val ip = Formatter.formatIpAddress(wifiInfo.ipAddress)
-                if (ip != "0.0.0.0" && ip.isNotBlank()) return ip
+                if (ip != "0.0.0.0" && ip.isNotBlank() && ip != "127.0.0.1") return ip
             }
         } catch (_: Exception) {}
 
         try {
             val interfaces = NetworkInterface.getNetworkInterfaces()
+            val candidateIps = mutableListOf<String>()
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 if (iface.isLoopback || !iface.isUp) continue
@@ -375,11 +405,24 @@ object RoomAudioStreamManager {
                     val addr = addresses.nextElement()
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val hostAddress = addr.hostAddress ?: ""
-                        if (hostAddress.startsWith("192.168.") || hostAddress.startsWith("10.") || hostAddress.startsWith("172.")) {
-                            return hostAddress
+                        if (hostAddress.isNotBlank() && hostAddress != "127.0.0.1" && hostAddress != "0.0.0.0") {
+                            val ifaceLower = iface.name.lowercase()
+                            // Prioritize Wi-Fi, Ethernet, and Hotspot network interfaces
+                            if (ifaceLower.contains("wlan") ||
+                                ifaceLower.contains("ap") ||
+                                ifaceLower.contains("eth") ||
+                                hostAddress.startsWith("192.168.") ||
+                                hostAddress.startsWith("10.") ||
+                                hostAddress.startsWith("172.")) {
+                                return hostAddress
+                            }
+                            candidateIps.add(hostAddress)
                         }
                     }
                 }
+            }
+            if (candidateIps.isNotEmpty()) {
+                return candidateIps.first()
             }
         } catch (_: Exception) {}
 

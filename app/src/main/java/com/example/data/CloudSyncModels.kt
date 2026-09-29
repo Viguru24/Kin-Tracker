@@ -31,18 +31,18 @@ data class CloudShoppingItem(
 
 @JsonClass(generateAdapter = true)
 data class CloudMember(
-    val id: String,
-    val name: String,
-    val avatarColorHex: String,
-    val x: Double,
-    val y: Double,
-    val batteryPercentage: Int,
-    val isCharging: Boolean,
-    val speedMph: Double,
-    val statusText: String,
-    val isComingHome: Boolean,
-    val etaMinutes: Int,
-    val lastActive: Long,
+    val id: String = "",
+    val name: String = "",
+    val avatarColorHex: String = "#0061A4",
+    val x: Double = 0.0,
+    val y: Double = 0.0,
+    val batteryPercentage: Int = 100,
+    val isCharging: Boolean = false,
+    val speedMph: Double = 0.0,
+    val statusText: String = "",
+    val isComingHome: Boolean = false,
+    val etaMinutes: Int = 0,
+    val lastActive: Long = 0L,
     val avatarEmoji: String = "", // Profile picture emoji representation!
     val locationSince: Long = 0L, // Timestamp of arrival at current location
     val localIp: String = "",

@@ -360,4 +360,57 @@ router.post('/:circleId/leave', (req, res) => {
     }
 });
 
+/**
+ * 8. RENAME DEVICE / MEMBER IN CIRCLE
+ * Synchronizes new name to every person in the circle.
+ */
+router.post('/:circleId/member/rename', (req, res) => {
+    try {
+        const { circleId } = req.params;
+        const { memberId, newName, avatarColorHex, avatarEmoji } = req.body;
+        if (!memberId || !newName || !newName.trim()) {
+            return res.status(400).json({ success: false, error: 'memberId and newName are required.' });
+        }
+
+        let circle = db.getCircleById(circleId);
+        if (!circle) {
+            circle = db.getCircleByInviteCode(circleId);
+        }
+        if (!circle) {
+            return res.status(404).json({ success: false, error: 'Circle not found.' });
+        }
+
+        let member = db.getMember(memberId);
+        if (!member) {
+            const parts = memberId.split('_');
+            const uuid = parts.length >= 3 ? parts[parts.length - 1] : memberId;
+            const members = db.getCircleMembers(circle.id);
+            member = members.find(m => m.id === memberId || (uuid.length >= 4 && m.id.endsWith(`_${uuid}`)));
+        }
+
+        if (!member) {
+            return res.status(404).json({ success: false, error: 'Member not found in circle.' });
+        }
+
+        member.name = newName.trim();
+        if (avatarColorHex) member.avatarColorHex = avatarColorHex;
+        if (avatarEmoji) member.avatarEmoji = avatarEmoji;
+        member.lastActive = Date.now();
+        db.saveMember(member);
+
+        circle.lastUpdated = Date.now();
+        db.saveCircle(circle);
+
+        console.log(`[Circle] Member ${member.id} renamed to "${member.name}" in circle "${circle.name}"`);
+
+        return res.json({
+            success: true,
+            member: member
+        });
+    } catch (err) {
+        console.error('[Rename Member Error]', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 module.exports = router;

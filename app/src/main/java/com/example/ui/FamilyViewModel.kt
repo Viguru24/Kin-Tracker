@@ -1061,6 +1061,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     ))
                 }
                 savePreferences()
+                cloudSyncManager.syncMyProfileToCloud()
+            } else {
+                cloudSyncManager.renameDeviceInCircle(updated)
             }
             repository.insertLog(ActivityLog(memberId = updated.id, memberName = updated.name, actionText = "updated tracker details", iconName = "check_in"))
             _uiEvents.emit("${updated.name}'s tracker details updated!")
@@ -1435,6 +1438,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
                 repository.updateMember(it.copy(name = cleanName, avatarColorHex = c, avatarEmoji = em, phoneNumber = p))
             }
+            cloudSyncManager.syncMyProfileToCloud()
         }
         savePreferences()
         cloudSyncManager.toggleCloudSync(e, t, myDeviceName, myDeviceColor, myDeviceEmoji, myDevicePhone)
@@ -1457,6 +1461,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     photoPath = if (photoPath.isNotBlank()) photoPath else it.photoPath
                 ))
             }
+            cloudSyncManager.syncMyProfileToCloud()
         }
         savePreferences()
     }

@@ -23,7 +23,7 @@ class CloudSyncManager(
     private val groupSyncToken: MutableStateFlow<String>,
     private val cloudStatusText: MutableStateFlow<String>,
     private val familyMembers: StateFlow<List<FamilyMember>>,
-    private val myDeviceName: StateFlow<String>,
+    private val myDeviceName: MutableStateFlow<String>,
     private val myDeviceColor: StateFlow<String>,
     private val myDeviceUUID: StateFlow<String>,
     private val ghostModeExpiryTime: StateFlow<Long>,
@@ -52,6 +52,20 @@ class CloudSyncManager(
     private val localMockCloudData = ConcurrentHashMap<String, String>()
     private val lastProcessedReaction = ConcurrentHashMap<String, String>()
     private val lastProcessedCheckIn = ConcurrentHashMap<String, String>()
+
+    init {
+        com.example.data.RoomAudioStreamManager.onTransmitterToggled = {
+            triggerSyncNow()
+        }
+    }
+
+    fun triggerSyncNow() {
+        scope.launch {
+            if (isCloudSyncEnabled.value && groupSyncToken.value.isNotBlank()) {
+                performCloudSyncTick()
+            }
+        }
+    }
 
     fun startCloudSyncLoop() {
         cloudSyncJob?.cancel()
@@ -133,7 +147,18 @@ class CloudSyncManager(
 
             val prefs = application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
             val myEntry = payload?.members?.values?.firstOrNull {
-                it.id == myCloudId || it.name.trim().equals(myName.trim(), ignoreCase = true)
+                it.id == myCloudId || (myDeviceUUID.value.length >= 4 && it.id.endsWith("_" + myDeviceUUID.value)) || it.name.trim().equals(myName.trim(), ignoreCase = true)
+            }
+            if (myEntry != null && myEntry.name.isNotBlank() && !myEntry.name.trim().equals(myName.trim(), ignoreCase = false)) {
+                val newSyncedName = myEntry.name.trim()
+                myDeviceName.value = newSyncedName
+                prefs.edit().putString("myDeviceName", newSyncedName).apply()
+                val meLocal = repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }
+                if (meLocal != null) {
+                    repository.updateMember(meLocal.copy(name = newSyncedName))
+                }
+                savePreferences()
+                uiEvents.emit("📱 Device name updated to '$newSyncedName' by circle!")
             }
             val currentLocPaused = prefs.getBoolean("is_location_paused", false)
             if (myEntry != null && myEntry.isLocationPaused != currentLocPaused) {
@@ -379,9 +404,12 @@ class CloudSyncManager(
             val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
 
             for (cloudM in incomingCloudMembers) {
-                if (cloudM.localIp.isNotBlank()) {
-                    com.example.data.RoomAudioStreamManager.registerMemberIp(cloudM.id, cloudM.localIp, cloudM.name)
-                }
+                com.example.data.RoomAudioStreamManager.registerMemberAudioState(
+                    memberId = cloudM.id,
+                    ip = cloudM.localIp,
+                    isTransmitting = cloudM.isAudioTransmitter,
+                    memberName = cloudM.name
+                )
                 // Do not ingest self device (already tracked locally with GPS as "me")
                 if (cloudM.id == myCloudId || cloudM.id.endsWith("_" + myDeviceUUID.value)) continue
 
@@ -403,7 +431,11 @@ class CloudSyncManager(
                     }
                 }
 
+                val cloudDeviceUUID = if (cloudM.id.startsWith("device_") && cloudM.id.contains("_")) cloudM.id.substringAfterLast("_") else ""
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
+                    ?: existingLocal.firstOrNull {
+                        cloudDeviceUUID.length >= 4 && it.id.startsWith("device_") && it.id.endsWith("_$cloudDeviceUUID")
+                    }
 
                 val matchingByName = existingLocal.firstOrNull {
                     it.id != "me" && it.id != cloudM.id && !it.id.startsWith("device_") &&
@@ -572,12 +604,14 @@ class CloudSyncManager(
                 val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else cloudM.x
                 val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else cloudM.y
 
-                // If the user has locally renamed this member, always honour their choice over the cloud name
-                val userEditedName = contactsPrefs.getString("edited_name_${cloudM.id}", null)
+                // Synchronize circle-wide device name
                 val resolvedName = when {
-                    userEditedName?.isNotBlank() == true -> userEditedName
                     cloudM.name.trim().equals(myName.trim(), ignoreCase = true) -> "${cloudM.name} (Other Device)"
+                    cloudM.name.isNotBlank() -> cloudM.name
                     else -> cloudM.name
+                }
+                if (cloudM.name.isNotBlank()) {
+                    contactsPrefs.edit().putString("edited_name_${cloudM.id}", resolvedName).apply()
                 }
 
                 val mappedLocal = FamilyMember(
@@ -593,8 +627,15 @@ class CloudSyncManager(
                     isLocationPaused = isMemberLocPaused
                 )
 
-                if (matchingLocal == null) repository.insertFamilyMembers(listOf(mappedLocal))
-                else repository.updateMember(mappedLocal)
+                if (matchingLocal != null && matchingLocal.id != cloudM.id) {
+                    // Device was renamed and received a new member ID; delete old record from Room
+                    repository.deleteMember(matchingLocal)
+                    repository.insertFamilyMembers(listOf(mappedLocal))
+                } else if (matchingLocal == null) {
+                    repository.insertFamilyMembers(listOf(mappedLocal))
+                } else {
+                    repository.updateMember(mappedLocal)
+                }
                 if (mappedLocal.x != 0.0 && mappedLocal.y != 0.0) {
                     repository.recordBreadcrumbThrottled(mappedLocal.id, mappedLocal.y, mappedLocal.x, mappedLocal.speedMph)
                     com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(
@@ -612,10 +653,12 @@ class CloudSyncManager(
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
                 if (localM.id.startsWith("device_") && !newPayload.members.containsKey(localM.id)) {
+                    val localUuid = localM.id.substringAfterLast("_")
+                    val hasSameUuidReplacement = localUuid.length >= 4 && newPayload.members.keys.any { it.endsWith("_$localUuid") }
                     val localNameLower = localM.name.lowercase().trim()
                     val isKnownFamilyLocal = knownFamilyKeywordsLocal.any { localNameLower.contains(it) }
-                    // Only remove from local DB if this is NOT a known family member — they may just be temporarily offline
-                    if (!isKnownFamilyLocal) {
+                    // Only remove from local DB if superseded by a renamed record or if this is NOT a known family member
+                    if (hasSameUuidReplacement || !isKnownFamilyLocal) {
                         repository.deleteMember(localM)
                     }
                 }
@@ -719,6 +762,90 @@ class CloudSyncManager(
             )
             updateGroupData(token, updatedPayload)
         } catch (e: Exception) {}
+    }
+
+    fun syncMyProfileToCloud() {
+        scope.launch {
+            if (!isCloudSyncEnabled.value || groupSyncToken.value.isBlank()) return@launch
+            try {
+                performCloudSyncTick()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun renameDeviceInCircle(updated: FamilyMember) {
+        scope.launch {
+            val token = groupSyncToken.value
+            if (token.isBlank()) return@launch
+            try {
+                val payload = getGroupData(token) ?: return@launch
+                val updatedMembers = payload.members.toMutableMap()
+
+                val updatedTargetId = updated.id
+                val updatedTargetUuid = if (updatedTargetId.startsWith("device_") && updatedTargetId.contains("_")) {
+                    updatedTargetId.substringAfterLast("_")
+                } else ""
+
+                // Find matching member entry in cloud payload
+                val targetEntry = updatedMembers.entries.firstOrNull {
+                    it.key == updatedTargetId || it.value.id == updatedTargetId ||
+                    (updatedTargetUuid.length >= 4 && (it.key.endsWith("_$updatedTargetUuid") || it.value.id.endsWith("_$updatedTargetUuid")))
+                }
+
+                val oldKey = targetEntry?.key ?: updatedTargetId
+                val oldMember = targetEntry?.value
+
+                val newCloudMember = oldMember?.copy(
+                    name = updated.name,
+                    avatarColorHex = if (updated.avatarColorHex.isNotBlank()) updated.avatarColorHex else oldMember.avatarColorHex,
+                    avatarEmoji = if (updated.avatarEmoji.isNotBlank()) updated.avatarEmoji else oldMember.avatarEmoji,
+                    lastActive = System.currentTimeMillis()
+                ) ?: CloudMember(
+                    id = oldKey,
+                    name = updated.name,
+                    avatarColorHex = updated.avatarColorHex,
+                    x = updated.x,
+                    y = updated.y,
+                    batteryPercentage = updated.batteryPercentage,
+                    isCharging = updated.isCharging,
+                    speedMph = updated.speedMph,
+                    statusText = updated.statusText,
+                    isComingHome = updated.isComingHome,
+                    etaMinutes = updated.etaMinutes,
+                    lastActive = System.currentTimeMillis(),
+                    avatarEmoji = updated.avatarEmoji
+                )
+
+                val newKey = if (updatedTargetUuid.length >= 4) {
+                    "device_" + updated.name.lowercase().replace("\\s".toRegex(), "") + "_" + updatedTargetUuid
+                } else oldKey
+
+                if (updatedTargetUuid.length >= 4) {
+                    val toRemove = updatedMembers.filter { it.key.endsWith("_$updatedTargetUuid") || it.value.id.endsWith("_$updatedTargetUuid") }.keys
+                    toRemove.forEach { updatedMembers.remove(it) }
+                } else {
+                    updatedMembers.remove(oldKey)
+                }
+
+                val finalMember = newCloudMember.copy(id = newKey)
+                updatedMembers[newKey] = finalMember
+
+                val updatedPayload = payload.copy(
+                    lastUpdated = System.currentTimeMillis(),
+                    members = updatedMembers
+                )
+                updateGroupData(token, updatedPayload)
+
+                // Also notify the server REST API if available
+                try {
+                    val bodyJson = "{\"memberId\":\"$oldKey\",\"newName\":\"${updated.name}\",\"avatarColorHex\":\"${updated.avatarColorHex}\",\"avatarEmoji\":\"${updated.avatarEmoji}\"}"
+                    val requestBody = bodyJson.toRequestBody("application/json".toMediaTypeOrNull())
+                    apiService.renameMember(token, requestBody)
+                } catch (_: Exception) {}
+
+                uiEvents.emit("Renamed ${updated.name} across circle!")
+            } catch (e: Exception) {}
+        }
     }
 
     suspend fun removeShoppingItemFromCloud(itemName: String) {

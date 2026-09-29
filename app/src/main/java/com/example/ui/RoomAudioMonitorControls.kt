@@ -10,7 +10,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -43,6 +41,7 @@ fun RoomAudioMonitorControls(
     val activeListeningId by RoomAudioStreamManager.activeListeningMemberId.collectAsState()
     val decibels by RoomAudioStreamManager.currentDecibels.collectAsState()
     val statusMessage by RoomAudioStreamManager.statusMessage.collectAsState()
+    val activeTransmitters by RoomAudioStreamManager.activeTransmittingMembers.collectAsState()
 
     var hasMicPermission by remember {
         mutableStateOf(
@@ -76,21 +75,44 @@ fun RoomAudioMonitorControls(
             // Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("🎧", fontSize = 20.sp)
-                Column {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color(0xFFEFF3FA), CircleShape)
+                        .border(1.dp, Color(0xFFDCE2EF), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎧", fontSize = 18.sp)
+                }
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Family Circle Audio",
-                        color = TextPrimary,
+                        color = Color(0xFF1E2430),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "One-tap live audio for members in your family group",
-                        color = SecondarySlate,
+                        text = "Live sovereign audio feed linked via VPS backend",
+                        color = Color(0xFF5A6275),
                         fontSize = 11.sp
                     )
+                }
+                if (statusMessage.isNotBlank() && statusMessage != "Idle" && statusMessage != "Transmitter Stopped" && statusMessage != "Stopped Listening") {
+                    Surface(
+                        color = Color(0xFFE8F1FC),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, Color(0xFFBFDBFE))
+                    ) {
+                        Text(
+                            text = statusMessage.take(28),
+                            color = RadarCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 
@@ -102,27 +124,41 @@ fun RoomAudioMonitorControls(
             if (otherMembers.isEmpty()) {
                 Text(
                     text = "No other family members linked yet.",
-                    color = SecondarySlate,
+                    color = Color(0xFF6B7280),
                     fontSize = 12.sp,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     otherMembers.forEach { member ->
                         val isListeningToThisMember = isListening && activeListeningId == member.id
+                        val isTransmitting = remember(activeTransmitters, member.id, member.name) {
+                            RoomAudioStreamManager.isMemberTransmitting(member.id, member.name)
+                        }
                         val memberFirstName = member.name.replace(
                             Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE),
                             ""
                         ).trim().ifBlank { member.name }
 
+                        val memberIp = RoomAudioStreamManager.getMemberIp(member.id, member.name)
+
+                        // Rich grey styling avoiding pitch black
+                        val cardBg = when {
+                            isListeningToThisMember -> Color(0xFFF0FDF4)
+                            isTransmitting -> Color(0xFFF4F7FC)
+                            else -> Color(0xFFF7F8FA)
+                        }
+                        val cardBorder = when {
+                            isListeningToThisMember -> GlowingEmerald
+                            isTransmitting -> RadarCyan.copy(alpha = 0.5f)
+                            else -> Color(0xFFE5E7EB)
+                        }
+
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            color = if (isListeningToThisMember) Color(0xFF22172E) else Color(0xFF151822),
+                            color = cardBg,
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(
-                                1.dp,
-                                if (isListeningToThisMember) PrimaryCosmic.copy(alpha = 0.8f) else SlateBorder
-                            )
+                            border = BorderStroke(1.dp, cardBorder)
                         ) {
                             Column(
                                 modifier = Modifier.padding(12.dp),
@@ -135,33 +171,60 @@ fun RoomAudioMonitorControls(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(34.dp)
-                                                .background(Color(0xFF202534), CircleShape)
-                                                .border(1.dp, SlateBorder, CircleShape),
+                                                .size(38.dp)
+                                                .background(Color(0xFFE9ECF2), CircleShape)
+                                                .border(1.dp, Color(0xFFD1D6E2), CircleShape),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else memberFirstName.take(1).uppercase(),
-                                                fontSize = 16.sp
+                                                fontSize = 17.sp
                                             )
                                         }
 
                                         Column {
                                             Text(
                                                 text = memberFirstName,
-                                                color = TextPrimary,
+                                                color = Color(0xFF1E2430),
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
-                                            Text(
-                                                text = if (isListeningToThisMember) "🔴 Live Audio Stream Active" else "Tap to listen in live",
-                                                color = if (isListeningToThisMember) GlowingEmerald else SecondarySlate,
-                                                fontSize = 10.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                when {
+                                                    isListeningToThisMember -> {
+                                                        Box(modifier = Modifier.size(6.dp).background(Color(0xFFE53935), CircleShape))
+                                                        Text(
+                                                            text = "Live Audio Stream Active",
+                                                            color = GlowingEmerald,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                    isTransmitting -> {
+                                                        Box(modifier = Modifier.size(6.dp).background(GlowingEmerald, CircleShape))
+                                                        Text(
+                                                            text = "Broadcasting Live" + if (!memberIp.isNullOrBlank()) " • $memberIp" else "",
+                                                            color = GlowingEmerald,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+                                                    else -> {
+                                                        Text(
+                                                            text = if (!memberIp.isNullOrBlank()) "Standby • IP: $memberIp" else "Standby (Tap to connect)",
+                                                            color = Color(0xFF5A6275),
+                                                            fontSize = 11.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
@@ -186,7 +249,9 @@ fun RoomAudioMonitorControls(
                                             onClick = {
                                                 RoomAudioStreamManager.startListeningToMember(context, member.id, member.name)
                                             },
-                                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isTransmitting) PrimaryCosmic else Color(0xFF334155)
+                                            ),
                                             shape = RoundedCornerShape(8.dp),
                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                             modifier = Modifier.height(34.dp)
@@ -196,7 +261,12 @@ fun RoomAudioMonitorControls(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
                                                 Text("🎧", fontSize = 11.sp)
-                                                Text("Listen", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                                Text(
+                                                    text = if (isTransmitting) "Listen Live" else "Listen",
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp
+                                                )
                                             }
                                         }
                                     }
@@ -216,9 +286,9 @@ fun RoomAudioMonitorControls(
             // ─────────────────────────────────────────────────────────────
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = if (isTransmitterActive) Color(0xFF102820) else Color(0xFF151822),
+                color = if (isTransmitterActive) Color(0xFFF0FDF4) else Color(0xFFF7F8FA),
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, if (isTransmitterActive) GlowingEmerald.copy(alpha = 0.5f) else SlateBorder)
+                border = BorderStroke(1.dp, if (isTransmitterActive) GlowingEmerald else Color(0xFFE5E7EB))
             ) {
                 Row(
                     modifier = Modifier
@@ -229,21 +299,29 @@ fun RoomAudioMonitorControls(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text(if (isTransmitterActive) "🎙️" else "🔕", fontSize = 16.sp)
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(if (isTransmitterActive) Color(0xFFD1FAE5) else Color(0xFFE9ECF2), CircleShape)
+                                .border(1.dp, if (isTransmitterActive) Color(0xFFA7F3D0) else Color(0xFFD1D6E2), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(if (isTransmitterActive) "🎙️" else "🔕", fontSize = 16.sp)
+                        }
                         Column {
                             Text(
                                 text = "Broadcast My Audio to Family",
-                                color = TextPrimary,
-                                fontSize = 12.sp,
+                                color = Color(0xFF1E2430),
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = if (isTransmitterActive) "🟢 Active — Family circle can listen in" else "Enable if leaving this phone to be monitored",
-                                color = if (isTransmitterActive) GlowingEmerald else SecondarySlate,
-                                fontSize = 10.sp
+                                text = if (isTransmitterActive) "🟢 Active — Broadcasting to VPS & Family Circle" else "Enable if leaving this phone to be monitored",
+                                color = if (isTransmitterActive) GlowingEmerald else Color(0xFF5A6275),
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -264,11 +342,27 @@ fun RoomAudioMonitorControls(
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = GlowingEmerald,
-                            uncheckedThumbColor = SecondarySlate,
-                            uncheckedTrackColor = CosmicBlack
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFFCBD5E1)
                         )
                     )
                 }
+            }
+
+            // Sovereign VPS indicator footer
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("🔒", fontSize = 10.sp)
+                Text(
+                    text = "VPS Audio Bridge: api.cosmowhisper.com • Port 18884 Sovereign P2P",
+                    color = Color(0xFF6B7280),
+                    fontSize = 10.sp
+                )
             }
         }
     }
@@ -292,7 +386,8 @@ private fun AudioDecibelWaveMeter(decibels: Float, name: String = "") {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0F121C), RoundedCornerShape(8.dp))
+            .background(Color(0xFFEBF0F6), RoundedCornerShape(10.dp))
+            .border(BorderStroke(1.dp, Color(0xFFD5DFEC)), RoundedCornerShape(10.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -303,7 +398,7 @@ private fun AudioDecibelWaveMeter(decibels: Float, name: String = "") {
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Box(
                     modifier = Modifier
@@ -312,7 +407,7 @@ private fun AudioDecibelWaveMeter(decibels: Float, name: String = "") {
                 )
                 Text(
                     text = if (decibels > 70f) "Loud Noise / Activity" else if (decibels > 45f) "Rustling / Quiet Sound" else "Quiet 😴",
-                    color = if (decibels > 70f) ActiveAmber else TextPrimary,
+                    color = Color(0xFF1E2430),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )

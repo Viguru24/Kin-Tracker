@@ -54,6 +54,14 @@ interface KinTrackerApiService {
         @Body body: RequestBody
     ): Response<ResponseBody>
 
+    // 8. Rename Member / Device in Circle
+    @POST("api/circles/{circleId}/member/rename")
+    @Headers("Content-Type: application/json")
+    suspend fun renameMember(
+        @Path("circleId") circleId: String,
+        @Body body: RequestBody
+    ): Response<ResponseBody>
+
     companion object {
         fun create(): KinTrackerApiService {
             val logging = HttpLoggingInterceptor().apply {
