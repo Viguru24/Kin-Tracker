@@ -86,7 +86,7 @@ fun MemberCard(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .combinedClickable(
-                    onClick = { onSelectMember(if (isSelected) null else member.id) },
+                    onClick = { onSelectMember(member.id) },
                     onLongClick = { showContextMenu = true }
                 )
                 .testTag("member_card_${member.id}"),

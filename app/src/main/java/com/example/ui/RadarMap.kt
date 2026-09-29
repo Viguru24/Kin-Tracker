@@ -115,6 +115,22 @@ fun computeClusterLayout(
     val unassignedMembers = mutableListOf<FamilyMember>()
 
     activeMembers.forEach { m ->
+        val transit = classifyTransitMode(m.speedMph, m.statusText, m.id)
+        val isActivelyMoving = transit != TransitMode.STATIONARY ||
+            m.speedMph >= 0.6 ||
+            m.isComingHome ||
+            m.statusText.contains("walk", ignoreCase = true) ||
+            m.statusText.contains("moving", ignoreCase = true) ||
+            m.statusText.contains("driving", ignoreCase = true) ||
+            m.statusText.contains("bike", ignoreCase = true) ||
+            m.statusText.contains("transit", ignoreCase = true) ||
+            m.statusText.contains("commute", ignoreCase = true)
+
+        if (isActivelyMoving) {
+            adjustedCoordinates[m.id] = GeoPoint(m.y, m.x)
+            return@forEach
+        }
+
         val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
             com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
         } else Double.MAX_VALUE
@@ -393,6 +409,16 @@ fun RadarMap(
                 val state = memberVisualStates[m.id]
                 val transit = classifyTransitMode(m.speedMph, m.statusText, m.id)
 
+                val isActivelyTraveling = transit != TransitMode.STATIONARY ||
+                    m.speedMph >= 0.6 ||
+                    m.isComingHome ||
+                    m.statusText.contains("walk", ignoreCase = true) ||
+                    m.statusText.contains("moving", ignoreCase = true) ||
+                    m.statusText.contains("driving", ignoreCase = true) ||
+                    m.statusText.contains("bike", ignoreCase = true) ||
+                    m.statusText.contains("transit", ignoreCase = true) ||
+                    m.statusText.contains("commute", ignoreCase = true)
+
                 // Check barrier containment (Home, Safe Zones, Work)
                 val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
                     com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
@@ -407,31 +433,33 @@ fun RadarMap(
 
                 val isInsideBarrier = isAtHome || (matchedSafeZone != null) || isInsideWork
 
-                // Break-out condition: member must exceed barrier boundary + 20m hysteresis AND maintain speed >= 1.8 mph
+                // Break-out condition: member must exceed barrier boundary + 20m hysteresis AND maintain speed >= 1.5 mph
                 val isBreakingOut = when {
-                    isAtHome -> distToHome > (homeRadiusMeters + 20.0) && m.speedMph >= 1.8
+                    isAtHome -> distToHome > (homeRadiusMeters + 20.0) && m.speedMph >= 1.5
                     matchedSafeZone != null -> {
                         val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, matchedSafeZone.latitude, matchedSafeZone.longitude)
-                        d > (matchedSafeZone.radiusMeters + 20.0) && m.speedMph >= 1.8
+                        d > (matchedSafeZone.radiusMeters + 20.0) && m.speedMph >= 1.5
                     }
                     isInsideWork -> {
                         val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng)
-                        d > (workRadiusMeters + 20.0) && m.speedMph >= 1.8
+                        d > (workRadiusMeters + 20.0) && m.speedMph >= 1.5
                     }
                     else -> false
                 }
 
-                // If inside a barrier and not breaking out, the member is strictly STATIC!
-                val isReportedMoving = if (isInsideBarrier && !isBreakingOut) {
+                // If actively traveling (walking, biking, driving, transit), member is ALWAYS moving!
+                val isReportedMoving = if (isActivelyTraveling) {
+                    true
+                } else if (isInsideBarrier && !isBreakingOut) {
                     false
                 } else {
-                    m.speedMph >= 1.8 || (transit != TransitMode.STATIONARY && m.speedMph >= 1.2)
+                    m.speedMph >= 1.5
                 }
 
                 val assignedClusterPos = adjustedCoordinates[m.id] ?: GeoPoint(m.y, m.x)
 
                 if (state == null) {
-                    val initialGeo = if (isInsideBarrier && !isBreakingOut) assignedClusterPos else GeoPoint(m.y, m.x)
+                    val initialGeo = if (isInsideBarrier && !isBreakingOut && !isActivelyTraveling) assignedClusterPos else GeoPoint(m.y, m.x)
                     memberVisualStates[m.id] = MemberVisualState(
                         currentGeo = initialGeo,
                         targetGeo = initialGeo,
@@ -442,7 +470,7 @@ fun RadarMap(
                     )
                     visualCoordinates[m.id] = initialGeo
                 } else {
-                    if (isInsideBarrier && !isBreakingOut) {
+                    if (isInsideBarrier && !isBreakingOut && !isActivelyTraveling) {
                         // Locked static inside barrier — zero GPS jitter motion
                         state.isMoving = false
                         state.speedMph = 0.0
@@ -457,13 +485,14 @@ fun RadarMap(
                         }
                         visualCoordinates[m.id] = state.currentGeo
                     } else {
-                        // Truly moving outside barrier
+                        // Truly moving outside barrier or actively walking/traveling
                         val distMovedM = com.example.data.GeoUtils.distanceMeters(
-                            state.targetGeo.latitude, state.targetGeo.longitude,
+                            state.currentGeo.latitude, state.currentGeo.longitude,
                             m.y, m.x
                         )
-                        // Suppress micro-jitter (< 4.0m) when speed is low
-                        if (distMovedM > 4.0 || (m.speedMph >= 1.8 && distMovedM > 1.5)) {
+                        // Allow small walking steps (0.3m) when walking/traveling, suppress jitter (3.0m) when stationary
+                        val minMovementMeters = if (isReportedMoving) 0.3 else 3.0
+                        if (distMovedM >= minMovementMeters) {
                             val dLat = m.y - state.currentGeo.latitude
                             val dLng = m.x - state.currentGeo.longitude
                             val cosLat = kotlin.math.cos(Math.toRadians(m.y))
@@ -472,8 +501,8 @@ fun RadarMap(
                             state.targetGeo = GeoPoint(m.y, m.x)
                             val elapsedSec = ((now - state.lastTargetUpdateTime) / 1000.0).coerceAtLeast(0.5)
                             state.lastTargetUpdateTime = now
-                            state.speedMph = if (m.speedMph >= 1.0) m.speedMph else (distMovedM / elapsedSec) * 2.23694
-                            state.isMoving = isReportedMoving || state.speedMph >= 1.8
+                            state.speedMph = if (m.speedMph >= 0.5) m.speedMph else (distMovedM / elapsedSec) * 2.23694
+                            state.isMoving = true
                         } else {
                             state.isMoving = isReportedMoving
                             if (!isReportedMoving) {
@@ -486,7 +515,11 @@ fun RadarMap(
         }
     }
 
-    // High-frequency (60 FPS) continuous road interpolation & dead-reckoning engine
+    val currentSelectedMemberId by rememberUpdatedState(selectedMemberId)
+    val currentIsFollowingSelectedMember by rememberUpdatedState(isFollowingSelectedMember)
+    val currentIsRouteTrailEnabled by rememberUpdatedState(isRouteTrailEnabled)
+
+    // High-frequency (60 FPS) continuous road interpolation & camera follow engine
     LaunchedEffect(Unit) {
         var lastFrameTime = android.os.SystemClock.uptimeMillis()
         while (isActive) {
@@ -505,12 +538,12 @@ fun RadarMap(
                 val distToTargetM = com.example.data.GeoUtils.distanceMeters(curLat, curLng, tgtLat, tgtLng)
 
                 if (state.isMoving) {
-                    val speedMps = (state.speedMph * 0.44704).coerceAtLeast(1.2)
+                    val speedMps = (state.speedMph * 0.44704).coerceAtLeast(0.6)
                     // Catchup speed smoothly scales to ensure it tracks incoming pings without lag
-                    val catchupSpeedMps = maxOf(speedMps, distToTargetM / 1.5)
+                    val catchupSpeedMps = maxOf(speedMps, distToTargetM / 1.0)
                     val stepM = catchupSpeedMps * dt
 
-                    if (distToTargetM > stepM && distToTargetM > 0.5) {
+                    if (distToTargetM > stepM && distToTargetM > 0.2) {
                         // Smoothly advance toward target
                         val frac = (stepM / distToTargetM).coerceIn(0.0, 1.0)
                         val nextLat = curLat + (tgtLat - curLat) * frac
@@ -520,31 +553,11 @@ fun RadarMap(
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
                     } else {
-                        // Reached target! DEAD RECKONING EXTRAPOLATION:
-                        // Continue moving forward along road heading at current speed!
-                        val timeSinceGps = now - state.lastTargetUpdateTime
-                        if (timeSinceGps < 30_000L) { // Extrapolate for up to 30s
-                            val decay = if (timeSinceGps > 15_000L) {
-                                (1.0 - (timeSinceGps - 15_000L) / 15_000.0).coerceIn(0.2, 1.0)
-                            } else 1.0
-                            val deadStepM = speedMps * decay * dt
-                            val rad = Math.toRadians(state.bearingDeg)
-                            val dLat = (deadStepM * kotlin.math.cos(rad)) / 111000.0
-                            val dLng = (deadStepM * kotlin.math.sin(rad)) / (111000.0 * kotlin.math.cos(Math.toRadians(curLat)))
-                            val nextLat = curLat + dLat
-                            val nextLng = curLng + dLng
-                            state.currentGeo = GeoPoint(nextLat, nextLng)
-                            state.targetGeo = state.currentGeo
-                            marker.position = state.currentGeo
-                            visualCoordinates[mId] = state.currentGeo
-                            anyMoved = true
-                        } else {
-                            state.currentGeo = state.targetGeo
-                            marker.position = state.currentGeo
-                            visualCoordinates[mId] = state.currentGeo
-                            state.isMoving = false
-                            anyMoved = true
-                        }
+                        // Reached target
+                        state.currentGeo = state.targetGeo
+                        marker.position = state.currentGeo
+                        visualCoordinates[mId] = state.currentGeo
+                        anyMoved = true
                     }
                 } else {
                     // Stationary: ease gently to settled target
@@ -559,12 +572,17 @@ fun RadarMap(
                     }
                 }
 
-                // Smooth camera follow for selected member ONLY when moving along roads
-                val isThisMemberSelected = mId == selectedMemberId || 
-                    (selectedMemberId != null && (mId.contains(selectedMemberId, ignoreCase = true) || selectedMemberId.contains(mId, ignoreCase = true)))
-                if (isThisMemberSelected && isFollowingSelectedMember && !isRouteTrailEnabled && state.isMoving) {
+                // Smooth camera follow for selected member when follow mode is active
+                val selId = currentSelectedMemberId
+                val isThisMemberSelected = selId != null && (
+                    mId == selId || 
+                    mId.contains(selId, ignoreCase = true) || 
+                    selId.contains(mId, ignoreCase = true)
+                )
+                if (isThisMemberSelected && currentIsFollowingSelectedMember && !currentIsRouteTrailEnabled) {
                     mapViewRef?.let { map ->
                         map.controller.setCenter(state.currentGeo)
+                        anyMoved = true
                     }
                 }
             }
@@ -671,6 +689,17 @@ fun RadarMap(
         }
     }
 
+    // Keep camera panning to stay centered on the selected member when follow mode is active!
+    LaunchedEffect(selectedMember?.y, selectedMember?.x, selectedMemberId, isFollowingSelectedMember) {
+        if (isFollowingSelectedMember && selectedMember != null && selectedMember.x != 0.0 && selectedMember.y != 0.0 && !isRouteTrailEnabled) {
+            mapViewRef?.let { map ->
+                val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                map.controller.setCenter(targetGeo)
+                mapViewRef?.postInvalidate()
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .background(Color(0xFFE0E2EC))
@@ -685,6 +714,7 @@ fun RadarMap(
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
+                    val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
                     var touchDownX = 0f
                     var touchDownY = 0f
                     // Allow panning and swiping on the Map without triggering outer container scrolling
@@ -698,8 +728,8 @@ fun RadarMap(
                             android.view.MotionEvent.ACTION_MOVE -> {
                                 val dx = Math.abs(event.x - touchDownX)
                                 val dy = Math.abs(event.y - touchDownY)
-                                if (dx > 12f || dy > 12f) {
-                                    // User is actively panning/scrolling the map: release camera lock!
+                                if (dx > touchSlop * 2.5f || dy > touchSlop * 2.5f) {
+                                    // User is deliberately panning/scrolling the map: release camera lock!
                                     isFollowingSelectedMember = false
                                     isCameraFollowingMe = false
                                 }
@@ -949,14 +979,32 @@ fun RadarMap(
                             animFrame = animTick
                         )
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { m, _ ->
-                            onSelectMember(if (selectedMemberId == member.id) null else member.id)
+                        setOnMarkerClickListener { _, _ ->
+                            onSelectMember(member.id)
+                            isFollowingSelectedMember = true
+                            mapViewRef?.let { map ->
+                                val targetGeo = visualCoordinates[member.id] ?: GeoPoint(member.y, member.x)
+                                map.controller.animateTo(targetGeo)
+                                if (map.zoomLevelDouble < 15.0) {
+                                    map.controller.setZoom(16.0)
+                                }
+                            }
                             memberForContextMenu = member
                             true
                         }
                     }
                     mapView.overlays.add(memberMarker)
-                    memberVisualStates[member.id]?.let { it.markerRef = memberMarker }
+                    val visualState = memberVisualStates.getOrPut(member.id) {
+                        MemberVisualState(
+                            currentGeo = GeoPoint(member.y, member.x),
+                            targetGeo = GeoPoint(member.y, member.x),
+                            speedMph = member.speedMph,
+                            bearingDeg = 0.0,
+                            lastTargetUpdateTime = System.currentTimeMillis(),
+                            isMoving = false
+                        )
+                    }
+                    visualState.markerRef = memberMarker
                 }
 
                 // Apply OpenStreetMap customizable styling options using tile sources and matrices
