@@ -2,7 +2,10 @@ package com.example.ui
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -299,62 +302,113 @@ fun RoomAudioMonitorControls(
                 shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, if (isTransmitterActive) GlowingEmerald else Color(0xFFE5E7EB))
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(12.dp)
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(if (isTransmitterActive) Color(0xFFD1FAE5) else Color(0xFFE9ECF2), CircleShape)
-                                .border(1.dp, if (isTransmitterActive) Color(0xFFA7F3D0) else Color(0xFFD1D6E2), CircleShape),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (isTransmitterActive) "🎙️" else "🔕", fontSize = 16.sp)
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(if (isTransmitterActive) Color(0xFFD1FAE5) else Color(0xFFE9ECF2), CircleShape)
+                                    .border(1.dp, if (isTransmitterActive) Color(0xFFA7F3D0) else Color(0xFFD1D6E2), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(if (isTransmitterActive) "🎙️" else "🔕", fontSize = 16.sp)
+                            }
+                            Column {
+                                Text(
+                                    text = "Broadcast My Audio to Family",
+                                    color = Color(0xFF1E2430),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isTransmitterActive) "🟢 Active — Broadcasting to VPS & Family Circle" else "Enable if leaving this phone to be monitored",
+                                    color = if (isTransmitterActive) GlowingEmerald else Color(0xFF5A6275),
+                                    fontSize = 11.sp
+                                )
+                            }
                         }
-                        Column {
-                            Text(
-                                text = "Broadcast My Audio to Family",
-                                color = Color(0xFF1E2430),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
+
+                        Switch(
+                            checked = isTransmitterActive,
+                            onCheckedChange = { enable ->
+                                if (enable) {
+                                    if (!hasMicPermission) {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    } else {
+                                        RoomAudioStreamManager.startTransmitter(context)
+                                    }
+                                } else {
+                                    RoomAudioStreamManager.stopTransmitter()
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = GlowingEmerald,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFCBD5E1)
                             )
-                            Text(
-                                text = if (isTransmitterActive) "🟢 Active — Broadcasting to VPS & Family Circle" else "Enable if leaving this phone to be monitored",
-                                color = if (isTransmitterActive) GlowingEmerald else Color(0xFF5A6275),
-                                fontSize = 11.sp
-                            )
-                        }
+                        )
                     }
 
-                    Switch(
-                        checked = isTransmitterActive,
-                        onCheckedChange = { enable ->
-                            if (enable) {
-                                if (!hasMicPermission) {
-                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                } else {
-                                    RoomAudioStreamManager.startTransmitter(context)
+                    if (!hasMicPermission) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            color = Color(0xFFFFFBEB),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "⚠️ Microphone permission is required to broadcast audio.",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF92400E)
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Button(
+                                        onClick = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Grant Permission", fontSize = 11.sp, color = Color.White)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = Uri.fromParts("package", context.packageName, null)
+                                            }
+                                            context.startActivity(intent)
+                                        },
+                                        shape = RoundedCornerShape(6.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("App Settings", fontSize = 11.sp, color = Color(0xFF92400E))
+                                    }
                                 }
-                            } else {
-                                RoomAudioStreamManager.stopTransmitter()
                             }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = GlowingEmerald,
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color(0xFFCBD5E1)
-                        )
-                    )
+                        }
+                    }
                 }
             }
 
