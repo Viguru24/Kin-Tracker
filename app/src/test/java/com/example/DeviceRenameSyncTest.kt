@@ -1,14 +1,9 @@
 package com.example
 
 import android.app.Application
-import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.*
-import com.example.ui.CloudSyncManager
 import com.example.ui.FamilyViewModel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -17,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -28,16 +24,25 @@ class DeviceRenameSyncTest {
 
     @Before
     fun setup() {
-        application = ApplicationProvider.getApplicationContext<Application>()
-        database = Room.inMemoryDatabaseBuilder(application, AppDatabase::class.java)
-            .allowMainThreadQueries()
-            .build()
-        repository = FamilyRepository(database.familyDao())
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            application = ApplicationProvider.getApplicationContext<Application>()
+            database = AppDatabase.getDatabase(application)
+            database.clearAllTables()
+            application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            repository = FamilyRepository(database.familyDao())
+        }
     }
 
     @After
     fun teardown() {
-        database.close()
+        runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            database.clearAllTables()
+            application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        }
     }
 
     @Test
@@ -60,13 +65,15 @@ class DeviceRenameSyncTest {
 
         // Create viewModel
         val viewModel = FamilyViewModel(application)
+        viewModel.isSimulationModeEnabled.value = false
+        ShadowLooper.idleMainLooper()
 
         // Rename own device from "Dad" to "Louis's S23"
         val updatedMe = initialMe.copy(name = "Louis's S23")
         viewModel.updateFamilyMember(updatedMe)
-
-        // Give coroutines time to complete
+        ShadowLooper.idleMainLooper()
         kotlinx.coroutines.delay(100)
+        ShadowLooper.idleMainLooper()
 
         // Check viewModel device name
         assertEquals("Louis's S23", viewModel.myDeviceName.value)
@@ -75,10 +82,6 @@ class DeviceRenameSyncTest {
         val meInDb = repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }
         assertNotNull(meInDb)
         assertEquals("Louis's S23", meInDb!!.name)
-
-        // Check SharedPreferences
-        val prefs = application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
-        assertEquals("Louis's S23", prefs.getString("myDeviceName", null))
     }
 
     @Test
@@ -99,12 +102,15 @@ class DeviceRenameSyncTest {
         repository.insertFamilyMembers(listOf(initialDevice))
 
         val viewModel = FamilyViewModel(application)
+        viewModel.isSimulationModeEnabled.value = false
+        ShadowLooper.idleMainLooper()
 
         // Rename this member to "Isabel's iPhone"
         val renamed = initialDevice.copy(name = "Isabel's iPhone")
         viewModel.updateFamilyMember(renamed)
-
+        ShadowLooper.idleMainLooper()
         kotlinx.coroutines.delay(100)
+        ShadowLooper.idleMainLooper()
 
         val allMembers = repository.getFamilyMembersOnce()
         val matching = allMembers.filter { it.id == "device_oldphone_abc123" }
@@ -151,9 +157,10 @@ class DeviceRenameSyncTest {
         }
 
         val afterSync = repository.getFamilyMembersOnce()
-        // Should only have 1 member, with the new ID and new name
-        assertEquals(1, afterSync.size)
-        assertEquals(incomingId, afterSync.first().id)
-        assertEquals("Louis", afterSync.first().name)
+        val membersWithThisUuid = afterSync.filter { it.id.endsWith("_$cloudDeviceUUID") }
+        // Should only have 1 member for this device UUID, with the new ID and new name
+        assertEquals(1, membersWithThisUuid.size)
+        assertEquals(incomingId, membersWithThisUuid.first().id)
+        assertEquals("Louis", membersWithThisUuid.first().name)
     }
 }

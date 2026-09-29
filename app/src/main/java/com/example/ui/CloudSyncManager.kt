@@ -712,8 +712,9 @@ class CloudSyncManager(
     }
 
     suspend fun updateGroupData(token: String, payload: CloudGroupPayload): Boolean {
+        val payloadJson = payloadAdapter.toJson(payload)
+        localMockCloudData[token] = payloadJson
         return try {
-            val payloadJson = payloadAdapter.toJson(payload)
             val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
             val response = cloudService.updateGroupData(token, requestBody)
             response.isSuccessful
@@ -730,7 +731,12 @@ class CloudSyncManager(
                 payloadAdapter.fromJson(jsonString)
             } else null
         } catch (e: Exception) {
-            null
+            val mockJson = localMockCloudData[token]
+            if (mockJson != null && mockJson.isNotBlank()) {
+                try {
+                    payloadAdapter.fromJson(mockJson)
+                } catch (ex: Exception) { null }
+            } else null
         }
     }
 

@@ -168,8 +168,9 @@ class SimulationEngine(
                     }
 
                     if (updated) {
+                        val currentMember = repository.getFamilyMembersOnce().firstOrNull { it.id == member.id } ?: member
                         repository.updateMember(
-                            member.copy(
+                            currentMember.copy(
                                 x = newX,
                                 y = newY,
                                 batteryPercentage = newBattery,
