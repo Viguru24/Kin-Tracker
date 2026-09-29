@@ -127,6 +127,17 @@ app.put('/sync/:token', (req, res) => {
             memberIds: []
         };
         db.saveCircle(circle);
+    } else {
+        if (body.homeLat !== undefined) circle.homeLat = body.homeLat;
+        if (body.homeLng !== undefined) circle.homeLng = body.homeLng;
+        if (body.isHomeCalibrated !== undefined) circle.isHomeCalibrated = Boolean(body.isHomeCalibrated);
+        if (body.workLat !== undefined) circle.workLat = body.workLat;
+        if (body.workLng !== undefined) circle.workLng = body.workLng;
+        if (body.isWorkCalibrated !== undefined) circle.isWorkCalibrated = Boolean(body.isWorkCalibrated);
+        if (body.homeRadiusMeters !== undefined) circle.homeRadiusMeters = body.homeRadiusMeters;
+        if (body.workRadiusMeters !== undefined) circle.workRadiusMeters = body.workRadiusMeters;
+        circle.lastUpdated = Date.now();
+        db.saveCircle(circle);
     }
 
     // If members map provided

@@ -538,7 +538,7 @@ fun MainScreen(
                         cleanSpeechText.contains("has arrived at home", ignoreCase = true) || cleanSpeechText.contains("has arrived home", ignoreCase = true) -> {
                             "$personName has arrived home"
                         }
-                        cleanSpeechText.contains("has left the house", ignoreCase = true) || cleanSpeechText.contains("has left", ignoreCase = true) -> {
+                        cleanSpeechText.contains("has left the house", ignoreCase = true) -> {
                             "$personName has left the house"
                         }
                         else -> cleanSpeechText

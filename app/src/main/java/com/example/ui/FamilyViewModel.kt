@@ -357,7 +357,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     allPlaces.add(MonitoredPlace("place_home", "Home", hLat, hLng, hRadius, "home", isHome = true))
                 }
                 if (isWCal && wLat != 0.0 && wLng != 0.0) {
-                    allPlaces.add(MonitoredPlace("place_work", "Work", wLat, wLng, wRadius, "work", isWork = true))
+                    val isWoodcote = Math.hypot((wLat - 51.3280) * 111.0, (wLng - (-0.1405)) * 111.0) < 0.6
+                    val placeName = if (isWoodcote) "Woodcote Primary School" else "Work"
+                    val placeIcon = if (isWoodcote) "school" else "work"
+                    allPlaces.add(MonitoredPlace("place_work", placeName, wLat, wLng, wRadius, placeIcon, isWork = !isWoodcote))
                 }
                 customZones.forEach { zone ->
                     if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {
@@ -586,6 +589,23 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 isCloudSyncEnabled.value = true
                 savePreferences()
             }
+
+            // Ensure Woodcote Primary School is registered as a safe zone
+            try {
+                val existingZones = repository.getAllSafeZonesOnce()
+                if (existingZones.none { it.name.contains("Woodcote", ignoreCase = true) || it.name.contains("School", ignoreCase = true) }) {
+                    repository.insertSafeZone(
+                        SafeZone(
+                            id = "zone_woodcote_school",
+                            name = "Woodcote Primary School",
+                            latitude = 51.3279926,
+                            longitude = -0.1405488,
+                            radiusMeters = 85.0,
+                            iconName = "school"
+                        )
+                    )
+                }
+            } catch (_: Exception) {}
 
             val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
             val savedLocationSince = prefs.getLong("my_location_since", 0L)
