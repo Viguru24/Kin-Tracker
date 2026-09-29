@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Config
+    Allows cleartext (plain TCP) traffic to local LAN address ranges used by
+    the RoomAudioStreamManager P2P socket on port 18884.
+    All internet-facing traffic remains TLS-only.
+-->
+<network-security-config>
+
+    <!-- Allow cleartext to private/LAN address ranges only -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Class A private range -->
+        <domain includeSubdomains="true">10.0.0.0</domain>
+        <!-- Class B private range -->
+        <domain includeSubdomains="true">172.16.0.0</domain>
+        <!-- Class C private range (most home routers) -->
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <!-- Hotspot range -->
+        <domain includeSubdomains="true">192.168.43.0</domain>
+        <domain includeSubdomains="true">192.168.49.0</domain>
+    </domain-config>
+
+    <!-- Default: enforce TLS for all other traffic -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+</network-security-config>

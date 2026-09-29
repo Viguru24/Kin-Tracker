@@ -245,34 +245,75 @@ object RoomAudioStreamManager {
     }
 
     private suspend fun discoverActiveBeaconIp(context: Context?, port: Int): String? = withContext(Dispatchers.IO) {
-        val baseIp = if (context != null) getLocalIpAddress(context) else "192.168.1.1"
-        if (!baseIp.contains(".")) return@withContext null
-        val prefix = baseIp.substringBeforeLast(".") + "."
+        // Collect ALL candidate local subnets (device may have wlan0, ap0, rndis0 etc.)
+        val subnets = mutableSetOf<String>()
+
+        // 1. Try WifiManager (most reliable on wlan0)
+        if (context != null) {
+            try {
+                val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                val wifiInfo = wm?.connectionInfo
+                if (wifiInfo != null && wifiInfo.ipAddress != 0) {
+                    @Suppress("DEPRECATION")
+                    val ip = android.text.format.Formatter.formatIpAddress(wifiInfo.ipAddress)
+                    if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1" && ip.contains(".")) {
+                        subnets.add(ip.substringBeforeLast(".") + ".")
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Enumerate ALL network interfaces as fallback / supplement
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces?.hasMoreElements() == true) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addrs = iface.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
+                        val h = addr.hostAddress ?: continue
+                        if (h != "127.0.0.1" && h != "0.0.0.0" && h.contains(".")) {
+                            subnets.add(h.substringBeforeLast(".") + ".")
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (subnets.isEmpty()) return@withContext null
+
+        _statusMessage.value = "Scanning ${subnets.size} subnet(s) for audio beacon..."
 
         val discoveredIp = CompletableDeferred<String?>()
         val jobs = mutableListOf<Job>()
 
-        for (i in 1..254) {
-            val ip = "$prefix$i"
-            val job = launch {
-                try {
-                    Socket().use { s ->
-                        s.connect(InetSocketAddress(ip, port), 250)
-                        if (!discoveredIp.isCompleted) {
-                            discoveredIp.complete(ip)
+        for (prefix in subnets) {
+            for (i in 1..254) {
+                val ip = "$prefix$i"
+                val job = launch {
+                    try {
+                        Socket().use { s ->
+                            s.connect(InetSocketAddress(ip, port), 400)
+                            if (!discoveredIp.isCompleted) {
+                                discoveredIp.complete(ip)
+                            }
                         }
-                    }
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                }
+                jobs.add(job)
             }
-            jobs.add(job)
         }
 
-        val result = withTimeoutOrNull(1800) {
+        // Give up to 5 seconds — covers slow/congested home routers
+        val result = withTimeoutOrNull(5000) {
             discoveredIp.await()
         }
         jobs.forEach { it.cancel() }
         result
     }
+
 
     private suspend fun connectAndStream(hostIp: String, port: Int, memberName: String) = withContext(Dispatchers.IO) {
         var audioTrack: AudioTrack? = null
