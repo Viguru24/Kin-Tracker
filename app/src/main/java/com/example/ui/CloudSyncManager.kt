@@ -605,13 +605,24 @@ class CloudSyncManager(
                 val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else cloudM.x
                 val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else cloudM.y
 
-                // Synchronize circle-wide device name
+                // Synchronize circle-wide device name.
+                // IMPORTANT: respect any local rename the user has made on THIS device.
+                // edited_name_${cloudM.id} is written whenever the user renames a member locally,
+                // so we read it back here and prefer it over whatever the cloud sent.
+                val locallyEditedName = contactsPrefs.getString("edited_name_${cloudM.id}", "")
+                    ?.trim()?.takeIf { it.isNotBlank() }
+
                 val resolvedName = when {
+                    // User has renamed this member locally on this device — always honour it
+                    !locallyEditedName.isNullOrBlank() -> locallyEditedName
+                    // Two devices registered with the same cloud name — disambiguate
                     cloudM.name.trim().equals(myName.trim(), ignoreCase = true) -> "${cloudM.name} (Other Device)"
+                    // Use the cloud name as-is
                     cloudM.name.isNotBlank() -> cloudM.name
                     else -> cloudM.name
                 }
-                if (cloudM.name.isNotBlank()) {
+                // Persist the resolved name so it survives app restarts
+                if (resolvedName.isNotBlank()) {
                     contactsPrefs.edit().putString("edited_name_${cloudM.id}", resolvedName).apply()
                 }
 
