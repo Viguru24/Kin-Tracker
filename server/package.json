@@ -23,7 +23,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
-    "morgan": "^1.10.0"
-  },
-  "devDependencies": {}
+    "morgan": "^1.10.0",
+    "ws": "^8.22.0"
+  }
 }

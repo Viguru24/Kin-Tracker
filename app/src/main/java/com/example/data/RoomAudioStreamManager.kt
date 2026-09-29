@@ -15,6 +15,13 @@ import android.text.format.Formatter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Inet4Address
@@ -22,6 +29,9 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URLEncoder
+import java.util.Collections
+import java.util.concurrent.TimeUnit
 import kotlin.math.log10
 import kotlin.math.sqrt
 
@@ -71,6 +81,31 @@ object RoomAudioStreamManager {
 
     private val _activeTransmittingMembers = MutableStateFlow<Set<String>>(emptySet())
     val activeTransmittingMembers = _activeTransmittingMembers.asStateFlow()
+
+    private val _activeTransport = MutableStateFlow("Idle")
+    val activeTransport = _activeTransport.asStateFlow()
+
+    private var activeCircleId: String = AppConfig.DEFAULT_GROUP_SYNC_TOKEN
+    private var myDeviceName: String = "KinDevice"
+    private var myDeviceId: String = "device_${Build.MODEL.replace(" ", "_")}"
+
+    fun setCircleContext(circleId: String, deviceName: String = "", deviceId: String = "") {
+        if (circleId.isNotBlank()) activeCircleId = circleId
+        if (deviceName.isNotBlank()) myDeviceName = deviceName
+        if (deviceId.isNotBlank()) myDeviceId = deviceId
+    }
+
+    private val httpClient by lazy {
+        OkHttpClient.Builder()
+            .pingInterval(20, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    private val lanClients = Collections.synchronizedSet(mutableSetOf<Socket>())
+    private var relayWebSocket: WebSocket? = null
+    private var listenerWebSocket: WebSocket? = null
 
     // ── Diagnostics ──────────────────────────────────────────────
     private val _bytesReceived = MutableStateFlow(0L)
@@ -240,14 +275,15 @@ object RoomAudioStreamManager {
     private var listenerSocket: Socket? = null
 
     // ─────────────────────────────────────────────────────────────
-    // 1. TRANSMITTER ENGINE (Baby Room Phone)
+    // 1. TRANSMITTER ENGINE (Baby Room Phone / Broadcaster)
     // ─────────────────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
     fun startTransmitter(context: Context? = null, port: Int = DEFAULT_PORT) {
         if (_isTransmitterActive.value) return
 
-        transmitterJob = scope.launch {
+        transmitterJob = scope.launch(Dispatchers.IO) {
+            var audioRecord: AudioRecord? = null
             try {
                 serverSocket = ServerSocket(port).apply { reuseAddress = true }
                 _isTransmitterActive.value = true
@@ -255,93 +291,126 @@ object RoomAudioStreamManager {
                 // Capture and expose the tablet's own local IP so the UI can show it
                 val myIp = if (context != null) getLocalIpAddress(context) else "unknown"
                 _transmitterLocalIp.value = myIp
-                _statusMessage.value = "Transmitter ready on $myIp:$port"
-                appendLog("TRANSMITTER started | IP=$myIp | port=$port")
+                _statusMessage.value = "Transmitter active ($myIp & Cloud Relay)"
+                appendLog("TRANSMITTER started | IP=$myIp | Port=$port")
                 onTransmitterToggled?.invoke(true)
 
-                while (isActive && serverSocket?.isClosed == false) {
-                    val clientSocket = try {
-                        serverSocket?.accept()
-                    } catch (e: Exception) {
-                        appendLog("accept() error: ${e.message}")
-                        null
-                    }
+                // 1. Local Wi-Fi acceptor loop
+                launch(Dispatchers.IO) {
+                    while (isActive && serverSocket?.isClosed == false) {
+                        val clientSocket = try {
+                            serverSocket?.accept()
+                        } catch (_: Exception) {
+                            null
+                        }
 
-                    if (clientSocket != null) {
-                        val clientIp = clientSocket.inetAddress?.hostAddress ?: "?"
-                        appendLog("Client connected from $clientIp")
-                        launch(Dispatchers.IO) {
-                            handleClientStream(clientSocket)
+                        if (clientSocket != null) {
+                            val clientIp = clientSocket.inetAddress?.hostAddress ?: "?"
+                            lanClients.add(clientSocket)
+                            val count = lanClients.size + (if (relayWebSocket != null) 1 else 0)
+                            _activeConnectionsCount.value = count
+                            appendLog("LAN client connected from $clientIp ✓")
                         }
                     }
                 }
+
+                // 2. Connect outgoing WebSocket to VPS Cloud Relay (for cellular listeners)
+                launch(Dispatchers.IO) {
+                    try {
+                        val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "")
+                        val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=broadcast&circleId=$cleanCircle&memberId=${URLEncoder.encode(myDeviceId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
+                        appendLog("Connecting to VPS Cloud Relay...")
+                        val req = Request.Builder().url(wsUrl).build()
+                        relayWebSocket = httpClient.newWebSocket(req, object : WebSocketListener() {
+                            override fun onOpen(webSocket: WebSocket, response: Response) {
+                                appendLog("VPS Cloud Bridge connected (Cellular Relay Ready) ✓")
+                            }
+                            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                                appendLog("VPS Cloud Bridge notice: ${t.message ?: "reconnecting"}")
+                            }
+                            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                                appendLog("VPS Cloud Bridge disconnected")
+                            }
+                        })
+                    } catch (e: Exception) {
+                        appendLog("VPS Cloud Bridge notice: ${e.message}")
+                    }
+                }
+
+                // 3. Audio capture loop (fans out to LAN listeners & Cloud Relay)
+                val minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_IN, AUDIO_FORMAT)
+                val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
+                val buffer = ByteArray(bufferSize)
+
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    SAMPLE_RATE,
+                    CHANNEL_IN,
+                    AUDIO_FORMAT,
+                    bufferSize
+                )
+
+                if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                    appendLog("AudioRecord FAILED to init — mic permission missing?")
+                    _lastError.value = "AudioRecord failed to initialise (mic permission?)"
+                    return@launch
+                }
+
+                audioRecord.startRecording()
+                appendLog("Microphone active — streaming to LAN & Cloud...")
+                var totalBytesSent = 0L
+                var firstChunkLogged = false
+
+                while (isActive && _isTransmitterActive.value) {
+                    val bytesRead = audioRecord.read(buffer, 0, buffer.size)
+                    if (bytesRead > 0) {
+                        totalBytesSent += bytesRead
+
+                        // (a) Fan-out to all connected local LAN Wi-Fi listeners
+                        synchronized(lanClients) {
+                            val it = lanClients.iterator()
+                            while (it.hasNext()) {
+                                val client = it.next()
+                                try {
+                                    val out = client.getOutputStream()
+                                    out.write(buffer, 0, bytesRead)
+                                    out.flush()
+                                } catch (_: Exception) {
+                                    it.remove()
+                                    try { client.close() } catch (_: Exception) {}
+                                }
+                            }
+                        }
+
+                        // (b) Fan-out to VPS Cloud Relay WebSocket
+                        try {
+                            relayWebSocket?.send(buffer.toByteString(0, bytesRead))
+                        } catch (_: Exception) {}
+
+                        // (c) RMS decibel level for UI waveform
+                        val db = calculateDecibels(buffer, bytesRead)
+                        _currentDecibels.value = db
+                        _activeConnectionsCount.value = lanClients.size
+
+                        if (!firstChunkLogged) {
+                            appendLog("First audio chunk dispatched ($bytesRead bytes) ✓")
+                            firstChunkLogged = true
+                        }
+                    } else if (bytesRead < 0) {
+                        appendLog("AudioRecord read returned $bytesRead — stopping")
+                        break
+                    }
+                }
+                appendLog("Transmitter stopped. Total streamed: ${totalBytesSent / 1024} KB")
             } catch (e: Exception) {
                 val msg = e.localizedMessage ?: "Unknown"
                 appendLog("TRANSMITTER error: $msg")
                 _statusMessage.value = "Transmitter error: $msg"
                 _lastError.value = msg
             } finally {
+                try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
                 stopTransmitterInternal()
             }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun handleClientStream(clientSocket: Socket) = withContext(Dispatchers.IO) {
-        _activeConnectionsCount.value += 1
-        var audioRecord: AudioRecord? = null
-
-        try {
-            val minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_IN, AUDIO_FORMAT)
-            val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
-            val buffer = ByteArray(bufferSize)
-
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                SAMPLE_RATE,
-                CHANNEL_IN,
-                AUDIO_FORMAT,
-                bufferSize
-            )
-
-            if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
-                appendLog("AudioRecord FAILED to init — mic permission missing?")
-                _lastError.value = "AudioRecord failed to initialise (mic permission?)"
-                clientSocket.close()
-                return@withContext
-            }
-
-            audioRecord.startRecording()
-            appendLog("AudioRecord recording | bufSize=$bufferSize")
-            val outputStream: OutputStream = clientSocket.getOutputStream()
-            var totalBytesSent = 0L
-            var firstChunkLogged = false
-
-            while (isActive && !clientSocket.isClosed && clientSocket.isConnected) {
-                val bytesRead = audioRecord.read(buffer, 0, buffer.size)
-                if (bytesRead > 0) {
-                    outputStream.write(buffer, 0, bytesRead)
-                    outputStream.flush()
-                    totalBytesSent += bytesRead
-                    val db = calculateDecibels(buffer, bytesRead)
-                    _currentDecibels.value = db
-                    if (!firstChunkLogged) {
-                        appendLog("First audio chunk sent: $bytesRead bytes ✓")
-                        firstChunkLogged = true
-                    }
-                } else if (bytesRead < 0) {
-                    appendLog("AudioRecord read returned $bytesRead — stopping")
-                    break
-                }
-            }
-            appendLog("Client disconnected. Total sent: ${totalBytesSent / 1024} KB")
-        } catch (e: Exception) {
-            appendLog("Stream error: ${e.message}")
-            _lastError.value = "Stream error: ${e.message}"
-        } finally {
-            try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
-            try { clientSocket.close() } catch (_: Exception) {}
-            _activeConnectionsCount.value = (_activeConnectionsCount.value - 1).coerceAtLeast(0)
         }
     }
 
@@ -352,6 +421,19 @@ object RoomAudioStreamManager {
     private fun stopTransmitterInternal() {
         try { serverSocket?.close() } catch (_: Exception) {}
         serverSocket = null
+
+        // Close all LAN clients
+        synchronized(lanClients) {
+            lanClients.forEach { try { it.close() } catch (_: Exception) {} }
+            lanClients.clear()
+        }
+
+        // Close VPS WebSocket
+        try {
+            relayWebSocket?.close(1000, "Transmitter stopped")
+        } catch (_: Exception) {}
+        relayWebSocket = null
+
         transmitterJob?.cancel()
         transmitterJob = null
         _isTransmitterActive.value = false
@@ -471,20 +553,11 @@ object RoomAudioStreamManager {
         _bytesReceived.value = 0L
 
         try {
-            appendLog("Connecting to $hostIp:$port")
-            _statusMessage.value = "Connecting to ${memberName.substringBefore(" ")}..."
-            val socket = Socket()
-            listenerSocket = socket
-            socket.connect(InetSocketAddress(hostIp, port), 5000)
-            appendLog("Socket connected ✓")
-
             _isListening.value = true
-            _statusMessage.value = "Listening Live to ${memberName.substringBefore(" ")}"
 
             val minBufSize = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_OUT, AUDIO_FORMAT)
             val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
             val buffer = ByteArray(bufferSize)
-            appendLog("Buffer size: $bufferSize bytes")
 
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -504,8 +577,6 @@ object RoomAudioStreamManager {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
-            appendLog("AudioTrack state=${audioTrack.state} (1=OK)")
-
             if (context != null) {
                 audioManager = context.applicationContext
                     .getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -515,7 +586,6 @@ object RoomAudioStreamManager {
                     previousSpeaker = am.isSpeakerphoneOn
                     val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    appendLog("Vol: $curVol/$maxVol | mode=${am.mode} | spk=${am.isSpeakerphoneOn}")
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
@@ -524,8 +594,7 @@ object RoomAudioStreamManager {
                             .setOnAudioFocusChangeListener {}
                             .build()
                         audioFocusRequest = focusReq
-                        val result = am.requestAudioFocus(focusReq)
-                        appendLog("AudioFocus result=$result (1=GRANTED)")
+                        am.requestAudioFocus(focusReq)
                     } else {
                         @Suppress("DEPRECATION")
                         am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
@@ -533,44 +602,118 @@ object RoomAudioStreamManager {
 
                     am.mode = AudioManager.MODE_NORMAL
                     am.isSpeakerphoneOn = true
-                    appendLog("Set mode=NORMAL speakerphone=true")
 
                     if (curVol == 0) {
                         am.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.8f).toInt(), 0)
-                        appendLog("Volume was 0 — raised to ${(maxVol * 0.8f).toInt()}")
                     }
                 }
             }
 
-            audioTrack.play()
-            appendLog("AudioTrack.play() called — reading stream...")
-            val inputStream: InputStream = socket.getInputStream()
             var totalBytes = 0L
-            var firstChunkLogged = false
+            var connectedViaLan = false
+            val isLanCandidate = hostIp.isNotBlank() && hostIp != "127.0.0.1" && hostIp != "cloud" &&
+                (hostIp.startsWith("192.168.") || hostIp.startsWith("10.") || hostIp.startsWith("172."))
 
-            while (isActive && !socket.isClosed && socket.isConnected) {
-                val bytesRead = inputStream.read(buffer, 0, buffer.size)
-                if (bytesRead > 0) {
-                    audioTrack.write(buffer, 0, bytesRead)
-                    totalBytes += bytesRead
-                    _bytesReceived.value = totalBytes
-                    _currentDecibels.value = calculateDecibels(buffer, bytesRead)
-                    if (!firstChunkLogged) {
-                        appendLog("First chunk received: $bytesRead bytes ✓")
-                        firstChunkLogged = true
+            // STEP 1: Attempt direct LAN Wi-Fi connection if on the same local network
+            if (isLanCandidate) {
+                try {
+                    appendLog("Trying Direct Wi-Fi connection ($hostIp:$port)...")
+                    _statusMessage.value = "Connecting to ${memberName.substringBefore(" ")} via Wi-Fi..."
+                    val socket = Socket()
+                    listenerSocket = socket
+                    socket.connect(InetSocketAddress(hostIp, port), 1800) // Fast 1.8s timeout for LAN
+                    connectedViaLan = true
+                    _activeTransport.value = "Direct Wi-Fi"
+                    appendLog("Connected via Direct Wi-Fi ✓")
+                    _statusMessage.value = "Listening Live to ${memberName.substringBefore(" ")} (Wi-Fi)"
+
+                    audioTrack.play()
+                    val inputStream = socket.getInputStream()
+                    var firstChunkLogged = false
+
+                    while (isActive && !socket.isClosed && socket.isConnected) {
+                        val bytesRead = inputStream.read(buffer, 0, buffer.size)
+                        if (bytesRead > 0) {
+                            audioTrack.write(buffer, 0, bytesRead)
+                            totalBytes += bytesRead
+                            _bytesReceived.value = totalBytes
+                            _currentDecibels.value = calculateDecibels(buffer, bytesRead)
+                            if (!firstChunkLogged) {
+                                appendLog("First chunk received via Direct Wi-Fi: $bytesRead bytes ✓")
+                                firstChunkLogged = true
+                            }
+                        } else if (bytesRead < 0) {
+                            appendLog("Direct Wi-Fi stream ended")
+                            break
+                        }
                     }
-                } else if (bytesRead < 0) {
-                    appendLog("Stream ended (bytesRead=$bytesRead)")
-                    break
+                } catch (e: Exception) {
+                    appendLog("Direct Wi-Fi unreachable (${e.message}) — switching to VPS Cloud Relay...")
+                    try { listenerSocket?.close() } catch (_: Exception) {}
+                    listenerSocket = null
                 }
             }
+
+            // STEP 2: Fallback to VPS Cloud Relay WebSocket (for cellular or remote Wi-Fi)
+            if (!connectedViaLan && isActive) {
+                _activeTransport.value = "VPS Cloud Relay"
+                _statusMessage.value = "Connecting to VPS Cloud Relay..."
+                val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "")
+                appendLog("Connecting to VPS Cloud Relay (circle: $cleanCircle)...")
+
+                val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=listen&circleId=$cleanCircle&memberId=${URLEncoder.encode(myDeviceId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
+                val req = Request.Builder().url(wsUrl).build()
+
+                audioTrack.play()
+                val streamFinished = CompletableDeferred<Unit>()
+
+                val ws = httpClient.newWebSocket(req, object : WebSocketListener() {
+                    var firstChunk = false
+
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        appendLog("VPS Cloud Relay connected ✓ (Cellular Stream Live)")
+                        _statusMessage.value = "Listening Live to ${memberName.substringBefore(" ")} (Cloud Relay)"
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                        val arr = bytes.toByteArray()
+                        if (arr.isNotEmpty()) {
+                            audioTrack.write(arr, 0, arr.size)
+                            totalBytes += arr.size
+                            _bytesReceived.value = totalBytes
+                            _currentDecibels.value = calculateDecibels(arr, arr.size)
+                            if (!firstChunk) {
+                                appendLog("First chunk received via Cloud Relay: ${arr.size} bytes ✓")
+                                firstChunk = true
+                            }
+                        }
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                        appendLog("VPS Cloud Relay notice: ${t.message}")
+                        _lastError.value = "Cloud Relay: ${t.message}"
+                        if (!streamFinished.isCompleted) streamFinished.complete(Unit)
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        appendLog("VPS Cloud Relay ended ($code: $reason)")
+                        if (!streamFinished.isCompleted) streamFinished.complete(Unit)
+                    }
+                })
+                listenerWebSocket = ws
+
+                try {
+                    streamFinished.await()
+                } catch (_: CancellationException) {}
+            }
+
         } catch (e: Exception) {
             val msg = e.localizedMessage ?: "Unknown error"
             appendLog("ERROR: $msg")
             _lastError.value = msg
             _statusMessage.value = "Connection ended: $msg"
         } finally {
-            appendLog("Cleaning up. Total bytes received: ${_bytesReceived.value}")
+            appendLog("Cleaning up listener. Total bytes received: ${_bytesReceived.value}")
             try {
                 audioManager?.let { am ->
                     am.isSpeakerphoneOn = previousSpeaker
@@ -585,10 +728,13 @@ object RoomAudioStreamManager {
             } catch (_: Exception) {}
             try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
             try { listenerSocket?.close() } catch (_: Exception) {}
+            try { listenerWebSocket?.close(1000, "Listener stopped") } catch (_: Exception) {}
             listenerSocket = null
+            listenerWebSocket = null
             _isListening.value = false
             _activeListeningMemberId.value = null
             _currentDecibels.value = 0f
+            _activeTransport.value = "Idle"
         }
     }
 
@@ -600,18 +746,18 @@ object RoomAudioStreamManager {
         }
     }
 
-
     fun stopListening() {
         scope.launch(Dispatchers.IO) {
-            try {
-                listenerSocket?.close()
-            } catch (_: Exception) {}
+            try { listenerSocket?.close() } catch (_: Exception) {}
+            try { listenerWebSocket?.close(1000, "Stopped listening") } catch (_: Exception) {}
             listenerSocket = null
+            listenerWebSocket = null
             listenerJob?.cancel()
             listenerJob = null
             _isListening.value = false
             _activeListeningMemberId.value = null
             _currentDecibels.value = 0f
+            _activeTransport.value = "Idle"
             _statusMessage.value = "Stopped Listening"
         }
     }

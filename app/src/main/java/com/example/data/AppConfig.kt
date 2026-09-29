@@ -6,6 +6,7 @@ object AppConfig {
     const val BASE_URL = "https://api.cosmowhisper.com/sync/"
     const val HEARTBEAT_URL = "https://api.cosmowhisper.com/sync/heartbeat"
     const val FEEDBACK_URL = "https://api.cosmowhisper.com/sync/feedback"
+    const val AUDIO_RELAY_WS_URL = "wss://api.cosmowhisper.com/audio"
     const val DEFAULT_CIRCLE_INVITE_CODE = "KT-4666"
     const val DEFAULT_GROUP_SYNC_TOKEN = "81e5632c_pin_group"
 

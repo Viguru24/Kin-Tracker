@@ -89,6 +89,13 @@ class CloudSyncManager(
         val myColor = myDeviceColor.value
         val meMember = familyMembers.value.firstOrNull { it.id == "me" } ?: return
 
+        // Synchronize RoomAudioStreamManager with active circle token and device name
+        com.example.data.RoomAudioStreamManager.setCircleContext(
+            circleId = token,
+            deviceName = myName,
+            deviceId = meMember.id
+        )
+
         try {
             cloudStatusText.value = "Syncing with Cloud..."
 

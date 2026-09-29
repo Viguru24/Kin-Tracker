@@ -1,10 +1,12 @@
 require('dotenv').config();
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const circleRoutes = require('./routes/circles');
 const db = require('./db');
+const { setupAudioRelay, getAudioRelayStats } = require('./audioRelay');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -179,11 +181,24 @@ app.put('/sync/:token', (req, res) => {
     return res.json({ success: true, message: 'Synced successfully' });
 });
 
+// Audio Relay Stats & Diagnostics
+app.get('/api/audio/stats', (req, res) => {
+    res.json({
+        status: 'online',
+        rooms: getAudioRelayStats()
+    });
+});
+
 // Start listening
-app.listen(PORT, '0.0.0.0', () => {
+const server = http.createServer(app);
+setupAudioRelay(server);
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(`🚀 Kin-Tracker Sovereign GPS Server v2.0.0`);
     console.log(`📡 Listening on: http://0.0.0.0:${PORT}`);
+    console.log(`🎙️ Cloud Audio Relay active at ws://0.0.0.0:${PORT}/audio`);
     console.log(`🛡️ Life360-Style Invite System Active`);
     console.log(`====================================================`);
 });
+

@@ -51,6 +51,7 @@ fun RoomAudioMonitorControls(
     val latestDiscoveredIp by RoomAudioStreamManager.latestDiscoveredIp.collectAsState()
     val activeConnectionsCount by RoomAudioStreamManager.activeConnectionsCount.collectAsState()
     val bytesReceived by RoomAudioStreamManager.bytesReceived.collectAsState()
+    val activeTransport by RoomAudioStreamManager.activeTransport.collectAsState()
     val lastError by RoomAudioStreamManager.lastError.collectAsState()
     val diagnosticLog by RoomAudioStreamManager.diagnosticLog.collectAsState()
 
@@ -429,6 +430,7 @@ fun RoomAudioMonitorControls(
                 isListening = isListening,
                 transmitterLocalIp = transmitterLocalIp,
                 autoDetectedIp = autoDetectedIp,
+                activeTransport = activeTransport,
                 bytesReceived = bytesReceived,
                 lastError = lastError,
                 diagnosticLog = diagnosticLog,
@@ -542,6 +544,7 @@ private fun AudioDiagnosticsPanel(
     isListening: Boolean,
     transmitterLocalIp: String,
     autoDetectedIp: String,
+    activeTransport: String,
     bytesReceived: Long,
     lastError: String,
     diagnosticLog: List<String>,
@@ -735,15 +738,35 @@ private fun AudioDiagnosticsPanel(
                 }
 
                 if (isListening) {
-                    Text(
-                        text = if (bytesReceived > 0)
-                            "${bytesReceived / 1024} KB received ✓"
-                        else
-                            "0 KB received — connected but no data yet!",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (bytesReceived > 0) Color(0xFF16A34A) else Color(0xFFDC2626)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = if (activeTransport.contains("Cloud") || activeTransport.contains("Relay")) Color(0xFFEEF2FF) else Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, if (activeTransport.contains("Cloud") || activeTransport.contains("Relay")) Color(0xFFC7D2FE) else Color(0xFF86EFAC))
+                        ) {
+                            Text(
+                                text = if (activeTransport.contains("Cloud") || activeTransport.contains("Relay")) "☁️ VPS Cloud Relay (Cellular)" else "📶 Direct Wi-Fi (LAN)",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeTransport.contains("Cloud") || activeTransport.contains("Relay")) Color(0xFF4338CA) else Color(0xFF15803D),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Text(
+                            text = if (bytesReceived > 0)
+                                "${bytesReceived / 1024} KB received ✓"
+                            else
+                                "Connecting…",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (bytesReceived > 0) Color(0xFF16A34A) else Color(0xFF64748B)
+                        )
+                    }
                 }
             }
 
