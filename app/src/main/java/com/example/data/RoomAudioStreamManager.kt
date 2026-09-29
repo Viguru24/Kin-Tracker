@@ -66,6 +66,9 @@ object RoomAudioStreamManager {
     private val _activeListeningMemberId = MutableStateFlow<String?>(null)
     val activeListeningMemberId = _activeListeningMemberId.asStateFlow()
 
+    private val _latestDiscoveredIp = MutableStateFlow("")
+    val latestDiscoveredIp = _latestDiscoveredIp.asStateFlow()
+
     private val _activeTransmittingMembers = MutableStateFlow<Set<String>>(emptySet())
     val activeTransmittingMembers = _activeTransmittingMembers.asStateFlow()
 
@@ -196,6 +199,7 @@ object RoomAudioStreamManager {
     fun registerMemberIp(memberId: String, ip: String, memberName: String = "") {
         if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1") {
             memberIpRegistry[memberId] = ip
+            _latestDiscoveredIp.value = ip
             if (memberName.isNotBlank()) {
                 val clean = memberName.lowercase().replace(Regex("\\s*\\(.*?\\)"), "").trim()
                 memberIpRegistry[clean] = ip
@@ -383,7 +387,7 @@ object RoomAudioStreamManager {
         }
     }
 
-    private suspend fun discoverActiveBeaconIp(context: Context?, port: Int): String? = withContext(Dispatchers.IO) {
+    suspend fun discoverActiveBeaconIp(context: Context?, port: Int = DEFAULT_PORT): String? = withContext(Dispatchers.IO) {
         // Collect ALL candidate local subnets (device may have wlan0, ap0, rndis0 etc.)
         val subnets = mutableSetOf<String>()
 
@@ -450,6 +454,10 @@ object RoomAudioStreamManager {
             discoveredIp.await()
         }
         jobs.forEach { it.cancel() }
+        if (!result.isNullOrBlank()) {
+            _latestDiscoveredIp.value = result
+            appendLog("Auto-discovered active audio beacon at $result ✓")
+        }
         result
     }
 

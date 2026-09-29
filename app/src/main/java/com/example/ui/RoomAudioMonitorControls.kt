@@ -46,10 +46,17 @@ fun RoomAudioMonitorControls(
     val statusMessage by RoomAudioStreamManager.statusMessage.collectAsState()
     val activeTransmitters by RoomAudioStreamManager.activeTransmittingMembers.collectAsState()
     val transmitterLocalIp by RoomAudioStreamManager.transmitterLocalIp.collectAsState()
+    val latestDiscoveredIp by RoomAudioStreamManager.latestDiscoveredIp.collectAsState()
     val activeConnectionsCount by RoomAudioStreamManager.activeConnectionsCount.collectAsState()
     val bytesReceived by RoomAudioStreamManager.bytesReceived.collectAsState()
     val lastError by RoomAudioStreamManager.lastError.collectAsState()
     val diagnosticLog by RoomAudioStreamManager.diagnosticLog.collectAsState()
+
+    val fallbackMemberIp = remember(members, activeTransmitters) {
+        members.firstOrNull { it.id != "me" && !RoomAudioStreamManager.getMemberIp(it.id, it.name).isNullOrBlank() }
+            ?.let { RoomAudioStreamManager.getMemberIp(it.id, it.name) } ?: ""
+    }
+    val autoDetectedIp = if (latestDiscoveredIp.isNotBlank()) latestDiscoveredIp else fallbackMemberIp
 
     // Re-check on every recomposition so it reflects the real state after the
     // system permission dialog closes — 'remember' alone wouldn't catch that.
@@ -419,6 +426,7 @@ fun RoomAudioMonitorControls(
                 isTransmitterActive = isTransmitterActive,
                 isListening = isListening,
                 transmitterLocalIp = transmitterLocalIp,
+                autoDetectedIp = autoDetectedIp,
                 bytesReceived = bytesReceived,
                 lastError = lastError,
                 diagnosticLog = diagnosticLog,
@@ -531,13 +539,22 @@ private fun AudioDiagnosticsPanel(
     isTransmitterActive: Boolean,
     isListening: Boolean,
     transmitterLocalIp: String,
+    autoDetectedIp: String,
     bytesReceived: Long,
     lastError: String,
     diagnosticLog: List<String>,
     activeConnectionsCount: Int,
     context: android.content.Context
 ) {
-    var manualIp by remember { mutableStateOf("") }
+    var manualIp by remember(autoDetectedIp) { mutableStateOf(autoDetectedIp) }
+    val coroutineScope = rememberCoroutineScope()
+    var isScanning by remember { mutableStateOf(false) }
+
+    LaunchedEffect(autoDetectedIp) {
+        if (autoDetectedIp.isNotBlank() && (manualIp.isBlank() || manualIp == "127.0.0.1")) {
+            manualIp = autoDetectedIp
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -582,7 +599,7 @@ private fun AudioDiagnosticsPanel(
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                         )
                         Text(
-                            text = "Type this IP into the phone's manual field below ↓",
+                            text = "Listeners on Wi-Fi will automatically connect to this IP",
                             fontSize = 10.sp,
                             color = Color(0xFF15803D)
                         )
@@ -608,16 +625,12 @@ private fun AudioDiagnosticsPanel(
             if (!isTransmitterActive) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "📲 Direct connect (bypass auto-discovery)",
+                        text = "📲 Audio Receiver Connection",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xFF1E2430)
                     )
-                    Text(
-                        text = "Check the tablet's 🔬 panel for its IP, then type it here:",
-                        fontSize = 10.sp,
-                        color = Color(0xFF6B7280)
-                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -626,13 +639,26 @@ private fun AudioDiagnosticsPanel(
                         OutlinedTextField(
                             value = manualIp,
                             onValueChange = { manualIp = it },
-                            placeholder = { Text("e.g. 192.168.1.42", fontSize = 12.sp) },
+                            placeholder = { Text("e.g. 192.168.1.157", fontSize = 12.sp, color = Color(0xFF64748B)) },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             shape = RoundedCornerShape(8.dp),
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontSize = 13.sp
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color(0xFF0F172A),
+                                unfocusedTextColor = Color(0xFF0F172A),
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White,
+                                cursorColor = Color(0xFF4F46E5),
+                                focusedBorderColor = Color(0xFF4F46E5),
+                                unfocusedBorderColor = Color(0xFF94A3B8),
+                                focusedPlaceholderColor = Color(0xFF64748B),
+                                unfocusedPlaceholderColor = Color(0xFF64748B)
                             )
                         )
                         Button(
@@ -657,6 +683,51 @@ private fun AudioDiagnosticsPanel(
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
                         ) {
                             Text("▶", color = Color.White, fontSize = 16.sp)
+                        }
+                    }
+
+                    // Auto-detect status & one-tap Wi-Fi scanner
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (manualIp.isNotBlank()) {
+                            Text(
+                                text = "✨ IP detected: $manualIp",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF15803D)
+                            )
+                        } else {
+                            Text(
+                                text = "Auto-detecting transmitter on Wi-Fi…",
+                                fontSize = 10.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+
+                        TextButton(
+                            onClick = {
+                                isScanning = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val found = RoomAudioStreamManager.discoverActiveBeaconIp(context)
+                                    if (!found.isNullOrBlank()) {
+                                        manualIp = found
+                                        RoomAudioStreamManager.registerMemberIp("manual_$found", found, found)
+                                    }
+                                    isScanning = false
+                                }
+                            },
+                            enabled = !isScanning && !isListening,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = if (isScanning) "Scanning…" else "🔍 Re-scan Wi-Fi",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4F46E5)
+                            )
                         }
                     }
                 }
