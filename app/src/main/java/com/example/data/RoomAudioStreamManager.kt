@@ -240,7 +240,7 @@ object RoomAudioStreamManager {
             }
 
             val finalIp = if (!targetIp.isNullOrBlank()) targetIp else "127.0.0.1"
-            connectAndStream(finalIp, port, memberName)
+            connectAndStream(context, finalIp, port, memberName)
         }
     }
 
@@ -315,8 +315,11 @@ object RoomAudioStreamManager {
     }
 
 
-    private suspend fun connectAndStream(hostIp: String, port: Int, memberName: String) = withContext(Dispatchers.IO) {
+    private suspend fun connectAndStream(context: Context?, hostIp: String, port: Int, memberName: String) = withContext(Dispatchers.IO) {
         var audioTrack: AudioTrack? = null
+        var audioManager: android.media.AudioManager? = null
+        var previousMode = android.media.AudioManager.MODE_NORMAL
+        var previousSpeaker = false
         try {
             _statusMessage.value = "Connecting to ${memberName.substringBefore(" ")}..."
             val socket = Socket()
@@ -330,8 +333,11 @@ object RoomAudioStreamManager {
             val bufferSize = (minBufSize * 2).coerceAtLeast(2048)
             val buffer = ByteArray(bufferSize)
 
+            // Force speaker output — USAGE_MEDIA can silently route to earpiece on many phones
+            // when there is no active media session. VOICE_COMMUNICATION + speakerphone on
+            // guarantees the audio comes through the loudspeaker every time.
             val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
 
@@ -347,6 +353,17 @@ object RoomAudioStreamManager {
                 .setBufferSizeInBytes(bufferSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+
+            // Explicitly route to loudspeaker — essential for VOICE_COMMUNICATION mode
+            if (context != null) {
+                audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+                audioManager?.let {
+                    previousMode = it.mode
+                    previousSpeaker = it.isSpeakerphoneOn
+                    it.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+                    it.isSpeakerphoneOn = true
+                }
+            }
 
             audioTrack.play()
             val inputStream: InputStream = socket.getInputStream()
@@ -365,6 +382,13 @@ object RoomAudioStreamManager {
         } catch (e: Exception) {
             _statusMessage.value = "Connection ended: ${e.localizedMessage ?: "Disconnected"}"
         } finally {
+            // Restore audio mode so calls and media work normally again
+            try {
+                audioManager?.let {
+                    it.isSpeakerphoneOn = previousSpeaker
+                    it.mode = previousMode
+                }
+            } catch (_: Exception) {}
             try {
                 audioTrack?.stop()
                 audioTrack?.release()
@@ -379,13 +403,14 @@ object RoomAudioStreamManager {
         }
     }
 
-    fun startListening(hostIp: String, port: Int = DEFAULT_PORT) {
+    fun startListening(context: Context? = null, hostIp: String, port: Int = DEFAULT_PORT) {
         if (_isListening.value) return
 
         listenerJob = scope.launch(Dispatchers.IO) {
-            connectAndStream(hostIp, port, "Room Audio")
+            connectAndStream(context, hostIp, port, "Room Audio")
         }
     }
+
 
     fun stopListening() {
         scope.launch(Dispatchers.IO) {

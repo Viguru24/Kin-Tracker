@@ -404,14 +404,19 @@ class CloudSyncManager(
             val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
 
             for (cloudM in incomingCloudMembers) {
+                // Do not ingest self device (already tracked locally with GPS as "me")
+                // IMPORTANT: also skip registering self as an audio transmitter — this was
+                // causing the phone to see the tablet's isAudioTransmitter=true and mark
+                // itself as broadcasting, lighting up the UI without actually streaming audio.
+                if (cloudM.id == myCloudId || cloudM.id.endsWith("_" + myDeviceUUID.value)) continue
+
+                // Register other family members' IP and transmitter state for the audio UI
                 com.example.data.RoomAudioStreamManager.registerMemberAudioState(
                     memberId = cloudM.id,
                     ip = cloudM.localIp,
                     isTransmitting = cloudM.isAudioTransmitter,
                     memberName = cloudM.name
                 )
-                // Do not ingest self device (already tracked locally with GPS as "me")
-                if (cloudM.id == myCloudId || cloudM.id.endsWith("_" + myDeviceUUID.value)) continue
 
                 val cleanCloudName = cloudM.name.lowercase().trim()
                 val cleanKey = cleanCloudName
