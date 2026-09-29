@@ -48,6 +48,9 @@ object RoomAudioStreamManager {
     private val _isTransmitterActive = MutableStateFlow(false)
     val isTransmitterActive = _isTransmitterActive.asStateFlow()
 
+    private val _transmitterLocalIp = MutableStateFlow("")
+    val transmitterLocalIp = _transmitterLocalIp.asStateFlow()
+
     private val _isListening = MutableStateFlow(false)
     val isListening = _isListening.asStateFlow()
 
@@ -85,6 +88,9 @@ object RoomAudioStreamManager {
         val line = "[$ts] $msg"
         _diagnosticLog.value = (_diagnosticLog.value + line).takeLast(20)
     }
+
+    /** Public entry-point so the UI layer can write events (e.g. permission denied) into the same log. */
+    fun appendDiagLog(msg: String) = appendLog(msg)
 
     var onTransmitterToggled: ((Boolean) -> Unit)? = null
 
@@ -234,33 +240,42 @@ object RoomAudioStreamManager {
     // ─────────────────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
-    fun startTransmitter(port: Int = DEFAULT_PORT) {
+    fun startTransmitter(context: Context? = null, port: Int = DEFAULT_PORT) {
         if (_isTransmitterActive.value) return
 
         transmitterJob = scope.launch {
             try {
-                serverSocket = ServerSocket(port).apply {
-                    reuseAddress = true
-                }
+                serverSocket = ServerSocket(port).apply { reuseAddress = true }
                 _isTransmitterActive.value = true
-                _statusMessage.value = "Room Transmitter Active on port $port"
+
+                // Capture and expose the tablet's own local IP so the UI can show it
+                val myIp = if (context != null) getLocalIpAddress(context) else "unknown"
+                _transmitterLocalIp.value = myIp
+                _statusMessage.value = "Transmitter ready on $myIp:$port"
+                appendLog("TRANSMITTER started | IP=$myIp | port=$port")
                 onTransmitterToggled?.invoke(true)
 
                 while (isActive && serverSocket?.isClosed == false) {
                     val clientSocket = try {
                         serverSocket?.accept()
                     } catch (e: Exception) {
+                        appendLog("accept() error: ${e.message}")
                         null
                     }
 
                     if (clientSocket != null) {
+                        val clientIp = clientSocket.inetAddress?.hostAddress ?: "?"
+                        appendLog("Client connected from $clientIp")
                         launch(Dispatchers.IO) {
                             handleClientStream(clientSocket)
                         }
                     }
                 }
             } catch (e: Exception) {
-                _statusMessage.value = "Transmitter error: ${e.localizedMessage ?: "Unknown"}"
+                val msg = e.localizedMessage ?: "Unknown"
+                appendLog("TRANSMITTER error: $msg")
+                _statusMessage.value = "Transmitter error: $msg"
+                _lastError.value = msg
             } finally {
                 stopTransmitterInternal()
             }
@@ -286,53 +301,57 @@ object RoomAudioStreamManager {
             )
 
             if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                appendLog("AudioRecord FAILED to init — mic permission missing?")
+                _lastError.value = "AudioRecord failed to initialise (mic permission?)"
                 clientSocket.close()
                 return@withContext
             }
 
             audioRecord.startRecording()
+            appendLog("AudioRecord recording | bufSize=$bufferSize")
             val outputStream: OutputStream = clientSocket.getOutputStream()
+            var totalBytesSent = 0L
+            var firstChunkLogged = false
 
             while (isActive && !clientSocket.isClosed && clientSocket.isConnected) {
                 val bytesRead = audioRecord.read(buffer, 0, buffer.size)
                 if (bytesRead > 0) {
                     outputStream.write(buffer, 0, bytesRead)
                     outputStream.flush()
-
-                    // Calculate RMS decibel level
+                    totalBytesSent += bytesRead
                     val db = calculateDecibels(buffer, bytesRead)
                     _currentDecibels.value = db
+                    if (!firstChunkLogged) {
+                        appendLog("First audio chunk sent: $bytesRead bytes ✓")
+                        firstChunkLogged = true
+                    }
                 } else if (bytesRead < 0) {
+                    appendLog("AudioRecord read returned $bytesRead — stopping")
                     break
                 }
             }
-        } catch (_: Exception) {
+            appendLog("Client disconnected. Total sent: ${totalBytesSent / 1024} KB")
+        } catch (e: Exception) {
+            appendLog("Stream error: ${e.message}")
+            _lastError.value = "Stream error: ${e.message}"
         } finally {
-            try {
-                audioRecord?.stop()
-                audioRecord?.release()
-            } catch (_: Exception) {}
-            try {
-                clientSocket.close()
-            } catch (_: Exception) {}
+            try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
+            try { clientSocket.close() } catch (_: Exception) {}
             _activeConnectionsCount.value = (_activeConnectionsCount.value - 1).coerceAtLeast(0)
         }
     }
 
     fun stopTransmitter() {
-        scope.launch(Dispatchers.IO) {
-            stopTransmitterInternal()
-        }
+        scope.launch(Dispatchers.IO) { stopTransmitterInternal() }
     }
 
     private fun stopTransmitterInternal() {
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {}
+        try { serverSocket?.close() } catch (_: Exception) {}
         serverSocket = null
         transmitterJob?.cancel()
         transmitterJob = null
         _isTransmitterActive.value = false
+        _transmitterLocalIp.value = ""
         _activeConnectionsCount.value = 0
         _currentDecibels.value = 0f
         _statusMessage.value = "Transmitter Stopped"

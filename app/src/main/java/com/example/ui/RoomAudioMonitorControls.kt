@@ -42,23 +42,28 @@ fun RoomAudioMonitorControls(
     val decibels by RoomAudioStreamManager.currentDecibels.collectAsState()
     val statusMessage by RoomAudioStreamManager.statusMessage.collectAsState()
     val activeTransmitters by RoomAudioStreamManager.activeTransmittingMembers.collectAsState()
+    val transmitterLocalIp by RoomAudioStreamManager.transmitterLocalIp.collectAsState()
+    val activeConnectionsCount by RoomAudioStreamManager.activeConnectionsCount.collectAsState()
     val bytesReceived by RoomAudioStreamManager.bytesReceived.collectAsState()
     val lastError by RoomAudioStreamManager.lastError.collectAsState()
     val diagnosticLog by RoomAudioStreamManager.diagnosticLog.collectAsState()
-    val isToneTestActive by RoomAudioStreamManager.isToneTestActive.collectAsState()
 
-    var hasMicPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        )
-    }
+    // Re-check on every recomposition so it reflects the real state after the
+    // system permission dialog closes — 'remember' alone wouldn't catch that.
+    var hasMicPermission by remember { mutableStateOf(false) }
+    hasMicPermission = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.RECORD_AUDIO
+    ) == PackageManager.PERMISSION_GRANTED
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasMicPermission = granted
         if (granted) {
-            RoomAudioStreamManager.startTransmitter()
+            // Pass context so startTransmitter can resolve the local IP correctly
+            RoomAudioStreamManager.startTransmitter(context)
+        } else {
+            RoomAudioStreamManager.appendDiagLog("❌ Microphone permission DENIED — cannot broadcast")
         }
     }
 
@@ -337,7 +342,7 @@ fun RoomAudioMonitorControls(
                                 if (!hasMicPermission) {
                                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 } else {
-                                    RoomAudioStreamManager.startTransmitter()
+                                    RoomAudioStreamManager.startTransmitter(context)
                                 }
                             } else {
                                 RoomAudioStreamManager.stopTransmitter()
@@ -356,115 +361,16 @@ fun RoomAudioMonitorControls(
             // ─────────────────────────────────────────────────────────────
             // 3. AUDIO DIAGNOSTICS PANEL
             // ─────────────────────────────────────────────────────────────
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFFF0F4FF),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Color(0xFFCDD6F4))
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Header row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🔬 Audio Diagnostics",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E2430)
-                        )
-                        if (isListening) {
-                            Text(
-                                text = "${bytesReceived / 1024} KB received",
-                                fontSize = 11.sp,
-                                color = if (bytesReceived > 0) Color(0xFF16A34A) else Color(0xFFDC2626),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    // Test tone button — isolates speaker vs network issues
-                    Button(
-                        onClick = { RoomAudioStreamManager.playTestTone(context) },
-                        enabled = !isToneTestActive,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isToneTestActive) Color(0xFF6B7280) else Color(0xFF4F46E5)
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(if (isToneTestActive) "⏳" else "🔊", fontSize = 14.sp)
-                            Column {
-                                Text(
-                                    text = if (isToneTestActive) "Playing 440 Hz tone..." else "Test Speaker (440 Hz beep)",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                                Text(
-                                    text = if (isToneTestActive) "Listen — if silent, routing is broken" else "Tap to confirm speaker works independently",
-                                    color = Color.White.copy(alpha = 0.75f),
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-                    }
-
-                    // Last error
-                    if (lastError.isNotBlank()) {
-                        Surface(
-                            color = Color(0xFFFEE2E2),
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
-                        ) {
-                            Text(
-                                text = "⚠️ $lastError",
-                                fontSize = 10.sp,
-                                color = Color(0xFFDC2626),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    // Live log
-                    if (diagnosticLog.isNotEmpty()) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color(0xFF0F172A),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                diagnosticLog.forEach { line ->
-                                    Text(
-                                        text = line,
-                                        fontSize = 9.sp,
-                                        color = when {
-                                            line.contains("ERROR") || line.contains("error") -> Color(0xFFFC8181)
-                                            line.contains("✓") || line.contains("GRANTED") -> Color(0xFF86EFAC)
-                                            line.contains("TEST TONE") -> Color(0xFFFBBF24)
-                                            else -> Color(0xFF94A3B8)
-                                        },
-                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            AudioDiagnosticsPanel(
+                isTransmitterActive = isTransmitterActive,
+                isListening = isListening,
+                transmitterLocalIp = transmitterLocalIp,
+                bytesReceived = bytesReceived,
+                lastError = lastError,
+                diagnosticLog = diagnosticLog,
+                activeConnectionsCount = activeConnectionsCount,
+                context = context
+            )
 
             // Sovereign VPS indicator footer
             Row(
@@ -561,6 +467,201 @@ private fun AudioDecibelWaveMeter(decibels: Float, name: String = "") {
                         .height(barHeight.dp)
                         .background(barColor, RoundedCornerShape(1.dp))
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioDiagnosticsPanel(
+    isTransmitterActive: Boolean,
+    isListening: Boolean,
+    transmitterLocalIp: String,
+    bytesReceived: Long,
+    lastError: String,
+    diagnosticLog: List<String>,
+    activeConnectionsCount: Int,
+    context: android.content.Context
+) {
+    var manualIp by remember { mutableStateOf("") }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFFF0F4FF),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFFCDD6F4))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "🔬 Audio Diagnostics",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1E2430)
+            )
+
+            // ── TRANSMITTER SIDE (tablet) ─────────────────────────
+            if (isTransmitterActive) {
+                Surface(
+                    color = Color(0xFFECFDF5),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF86EFAC))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "📡 This device is broadcasting",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF15803D)
+                        )
+                        // Show IP large so it's easy to read and type into the phone
+                        Text(
+                            text = if (transmitterLocalIp.isNotBlank()) transmitterLocalIp else "Resolving IP…",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF166534),
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                        Text(
+                            text = "Type this IP into the phone's manual field below ↓",
+                            fontSize = 10.sp,
+                            color = Color(0xFF15803D)
+                        )
+                        if (activeConnectionsCount > 0) {
+                            Text(
+                                text = "✅ $activeConnectionsCount listener(s) connected and receiving",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF15803D)
+                            )
+                        } else {
+                            Text(
+                                text = "⏳ Waiting for a listener to connect…",
+                                fontSize = 11.sp,
+                                color = Color(0xFF6B7280)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── LISTENER SIDE (phone) ─────────────────────────────
+            if (!isTransmitterActive) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "📲 Direct connect (bypass auto-discovery)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1E2430)
+                    )
+                    Text(
+                        text = "Check the tablet's 🔬 panel for its IP, then type it here:",
+                        fontSize = 10.sp,
+                        color = Color(0xFF6B7280)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = manualIp,
+                            onValueChange = { manualIp = it },
+                            placeholder = { Text("e.g. 192.168.1.42", fontSize = 12.sp) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 13.sp
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                val ip = manualIp.trim()
+                                if (ip.isNotBlank()) {
+                                    RoomAudioStreamManager.stopListening()
+                                    RoomAudioStreamManager.registerMemberIp("manual_$ip", ip, ip)
+                                    RoomAudioStreamManager.startListeningToMember(
+                                        context = context,
+                                        memberId = "manual_$ip",
+                                        memberName = ip,
+                                        port = RoomAudioStreamManager.DEFAULT_PORT
+                                    )
+                                }
+                            },
+                            enabled = manualIp.trim().isNotBlank() && !isListening,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF4F46E5)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+                        ) {
+                            Text("▶", color = Color.White, fontSize = 16.sp)
+                        }
+                    }
+                }
+
+                if (isListening) {
+                    Text(
+                        text = if (bytesReceived > 0)
+                            "${bytesReceived / 1024} KB received ✓"
+                        else
+                            "0 KB received — connected but no data yet!",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (bytesReceived > 0) Color(0xFF16A34A) else Color(0xFFDC2626)
+                    )
+                }
+            }
+
+            // ── ERROR ──────────────────────────────────────────────
+            if (lastError.isNotBlank()) {
+                Surface(
+                    color = Color(0xFFFEE2E2),
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+                ) {
+                    Text(
+                        text = "⚠️ $lastError",
+                        fontSize = 10.sp,
+                        color = Color(0xFFDC2626),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // ── LIVE LOG ───────────────────────────────────────────
+            if (diagnosticLog.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color(0xFF0F172A),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        diagnosticLog.forEach { line ->
+                            Text(
+                                text = line,
+                                fontSize = 9.sp,
+                                color = when {
+                                    line.contains("ERROR") || line.contains("FAILED") || line.contains("error") -> Color(0xFFFC8181)
+                                    line.contains("✓") || line.contains("connected") || line.contains("GRANTED") -> Color(0xFF86EFAC)
+                                    line.contains("TRANSMITTER") -> Color(0xFFFBBF24)
+                                    else -> Color(0xFF94A3B8)
+                                },
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
             }
         }
     }
