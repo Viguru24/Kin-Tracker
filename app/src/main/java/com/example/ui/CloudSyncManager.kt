@@ -331,16 +331,16 @@ class CloudSyncManager(
                 // Also purge genuinely unknown/unnamed devices inactive > 7 days.
                 // NEVER auto-purge known family members (Isabel, Annette, etc.) — they
                 // may simply have a flat battery or lost signal temporarily.
-                val knownFamilyKeywords = listOf("isabel", "eloise", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother")
+                val knownFamilyKeywords = listOf("isabel", "eloise", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother", "tab", "tablet")
                 val staleThresholdMs = 7 * 24 * 3600 * 1000L // 7 days before considering a device truly gone
                 val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
                 val keysToRemove = updatedMembers.filter { entry ->
                     val entryId = entry.key
                     val entryName = entry.value.name.lowercase().trim()
                     val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + myDeviceUUID.value)
-                    val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
-                        deletedMembersPrefs.getBoolean("deleted_member_$entryId", false)
-                    val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) }
+                    val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) } || entryId.contains("isabel") || entryId.contains("eloise") || entryId.contains("tab")
+                    val isExplicitlyDeleted = !isKnownFamily && (deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
                     // Only purge stale entries that are NOT known family members
                     val isStaleUnknown = !isKnownFamily &&
                         (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
@@ -419,7 +419,8 @@ class CloudSyncManager(
                     .trim()
 
                 val isKnownFamily = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
-                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise")
+                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise") ||
+                    cleanKey.contains("tab") || cleanKey.contains("tablet")
 
                 // Check if user explicitly deleted this member locally (NEVER block known family members):
                 if (!isKnownFamily) {

@@ -617,15 +617,12 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val contactsPrefs = getApplication<Application>().getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             
-            // Clear any legacy deleted_eloise tombstone flags in SharedPreferences so real Eloise device can sync
-            // This covers both hardcoded name keys AND any device-ID-based keys that may contain "eloise"
+            // Clear any legacy deletion tombstone flags in SharedPreferences so all real family members and devices can sync
+            // This covers hardcoded names and any device-ID-based keys for family members & daughter tablets
+            val unblockKeywords = listOf("eloise", "isabel", "annette", "dad", "louis", "tab", "tablet", "daughter", "c538c8")
             deletedMembersPrefs.edit().apply {
-                remove("deleted_eloise")
-                remove("deleted_member_eloise")
-                remove("deleted_Eloise")
-                // Also sweep for any key containing "eloise" (covers UUID-based device IDs for Eloise's phone)
                 for (key in deletedMembersPrefs.all.keys) {
-                    if (key.contains("eloise", ignoreCase = true)) {
+                    if (unblockKeywords.any { key.contains(it, ignoreCase = true) }) {
                         remove(key)
                     }
                 }

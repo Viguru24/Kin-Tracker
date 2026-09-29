@@ -557,7 +557,7 @@ fun OnboardingScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Ask the person who created the circle to send you their 4-digit PIN, then enter it below.",
+                                "Ask the person who created the circle to send you their PIN or invite code, then enter it below.",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center,
@@ -568,12 +568,13 @@ fun OnboardingScreen(
                         OutlinedTextField(
                             value = joinToken,
                             onValueChange = { input ->
-                                if (input.length <= 4 && input.all { it.isDigit() }) {
-                                    joinToken = input
+                                val clean = input.filter { it.isLetterOrDigit() || it == '-' }.uppercase()
+                                if (clean.length <= 10) {
+                                    joinToken = clean
                                 }
                             },
-                            label = { Text("4-Digit PIN", color = SecondarySlate) },
-                            placeholder = { Text("e.g. 1234", color = SecondarySlate.copy(alpha = 0.5f)) },
+                            label = { Text("Circle PIN or Invite Code", color = SecondarySlate) },
+                            placeholder = { Text("e.g. 4666 or KT-4666", color = SecondarySlate.copy(alpha = 0.5f)) },
                             singleLine = true,
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth().testTag("onboarding_join_key_field"),
@@ -592,17 +593,18 @@ fun OnboardingScreen(
                         TextButton(
                             onClick = {
                                 val fromClip = clipboard.getText()?.text ?: ""
-                                val digitsOnly = fromClip.filter { it.isDigit() }.take(4)
-                                if (digitsOnly.isNotBlank()) joinToken = digitsOnly
+                                val clean = fromClip.filter { it.isLetterOrDigit() || it == '-' }.uppercase().take(10)
+                                if (clean.isNotBlank()) joinToken = clean
                             }
                         ) {
-                            Text("📋  Paste PIN from clipboard", color = RadarCyan, fontSize = 12.sp)
+                            Text("📋  Paste Code from clipboard", color = RadarCyan, fontSize = 12.sp)
                         }
 
+                        val canJoin = joinToken.trim().length >= 4
                         Button(
                             onClick = {
-                                if (joinToken.length == 4) {
-                                    viewModel.joinGroupWithPin(joinToken) { success, _ ->
+                                if (canJoin) {
+                                    viewModel.joinGroupWithPin(joinToken.trim()) { success, _ ->
                                         if (success) {
                                             viewModel.completeOnboarding()
                                             onComplete()
@@ -610,7 +612,7 @@ fun OnboardingScreen(
                                     }
                                 }
                             },
-                            enabled = joinToken.length == 4,
+                            enabled = canJoin,
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF26A69A),
