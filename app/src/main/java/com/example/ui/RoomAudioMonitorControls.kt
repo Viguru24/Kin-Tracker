@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.data.AudioTransmitterService
 import com.example.data.FamilyMember
 import com.example.data.RoomAudioStreamManager
 import com.example.ui.theme.*
@@ -73,8 +74,7 @@ fun RoomAudioMonitorControls(
     ) { granted ->
         hasMicPermission = granted
         if (granted) {
-            // Pass context so startTransmitter can resolve the local IP correctly
-            RoomAudioStreamManager.startTransmitter(context)
+            AudioTransmitterService.startService(context)
         } else {
             RoomAudioStreamManager.appendDiagLog("❌ Microphone permission DENIED — cannot broadcast")
         }
@@ -358,10 +358,10 @@ fun RoomAudioMonitorControls(
                                     if (!hasMicPermission) {
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     } else {
-                                        RoomAudioStreamManager.startTransmitter(context)
+                                        AudioTransmitterService.startService(context)
                                     }
                                 } else {
-                                    RoomAudioStreamManager.stopTransmitter()
+                                    AudioTransmitterService.stopService(context)
                                 }
                             },
                             colors = SwitchDefaults.colors(
