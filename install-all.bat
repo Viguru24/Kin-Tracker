@@ -1,5 +1,5 @@
 @echo off
-title Kin-Tracker - Build & Install to All Devices
+title Kin-Tracker - Build ^& Install to All Devices
 color 0A
 
 set APK=app\build\outputs\apk\debug\app-debug.apk
@@ -7,7 +7,7 @@ set PACKAGE=com.aistudio.familytracker.lnvwe
 set ACTIVITY=com.example.MainActivity
 
 echo ============================================
-echo   Kin-Tracker Auto-Builder & Installer
+echo   Kin-Tracker Auto-Builder ^& Installer
 echo ============================================
 echo.
 
