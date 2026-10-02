@@ -93,13 +93,17 @@ fun TelemetryDashboard(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        val activeMembers = members.filter { !(it.isLocationPaused || it.statusText.contains("Paused", ignoreCase = true)) }
+        val pausedMembers = members.filter { it.isLocationPaused || it.statusText.contains("Paused", ignoreCase = true) }
+        var isPausedExpanded by remember { mutableStateOf(false) }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Family Members (${members.size})",
+                text = "Active Circle (${activeMembers.size})",
                 color = TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
@@ -117,7 +121,7 @@ fun TelemetryDashboard(
             }
         }
 
-        if (members.isEmpty()) {
+        if (activeMembers.isEmpty() && pausedMembers.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -127,7 +131,7 @@ fun TelemetryDashboard(
                 CircularProgressIndicator(color = RadarCyan)
             }
         } else {
-            members.forEach { member ->
+            activeMembers.forEach { member ->
                 MemberCard(
                     member = member,
                     isSelected = member.id == selectedMemberId,
@@ -147,6 +151,71 @@ fun TelemetryDashboard(
                     onTriggerSOS = onTriggerSOS,
                     onSendReaction = onSendReaction
                 )
+            }
+
+            if (pausedMembers.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    onClick = { isPausedExpanded = !isPausedExpanded },
+                    shape = RoundedCornerShape(12.dp),
+                    color = CosmicSlateCard.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, ActiveAmber.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("⏸️", fontSize = 14.sp)
+                                Text(
+                                    text = "Paused Devices (${pausedMembers.size}) — Removed from Screen",
+                                    color = ActiveAmber,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = if (isPausedExpanded) "Hide ▲" else "Show ▼",
+                                color = SecondarySlate,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        if (isPausedExpanded) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                pausedMembers.forEach { pausedMember ->
+                                    MemberCard(
+                                        member = pausedMember,
+                                        isSelected = pausedMember.id == selectedMemberId,
+                                        homeLat = homeLat,
+                                        homeLng = homeLng,
+                                        onSelectMember = onSelectMember,
+                                        onCommuteHome = onCommuteHome,
+                                        onSendAway = onSendAway,
+                                        onInstantCheckIn = onInstantCheckIn,
+                                        onPing = onPing,
+                                        onEditMember = { memberToEdit = it },
+                                        onDeleteMember = { memberToDelete = it },
+                                        onTriggerAlarm = onTriggerAlarm,
+                                        isRinging = activeRingingMembers.contains(pausedMember.id) || activeRingingMembers.contains(pausedMember.name),
+                                        onToggleTracking = onToggleTracking,
+                                        onOpenWhatsApp = onOpenWhatsApp,
+                                        onTriggerSOS = onTriggerSOS,
+                                        onSendReaction = onSendReaction
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

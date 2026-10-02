@@ -329,213 +329,30 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun setupSafeZoneGeofences() {
         viewModelScope.launch {
-            combine(
-                repository.safeZones,
-                familyMembers,
-                homeLatFlow,
-                homeLngFlow,
-                homeRadiusFlow,
-                workLatFlow,
-                workLngFlow,
-                isWorkCalibratedFlow,
-                workRadiusFlow
-            ) { args: Array<Any> ->
-                @Suppress("UNCHECKED_CAST")
-                val customZones = args[0] as List<SafeZone>
-                @Suppress("UNCHECKED_CAST")
-                val members = args[1] as List<FamilyMember>
-                val hLat = args[2] as Double
-                val hLng = args[3] as Double
-                val hRadius = args[4] as Double
-                val wLat = args[5] as Double
-                val wLng = args[6] as Double
-                val isWCal = args[7] as Boolean
-                val wRadius = args[8] as Double
-
-                val allPlaces = mutableListOf<MonitoredPlace>()
-                if (hLat != 0.0 && hLng != 0.0) {
-                    allPlaces.add(MonitoredPlace("place_home", "Home", hLat, hLng, hRadius, "home", isHome = true))
-                }
-                if (isWCal && wLat != 0.0 && wLng != 0.0) {
-                    val isWoodcote = Math.hypot((wLat - 51.3280) * 111.0, (wLng - (-0.1405)) * 111.0) < 0.6
-                    val placeName = if (isWoodcote) "Woodcote Primary School" else "Work"
-                    val placeIcon = if (isWoodcote) "school" else "work"
-                    allPlaces.add(MonitoredPlace("place_work", placeName, wLat, wLng, wRadius, placeIcon, isWork = !isWoodcote))
-                }
-                customZones.forEach { zone ->
-                    if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {
-                        allPlaces.add(MonitoredPlace(zone.id, zone.name, zone.latitude, zone.longitude, zone.radiusMeters, zone.iconName))
+            val appCtx = getApplication<Application>()
+            val kPrefs = appCtx.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+            familyMembers.collect { members ->
+                if (members.isEmpty()) return@collect
+                val me = members.firstOrNull { it.id == "me" }
+                val myLoc = if (me != null && me.x != 0.0 && me.y != 0.0) {
+                    android.location.Location("GPS").apply {
+                        latitude = me.y
+                        longitude = me.x
                     }
-                }
-                Pair(allPlaces, members)
-            }.collect { (places, members) ->
-                if (places.isEmpty() || members.isEmpty()) return@collect
-                val now = System.currentTimeMillis()
+                } else null
 
-                val me = members.firstOrNull {
-                    it.id == "me" ||
-                    (myDeviceUUID.value.isNotBlank() && it.id == myDeviceUUID.value) ||
-                    (myDeviceName.value.isNotBlank() && it.name.equals(myDeviceName.value, ignoreCase = true)) ||
-                    it.name.contains("(You)", ignoreCase = true)
-                }
-                val hasMyGps = me != null && me.x != 0.0 && me.y != 0.0
-                val homePlace = places.firstOrNull { it.isHome }
-                val distMeToHomeMeters = if (hasMyGps && homePlace != null) {
-                    val x = (me!!.x - homePlace.longitude) * 111.0 * Math.cos(Math.toRadians(homePlace.latitude))
-                    val y = (me.y - homePlace.latitude) * 111.0
-                    Math.hypot(x, y) * 1000.0
-                } else Double.MAX_VALUE
-                val isMeOutsideHome = hasMyGps && distMeToHomeMeters > 200.0
-
-                members.forEach { member ->
-                    if (member.x == 0.0 && member.y == 0.0) return@forEach
-
-                    // Never notify or announce the device owner ("me") about their own arrival/departure
-                    val isSelf = member.id == "me" ||
-                            member.id == myDeviceUUID.value ||
-                            member.name.equals(myDeviceName.value, ignoreCase = true) ||
-                            member.name.contains("(You)", ignoreCase = true)
-                    if (isSelf) return@forEach
-
-                    val distToMeMeters = if (hasMyGps) {
-                        val xDistMe = (member.x - me!!.x) * 111.0 * Math.cos(Math.toRadians(member.y))
-                        val yDistMe = (member.y - me.y) * 111.0
-                        Math.hypot(xDistMe, yDistMe) * 1000.0
-                    } else Double.MAX_VALUE
-
-                    val distMemberToHomeMeters = if (homePlace != null) {
-                        val x = (member.x - homePlace.longitude) * 111.0 * Math.cos(Math.toRadians(homePlace.latitude))
-                        val y = (member.y - homePlace.latitude) * 111.0
-                        Math.hypot(x, y) * 1000.0
-                    } else Double.MAX_VALUE
-                    val isMemberOutsideHome = distMemberToHomeMeters > 200.0
-
-                    if (hasMyGps && distToMeMeters <= 250.0) {
-                        lastCoLocatedTimestamp[member.id] = now
-                        if (isMeOutsideHome && isMemberOutsideHome) {
-                            wasTravelingWithMeOutsideHome[member.id] = true
+                com.example.data.GeofenceMonitor.evaluateGeofences(
+                    context = appCtx,
+                    repository = repository,
+                    prefs = kPrefs,
+                    members = members,
+                    myLocation = myLoc,
+                    onUiEvent = { alertMsg ->
+                        viewModelScope.launch {
+                            _uiEvents.emit(alertMsg)
                         }
                     }
-
-                    places.forEach { place ->
-                        val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
-                        val yDist = (member.y - place.latitude) * 111.0
-                        val distMeters = Math.hypot(xDist, yDist) * 1000.0
-
-                        val cleanMemberName = member.name.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-                        val key = "${cleanMemberName.lowercase()}_${place.id}"
-                        val lastStatus = lastMemberZoneStatus[key]
-
-                        val effectiveRadius = if (place.isHome) maxOf(place.radiusMeters, 160.0) else place.radiusMeters
-                        val exitHysteresis = if (place.isHome) 70.0 else AppConfig.EXIT_HYSTERESIS_METERS
-
-                        // 1. INSIDE BOUNDARY CHECK: Within defined place radius (160m for Home)
-                        if (distMeters <= effectiveRadius) {
-                            outsideConfirmCount[key] = 0
-                            val inCount = (insideConfirmCount[key] ?: 0) + 1
-                            insideConfirmCount[key] = inCount
-
-                            if (lastStatus == null) {
-                                // Initial startup state: member was already inside this zone — no false arrival alert
-                                lastMemberZoneStatus[key] = "inside"
-                                insideConfirmCount[key] = AppConfig.ARRIVAL_CONFIRMATION_CHECKS
-                            } else if (lastStatus == "outside") {
-                                // Confirm arrival only after consecutive verified stable readings inside boundary
-                                if (inCount >= AppConfig.ARRIVAL_CONFIRMATION_CHECKS) {
-                                    lastMemberZoneStatus[key] = "inside"
-                                    insideConfirmCount[key] = 0
-                                    val lastAlert = lastZoneAlertTime["arr_$key"] ?: 0L
-                                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
-                                        lastZoneAlertTime["arr_$key"] = now
-                                        val placeDisplayName = if (place.isHome) "Home" else place.name
-
-                                        val isWithMeNow = hasMyGps && distToMeMeters <= 200.0
-                                        val recentlyWithMe = (now - (lastCoLocatedTimestamp[member.id] ?: 0L)) < 5 * 60 * 1000L
-                                        val traveledTogether = (wasTravelingWithMeOutsideHome[member.id] == true) && recentlyWithMe
-                                        val isArrivingWithMe = (place.isHome && (isWithMeNow || traveledTogether)) || (!place.isHome && isWithMeNow)
-
-                                        if (isArrivingWithMe) {
-                                            repository.insertLog(
-                                                ActivityLog(
-                                                    memberId = member.id,
-                                                    memberName = member.name,
-                                                    actionText = "arrived at $placeDisplayName (with you)",
-                                                    iconName = "check_in"
-                                                )
-                                            )
-                                            if (place.isHome) {
-                                                wasTravelingWithMeOutsideHome[member.id] = false
-                                            }
-                                        } else {
-                                            repository.insertLog(
-                                                ActivityLog(
-                                                    memberId = member.id,
-                                                    memberName = member.name,
-                                                    actionText = "arrived at $placeDisplayName",
-                                                    iconName = "check_in"
-                                                )
-                                            )
-                                            _uiEvents.emit("📍 Arrival Notice: $cleanMemberName has arrived at $placeDisplayName!")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home)
-                        else if (distMeters > (effectiveRadius + exitHysteresis)) {
-                            insideConfirmCount[key] = 0
-                            if (lastStatus == "inside") {
-                                val count = (outsideConfirmCount[key] ?: 0) + 1
-                                outsideConfirmCount[key] = count
-                                
-                                // Intentional departure confirmed ONLY after consecutive verified checks outside 230m buffer
-                                val isConfirmedDeparture = count >= AppConfig.DEPARTURE_CONFIRMATION_CHECKS && (member.speedMph >= AppConfig.MIN_EXIT_SPEED_MPH || distMeters > (effectiveRadius + 100.0))
-                                if (isConfirmedDeparture) {
-                                    lastMemberZoneStatus[key] = "outside"
-                                    outsideConfirmCount[key] = 0
-                                    
-                                    val lastAlert = lastZoneAlertTime["dep_$key"] ?: 0L
-                                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
-                                        lastZoneAlertTime["dep_$key"] = now
-                                        val placeDisplayName = if (place.isHome) "the house" else place.name
-                                        val isDepartingWithMe = hasMyGps && distToMeMeters <= 200.0
-                                        if (isDepartingWithMe) {
-                                            repository.insertLog(
-                                                ActivityLog(
-                                                    memberId = member.id,
-                                                    memberName = member.name,
-                                                    actionText = "left ${place.name} (with you)",
-                                                    iconName = "away"
-                                                )
-                                            )
-                                        } else {
-                                            val warningMsg = "🚪 Departure Warning: $cleanMemberName has left $placeDisplayName!"
-                                            repository.insertLog(
-                                                ActivityLog(
-                                                    memberId = member.id,
-                                                    memberName = member.name,
-                                                    actionText = "left ${place.name} (departed building)",
-                                                    iconName = "away"
-                                                )
-                                            )
-                                            if (isDepartureAlertsEnabled.value) {
-                                                _uiEvents.emit(warningMsg)
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if (lastStatus == null) {
-                                // Initial startup state: member was already outside
-                                lastMemberZoneStatus[key] = "outside"
-                                outsideConfirmCount[key] = 0
-                            }
-                        } else {
-                            // In hysteresis buffer zone: retain current state, reset confirmation counts
-                            insideConfirmCount[key] = 0
-                            outsideConfirmCount[key] = 0
-                        }
-                    }
-                }
+                )
             }
         }
     }
@@ -1067,36 +884,50 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun deleteFamilyMember(memberId: String) {
-        viewModelScope.launch {
-            val allCurrent = repository.getFamilyMembersOnce()
-            val target = allCurrent.firstOrNull { it.id == memberId }
-                ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
-            val cleanId = memberId.lowercase().trim()
-            val targetName = target?.name ?: memberId
+    fun deleteFamilyMember(memberId: String) = viewModelScope.launch {
+        val cleanId = memberId.lowercase().trim()
+        val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+        val isSelf = memberId == "me" || memberId == myDeviceUUID.value || memberId == myCloudIdVal
+        if (isSelf) {
+            _uiEvents.emit("Cannot remove your own active device.")
+            return@launch
+        }
 
-            // 1. Permanently record deletion in SharedPreferences so it can NEVER be resurrected
-            val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
-            val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-            val isMyDeviceName = cleanName == "dad" || cleanName == "louis" || cleanName.contains("other device") || cleanName.isBlank()
-            prefs.edit()
-                .putBoolean("deleted_$cleanId", true)
-                .putBoolean("deleted_member_$cleanId", true)
-                .apply()
+        // 1. Permanently record deletion in SharedPreferences immediately before suspension
+        val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("deleted_$cleanId", true)
+            .putBoolean("deleted_member_$cleanId", true)
+            .putBoolean("deleted_$memberId", true)
+            .putBoolean("deleted_member_$memberId", true)
+            .putLong("deleted_time_$cleanId", System.currentTimeMillis())
+            .commit()
 
-            if (!isMyDeviceName) {
-                prefs.edit()
-                    .putBoolean("deleted_$cleanName", true)
-                    .putBoolean("deleted_member_$cleanName", true)
-                    .apply()
-            }
-            prefs.edit().putLong("deleted_time_$cleanId", System.currentTimeMillis()).apply()
+        val kPrefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+        kPrefs.edit()
+            .remove("is_member_paused_$cleanId")
+            .remove("is_member_paused_$memberId")
+            .commit()
+
+        val allCurrent = repository.getFamilyMembersOnce()
+        val target = allCurrent.firstOrNull { it.id == memberId }
+            ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
+        val targetName = target?.name ?: memberId
+        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+
+        prefs.edit()
+            .putBoolean("deleted_$cleanName", true)
+            .putBoolean("deleted_member_$cleanName", true)
+            .commit()
+        kPrefs.edit()
+            .remove("is_member_paused_$cleanName")
+            .commit()
 
             // 2. Delete all matching records from local database (NEVER delete 'me')
             for (m in allCurrent) {
                 if (m.id == "me") continue
                 val mClean = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-                if (m.id == memberId || m.id == cleanId || (!isMyDeviceName && (mClean == cleanName || (cleanName.isNotEmpty() && mClean.contains(cleanName))))) {
+                if (m.id == memberId || m.id == cleanId || mClean == cleanName || (cleanName.isNotBlank() && mClean.contains(cleanName))) {
                     repository.deleteMember(m)
                 }
             }
@@ -1112,7 +943,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
             _uiEvents.emit("$targetName removed from radar circle.")
         }
-    }
 
     fun purgeDeletedCacheAndRefresh() {
         viewModelScope.launch {
@@ -1173,20 +1003,35 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleMemberTracking(memberId: String) = viewModelScope.launch {
         val myNameVal = myDeviceName.value
         val myCloudIdVal = "device_" + myNameVal.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
-        if (memberId == "me" || memberId == myCloudIdVal || memberId.equals(myNameVal, ignoreCase = true)) {
+        if (memberId == "me" || memberId == myCloudIdVal || (memberId.equals(myNameVal, ignoreCase = true) && !memberId.contains("other device", ignoreCase = true))) {
             toggleLocationPaused(!isLocationPaused.value)
             return@launch
         }
 
-        val token = groupSyncToken.value
-        val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
-        val targetName = localTarget?.name ?: memberId
-        val currentlyPaused = localTarget?.isLocationPaused == true || localTarget?.statusText?.contains("Paused", ignoreCase = true) == true
+        val kPrefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+        val cleanId = memberId.lowercase().trim()
+        val currentlyPaused = kPrefs.getBoolean("is_member_paused_$cleanId", kPrefs.getBoolean("is_member_paused_$memberId", false))
         val targetPaused = !currentlyPaused
+
+        kPrefs.edit()
+            .putBoolean("is_member_paused_$memberId", targetPaused)
+            .putBoolean("is_member_paused_$cleanId", targetPaused)
+            .commit()
 
         if (targetPaused && selectedMemberId.value == memberId) {
             selectedMemberId.value = null
         }
+
+        val token = groupSyncToken.value
+        val allCurrent = repository.getFamilyMembersOnce()
+        val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+            ?: allCurrent.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+        val targetName = localTarget?.name ?: memberId
+        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+        kPrefs.edit()
+            .putBoolean("is_member_paused_${localTarget?.id ?: memberId}", targetPaused)
+            .putBoolean("is_member_paused_$cleanName", targetPaused)
+            .commit()
 
         // Update local database immediately so the device is removed from / restored to the screen instantly
         localTarget?.let {

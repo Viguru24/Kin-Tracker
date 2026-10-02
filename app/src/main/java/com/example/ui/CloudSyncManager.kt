@@ -345,9 +345,10 @@ class CloudSyncManager(
                     val entryId = entry.key
                     val entryName = entry.value.name.lowercase().trim()
                     val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + myDeviceUUID.value)
+                    val isExplicitlyDeleted = (entryId != myCloudId && !entryId.endsWith("_" + myDeviceUUID.value)) &&
+                        (deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
+                         deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
                     val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) } || entryId.contains("isabel") || entryId.contains("eloise") || entryId.contains("tab")
-                    val isExplicitlyDeleted = !isKnownFamily && (deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
-                        deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
                     // Only purge stale entries that are NOT known family members
                     val isStaleUnknown = !isKnownFamily &&
                         (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
@@ -430,12 +431,9 @@ class CloudSyncManager(
                     .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                     .trim()
 
-                val isKnownFamily = cleanKey.contains("isabel") || cleanKey.contains("annette") ||
-                    cleanKey.contains("dad") || cleanKey.contains("louis") || cleanKey.contains("eloise") ||
-                    cleanKey.contains("tab") || cleanKey.contains("tablet")
-
-                // Check if user explicitly deleted this member locally (NEVER block known family members):
-                if (!isKnownFamily) {
+                // Check if user explicitly deleted this member locally (never block THIS active device):
+                val isCurrentDevice = cloudM.id == myCloudId || (myDeviceUUID.value.isNotBlank() && cloudM.id.endsWith("_" + myDeviceUUID.value))
+                if (!isCurrentDevice) {
                     if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
                         deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
                         deletedMembersPrefs.getBoolean("deleted_member_${cloudM.id}", false) ||
@@ -609,7 +607,10 @@ class CloudSyncManager(
                     }
                 }
 
-                val isMemberLocPaused = cloudM.isLocationPaused || cloudM.statusText.contains("Paused", ignoreCase = true)
+                val kPrefs = application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+                val isLocallyPaused = kPrefs.getBoolean("is_member_paused_${cloudM.id}", false) ||
+                        kPrefs.getBoolean("is_member_paused_$cleanKey", false)
+                val isMemberLocPaused = cloudM.isLocationPaused || isLocallyPaused || cloudM.statusText.contains("Paused", ignoreCase = true)
                 val finalStatus = if (isMemberLocPaused) "⏸️ Paused (Home Sleep)" else if (isMemberAtHome) "At Home (Live GPS)" else activeStatus
                 val finalSpeedMph = if (isMemberAtHome || isMemberLocPaused) 0.0 else resolvedSpeedMph
                 val finalComingHome = if (isMemberAtHome || isMemberLocPaused) false else cloudM.isComingHome
@@ -773,13 +774,14 @@ class CloudSyncManager(
             val cleanTargetName = memberName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
 
             val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
-            val isMyDeviceName = cleanTargetName == "dad" || cleanTargetName == "louis" || cleanTargetName.contains("other device") || cleanTargetName.isBlank()
 
             val keysToRemove = updatedMembers.filter { entry ->
-                if (entry.key == myCloudId || entry.key.endsWith("_" + myDeviceUUID.value)) return@filter false
+                if (entry.key == myCloudId || (myDeviceUUID.value.isNotBlank() && entry.key.endsWith("_" + myDeviceUUID.value))) return@filter false
+                val entryNameClean = entry.value.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
                 entry.key == memberId || 
                 entry.value.id == memberId ||
-                (!isMyDeviceName && entry.value.name.lowercase().contains(cleanTargetName))
+                entry.key.endsWith("_$memberId") ||
+                (cleanTargetName.isNotBlank() && (entryNameClean == cleanTargetName || entry.value.name.lowercase().contains(cleanTargetName)))
             }.keys
 
             for (k in keysToRemove) {

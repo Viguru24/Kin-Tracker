@@ -320,12 +320,12 @@ fun MapContextMenu(
                 }
 
 
-                // Kick / Remove Member (Owner only)
-                if (isOwner && member.id != "me" && member.id.startsWith("device_")) {
+                // Permanently Remove Member from Circle
+                if (member.id != "me") {
                     Button(
                         onClick = {
                             onDismiss()
-                            onKickMember(member.id)
+                            onDeleteMember(member)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
                         modifier = Modifier.fillMaxWidth(),
@@ -335,53 +335,28 @@ fun MapContextMenu(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("🥾", fontSize = 16.sp)
-                            Text("Kick / Remove Member permanently", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("🗑️", fontSize = 16.sp)
+                            Text("Permanently Remove ${member.name}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
 
-                // Edit / Delete Row
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // Edit Info Button
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onEditMember(member)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            onDismiss()
-                            onEditMember(member)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = RadarCyan, modifier = Modifier.size(14.dp))
-                            Text("Edit Info", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    if (member.id != "me") {
-                        Button(
-                            onClick = {
-                                onDismiss()
-                                onDeleteMember(member)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = SlateBorder),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = ErrorRed, modifier = Modifier.size(14.dp))
-                                Text("Delete", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = RadarCyan, modifier = Modifier.size(14.dp))
+                        Text("Edit Info", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

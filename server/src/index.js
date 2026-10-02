@@ -156,7 +156,8 @@ app.put('/sync/:token', (req, res) => {
             }
         });
 
-        // Clean up any existing circle member that has the same UUID suffix but a different ID
+        // Clean up any existing circle member that has the same UUID suffix but a different ID,
+        // or any member explicitly removed from the client members map
         if (circle.memberIds && circle.memberIds.length > 0) {
             const obsoleteIds = [];
             circle.memberIds.forEach(existingId => {
@@ -165,7 +166,11 @@ app.put('/sync/:token', (req, res) => {
                     const uuid = parts[parts.length - 1];
                     if (incomingUuids.has(uuid) && !body.members[existingId]) {
                         obsoleteIds.push(existingId);
+                        return;
                     }
+                }
+                if (!body.members[existingId]) {
+                    obsoleteIds.push(existingId);
                 }
             });
             obsoleteIds.forEach(oldId => {

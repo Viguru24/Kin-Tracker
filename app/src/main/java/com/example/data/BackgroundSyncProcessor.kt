@@ -365,9 +365,13 @@ object BackgroundSyncProcessor {
             val cleanMyName = myName.lowercase().trim()
             val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
 
+            val deletedMembersPrefs = context.getSharedPreferences("deleted_members", Context.MODE_PRIVATE)
             val keysToRemove = updatedMembers.filter { entry ->
                 val entryId = entry.key
-                entryId != myCloudId && entryId.endsWith("_" + dUuid)
+                val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + dUuid)
+                val isExplicitlyDeleted = entryId != myCloudId && !entryId.endsWith("_$dUuid") &&
+                        (deletedMembersPrefs.getBoolean("deleted_$entryId", false) || deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
+                isMyOldDeviceKey || isExplicitlyDeleted
             }.keys
             for (k in keysToRemove) {
                 updatedMembers.remove(k)
@@ -398,6 +402,73 @@ object BackgroundSyncProcessor {
             val payloadJson = payloadAdapter.toJson(newPayload)
             val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
             cloudService.updateGroupData(token, requestBody)
+
+            // 6. Ingest incoming circle members and evaluate background geofence arrival/departure alerts
+            val contactsPrefs = context.getSharedPreferences("circle_contacts_prefs", Context.MODE_PRIVATE)
+            val existingLocal = repository.getFamilyMembersOnce()
+            val evaluatedMembers = mutableListOf<FamilyMember>()
+
+            val meLocal = existingLocal.firstOrNull { it.id == "me" }
+            if (meLocal != null) evaluatedMembers.add(meLocal)
+
+            payload?.members?.values?.forEach { cloudM ->
+                if (cloudM.id == myCloudId || (dUuid.length >= 4 && cloudM.id.endsWith("_$dUuid"))) return@forEach
+
+                val cleanCloudName = cloudM.name.lowercase().trim()
+                val cleanKey = cleanCloudName
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+
+                // Check if user explicitly deleted this member locally
+                if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_${cloudM.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
+                    return@forEach
+                }
+
+                val isLocallyPaused = prefs.getBoolean("is_member_paused_${cloudM.id}", false) ||
+                        prefs.getBoolean("is_member_paused_$cleanKey", false)
+                val isMemberLocPaused = cloudM.isLocationPaused || isLocallyPaused || cloudM.statusText.contains("Paused", ignoreCase = true)
+
+                val locallyEditedName = contactsPrefs.getString("edited_name_${cloudM.id}", "")?.trim()?.takeIf { it.isNotBlank() }
+                val resolvedName = when {
+                    !locallyEditedName.isNullOrBlank() -> locallyEditedName
+                    cloudM.name.trim().equals(myName.trim(), ignoreCase = true) -> "${cloudM.name} (Other Device)"
+                    else -> cloudM.name
+                }
+
+                val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
+                val mappedMember = FamilyMember(
+                    id = cloudM.id,
+                    name = resolvedName,
+                    avatarColorHex = cloudM.avatarColorHex,
+                    x = cloudM.x,
+                    y = cloudM.y,
+                    batteryPercentage = cloudM.batteryPercentage,
+                    isCharging = cloudM.isCharging,
+                    speedMph = if (isMemberLocPaused) 0.0 else cloudM.speedMph,
+                    statusText = if (isMemberLocPaused) "⏸️ Paused (Hidden)" else cloudM.statusText,
+                    isComingHome = if (isMemberLocPaused) false else cloudM.isComingHome,
+                    etaMinutes = if (isMemberLocPaused) 0 else cloudM.etaMinutes,
+                    avatarEmoji = cloudM.avatarEmoji,
+                    phoneNumber = matchingLocal?.phoneNumber ?: "",
+                    photoPath = matchingLocal?.photoPath ?: "",
+                    lastActive = cloudM.lastActive,
+                    locationSince = cloudM.locationSince,
+                    isLocationPaused = isMemberLocPaused
+                )
+
+                if (matchingLocal != null) {
+                    repository.updateMember(mappedMember)
+                } else {
+                    repository.insertFamilyMembers(listOf(mappedMember))
+                }
+                evaluatedMembers.add(mappedMember)
+            }
+
+            // Run 24/7 background geofence presence detection and alert notifications
+            GeofenceMonitor.evaluateGeofences(context, repository, prefs, evaluatedMembers, location)
 
         } catch (e: Exception) {
             e.printStackTrace()
