@@ -913,48 +913,63 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         val target = allCurrent.firstOrNull { it.id == memberId }
             ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
         val targetName = target?.name ?: memberId
-        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
 
-        prefs.edit()
-            .putBoolean("deleted_$cleanName", true)
-            .putBoolean("deleted_member_$cleanName", true)
-            .commit()
-        kPrefs.edit()
-            .remove("is_member_paused_$cleanName")
-            .commit()
-
-            // 2. Delete all matching records from local database (NEVER delete 'me')
-            for (m in allCurrent) {
-                if (m.id == "me") continue
-                val mClean = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-                if (m.id == memberId || m.id == cleanId || mClean == cleanName || (cleanName.isNotBlank() && mClean.contains(cleanName))) {
-                    repository.deleteMember(m)
-                }
-            }
-
-            // 3. Remove from cloud group payload
-            cloudSyncManager.removeMemberFromCloud(memberId, targetName)
-
-            // 4. Remove location breadcrumbs for this member
-            repository.clearBreadcrumbsForMember(memberId)
-            if (target != null && target.id != memberId) repository.clearBreadcrumbsForMember(target.id)
-
-            repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of $targetName", iconName = "away"))
-            if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
-            _uiEvents.emit("$targetName removed from radar circle.")
+        val isCommonRole = cleanName in setOf("you", "dad", "louis", "wife", "mama", "mom", "mother", "daughter", "son", "isabel", "annette", "eloise")
+        if (!isCommonRole && cleanName.isNotBlank()) {
+            prefs.edit()
+                .putBoolean("deleted_$cleanName", true)
+                .putBoolean("deleted_member_$cleanName", true)
+                .apply()
         }
+
+        // 2. Delete the target record(s) from local database (NEVER delete 'me' or active device)
+        for (m in allCurrent) {
+            if (m.id == "me" || m.id == myCloudIdVal || (myDeviceUUID.value.isNotBlank() && m.id.endsWith("_" + myDeviceUUID.value))) continue
+            val matchesExactId = m.id == memberId || m.id == cleanId
+            val matchesTargetId = target != null && m.id == target.id
+            if (matchesExactId || matchesTargetId) {
+                repository.deleteMember(m)
+                repository.clearBreadcrumbsForMember(m.id)
+            }
+        }
+
+        // 3. Remove from cloud group payload
+        cloudSyncManager.removeMemberFromCloud(memberId, targetName)
+
+        // 4. Remove location breadcrumbs for this member
+        repository.clearBreadcrumbsForMember(memberId)
+        if (target != null && target.id != memberId) repository.clearBreadcrumbsForMember(target.id)
+
+        repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of $targetName", iconName = "away"))
+        if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
+        _uiEvents.emit("$targetName removed from radar circle.")
+    }
+
+    fun cleanDuplicates() = viewModelScope.launch {
+        val removed = cloudSyncManager.cleanupDuplicatesNow()
+        purgeDeletedCacheAndRefresh()
+        if (removed > 0) {
+            _uiEvents.emit("🧹 Cleaned $removed duplicate device(s) from circle!")
+        } else {
+            _uiEvents.emit("✅ Circle is clean. No duplicates found.")
+        }
+    }
 
     fun purgeDeletedCacheAndRefresh() {
         viewModelScope.launch {
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             val allCurrent = repository.getFamilyMembersOnce()
+            val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+
             for (m in allCurrent) {
-                val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
+                if (m.id == "me" || m.id == myCloudIdVal || (myDeviceUUID.value.isNotBlank() && m.id.endsWith("_" + myDeviceUUID.value))) continue
+                val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
                 if (deletedMembersPrefs.getBoolean("deleted_${m.id}", false) || 
-                    deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) ||
                     deletedMembersPrefs.getBoolean("deleted_member_${m.id}", false) ||
-                    deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)) {
+                    (cleanKey.isNotBlank() && (deletedMembersPrefs.getBoolean("deleted_$cleanKey", false) || deletedMembersPrefs.getBoolean("deleted_member_$cleanKey", false)))) {
                     repository.deleteMember(m)
+                    repository.clearBreadcrumbsForMember(m.id)
                 }
             }
             _uiEvents.emit("Radar cache cleaned & refreshed!")
@@ -1026,11 +1041,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         val allCurrent = repository.getFamilyMembersOnce()
         val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
             ?: allCurrent.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+        val targetIdToPause = localTarget?.id ?: memberId
         val targetName = localTarget?.name ?: memberId
-        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
         kPrefs.edit()
-            .putBoolean("is_member_paused_${localTarget?.id ?: memberId}", targetPaused)
-            .putBoolean("is_member_paused_$cleanName", targetPaused)
+            .putBoolean("is_member_paused_$targetIdToPause", targetPaused)
             .commit()
 
         // Update local database immediately so the device is removed from / restored to the screen instantly

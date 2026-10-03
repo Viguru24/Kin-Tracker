@@ -1016,7 +1016,9 @@ fun MainScreen(
                             },
                             activityLogs = logs,
                             onClearLogs = { viewModel.clearLogHistory() },
-                            onOpenFeedback = { isFeedbackOpen = true }
+                            onOpenFeedback = { isFeedbackOpen = true },
+                            onCleanDuplicates = { viewModel.cleanDuplicates() },
+                            onDeleteMember = { member -> viewModel.deleteFamilyMember(member.id) }
                         )
                     }
                 }

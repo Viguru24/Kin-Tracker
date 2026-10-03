@@ -333,26 +333,69 @@ class CloudSyncManager(
                 val updatedMembers = payload.members.toMutableMap()
                 val cleanMyName = myName.lowercase().trim()
                 val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
 
-                // Clean up old duplicate entries for THIS device UUID only.
-                // Also purge genuinely unknown/unnamed devices inactive > 7 days.
-                // NEVER auto-purge known family members (Isabel, Annette, etc.) — they
-                // may simply have a flat battery or lost signal temporarily.
+                // 1. DEDUPLICATE BY UUID:
+                // Multiple devices cannot have the exact same hardware UUID suffix.
+                // Keep only the one with the latest lastActive timestamp!
+                val membersByUuid = updatedMembers.values.groupBy { m ->
+                    if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
+                }.filterKeys { it.length >= 4 }
+
+                for ((_, list) in membersByUuid) {
+                    if (list.size > 1) {
+                        val newest = list.maxByOrNull { it.lastActive }
+                        for (stale in list) {
+                            if (stale.id != newest?.id && stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                                updatedMembers.remove(stale.id)
+                            }
+                        }
+                    }
+                }
+
+                // 2. DEDUPLICATE BY NORMALIZED NAME:
+                // If two or more devices share the exact same clean name (e.g. multiple "Louis's S23", or an older "Dad" when I am active "Dad"),
+                // keep only the one with the latest lastActive timestamp!
+                val membersByName = updatedMembers.values.groupBy { m ->
+                    m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                }.filterKeys { it.isNotBlank() }
+
+                for ((_, list) in membersByName) {
+                    if (list.size > 1) {
+                        val containsMe = list.any { it.id == myCloudId || it.id.endsWith("_" + myDeviceUUID.value) }
+                        if (containsMe) {
+                            for (stale in list) {
+                                if (stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                                    updatedMembers.remove(stale.id)
+                                }
+                            }
+                        } else {
+                            val newest = list.maxByOrNull { it.lastActive }
+                            for (stale in list) {
+                                if (stale.id != newest?.id) {
+                                    updatedMembers.remove(stale.id)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. REMOVE EXPLICITLY DELETED OR STALE MOCK/TEST ENTRIES:
                 val knownFamilyKeywords = listOf("isabel", "eloise", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother", "tab", "tablet")
                 val staleThresholdMs = 7 * 24 * 3600 * 1000L // 7 days before considering a device truly gone
-                val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
                 val keysToRemove = updatedMembers.filter { entry ->
                     val entryId = entry.key
                     val entryName = entry.value.name.lowercase().trim()
-                    val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + myDeviceUUID.value)
-                    val isExplicitlyDeleted = (entryId != myCloudId && !entryId.endsWith("_" + myDeviceUUID.value)) &&
-                        (deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
-                         deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
+                    val isMyDevice = entryId == myCloudId || entryId.endsWith("_" + myDeviceUUID.value)
+                    if (isMyDevice) return@filter false
+
+                    val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
+                        deletedMembersPrefs.getBoolean("deleted_member_$entryId", false)
+                    val isOldMock = entryId.contains("abc123") || entryId.startsWith("mock_")
                     val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) } || entryId.contains("isabel") || entryId.contains("eloise") || entryId.contains("tab")
-                    // Only purge stale entries that are NOT known family members
-                    val isStaleUnknown = !isKnownFamily &&
-                        (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
-                    isMyOldDeviceKey || isExplicitlyDeleted || isStaleUnknown
+                    val isStaleUnknown = !isKnownFamily && (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
+
+                    isExplicitlyDeleted || isOldMock || isStaleUnknown
                 }.keys
                 for (k in keysToRemove) {
                     updatedMembers.remove(k)
@@ -674,18 +717,24 @@ class CloudSyncManager(
 
 
 
-            val knownFamilyKeywordsLocal = listOf("isabel", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother")
+            val validCloudIds = newPayload.members.keys.toSet()
+            val validCloudUuids = validCloudIds.mapNotNull { if (it.contains("_")) it.substringAfterLast("_").takeIf { u -> u.length >= 4 } else null }.toSet()
+
             for (localM in existingLocal) {
                 if (localM.id == "me") continue
-                if (localM.id.startsWith("device_") && !newPayload.members.containsKey(localM.id)) {
-                    val localUuid = localM.id.substringAfterLast("_")
-                    val hasSameUuidReplacement = localUuid.length >= 4 && newPayload.members.keys.any { it.endsWith("_$localUuid") }
-                    val localNameLower = localM.name.lowercase().trim()
-                    val isKnownFamilyLocal = knownFamilyKeywordsLocal.any { localNameLower.contains(it) }
-                    // Only remove from local DB if superseded by a renamed record or if this is NOT a known family member
-                    if (hasSameUuidReplacement || !isKnownFamilyLocal) {
-                        repository.deleteMember(localM)
-                    }
+                if (localM.id == myCloudId || localM.id.endsWith("_" + myDeviceUUID.value)) continue
+
+                val localUuid = if (localM.id.contains("_")) localM.id.substringAfterLast("_") else ""
+                val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_${localM.id}", false) ||
+                    deletedMembersPrefs.getBoolean("deleted_member_${localM.id}", false)
+
+                val isNotInCloud = !validCloudIds.contains(localM.id)
+                val hasReplacementInCloud = (localUuid.length >= 4 && validCloudUuids.contains(localUuid)) ||
+                    newPayload.members.values.any { it.name.trim().equals(localM.name.trim(), ignoreCase = true) }
+
+                if (isExplicitlyDeleted || (isNotInCloud && hasReplacementInCloud) || (isNotInCloud && (localM.id.contains("abc123") || localM.id.startsWith("mock_")))) {
+                    repository.deleteMember(localM)
+                    repository.clearBreadcrumbsForMember(localM.id)
                 }
             }
 
@@ -771,17 +820,18 @@ class CloudSyncManager(
         try {
             val payload = getGroupData(token) ?: return
             val updatedMembers = payload.members.toMutableMap()
-            val cleanTargetName = memberName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-
             val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+
+            val targetUuid = if (memberId.startsWith("device_") && memberId.contains("_")) memberId.substringAfterLast("_") else ""
+            val cleanTargetName = memberName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
 
             val keysToRemove = updatedMembers.filter { entry ->
                 if (entry.key == myCloudId || (myDeviceUUID.value.isNotBlank() && entry.key.endsWith("_" + myDeviceUUID.value))) return@filter false
-                val entryNameClean = entry.value.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "").trim()
-                entry.key == memberId || 
-                entry.value.id == memberId ||
-                entry.key.endsWith("_$memberId") ||
-                (cleanTargetName.isNotBlank() && (entryNameClean == cleanTargetName || entry.value.name.lowercase().contains(cleanTargetName)))
+                val isExactMatch = entry.key == memberId || entry.value.id == memberId || entry.key.endsWith("_$memberId")
+                val isUuidMatch = targetUuid.length >= 4 && (entry.key.endsWith("_$targetUuid") || entry.value.id.endsWith("_$targetUuid"))
+                val isOldDuplicateName = cleanTargetName.isNotBlank() && entry.value.name.lowercase().trim() == cleanTargetName && (entry.key.contains("abc123") || entry.key.startsWith("mock_"))
+
+                isExactMatch || isUuidMatch || isOldDuplicateName
             }.keys
 
             for (k in keysToRemove) {
@@ -1220,8 +1270,14 @@ class CloudSyncManager(
                     val updatedMembers = payload.members.toMutableMap()
                     val kickedMember = updatedMembers.remove(memberId)
                     if (updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))) {
+                        val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+                        deletedMembersPrefs.edit()
+                            .putBoolean("deleted_$memberId", true)
+                            .putBoolean("deleted_member_$memberId", true)
+                            .apply()
                         repository.insertLog(ActivityLog(memberId = memberId, memberName = kickedMember?.name ?: memberId, actionText = "was permanently removed (kicked) from the circle by owner", iconName = "away"))
                         repository.getFamilyMembersOnce().firstOrNull { it.id == memberId }?.let { repository.deleteMember(it) }
+                        repository.clearBreadcrumbsForMember(memberId)
                         uiEvents.emit("Successfully kicked ${kickedMember?.name ?: memberId}.")
                     }
                 }
@@ -1229,5 +1285,79 @@ class CloudSyncManager(
                 uiEvents.emit("Failed to kick member: ${e.localizedMessage}")
             }
         }
+    }
+
+    suspend fun cleanupDuplicatesNow(): Int {
+        val token = groupSyncToken.value
+        if (token.isBlank()) return 0
+        return try {
+            val payload = getGroupData(token) ?: return 0
+            val updatedMembers = payload.members.toMutableMap()
+            val beforeCount = updatedMembers.size
+            val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+
+            // 1. Deduplicate by UUID
+            val membersByUuid = updatedMembers.values.groupBy { m ->
+                if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
+            }.filterKeys { it.length >= 4 }
+
+            for ((_, list) in membersByUuid) {
+                if (list.size > 1) {
+                    val newest = list.maxByOrNull { it.lastActive }
+                    for (stale in list) {
+                        if (stale.id != newest?.id && stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                            updatedMembers.remove(stale.id)
+                        }
+                    }
+                }
+            }
+
+            // 2. Deduplicate by normalized name
+            val membersByName = updatedMembers.values.groupBy { m ->
+                m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+            }.filterKeys { it.isNotBlank() }
+
+            for ((_, list) in membersByName) {
+                if (list.size > 1) {
+                    val containsMe = list.any { it.id == myCloudId || it.id.endsWith("_" + myDeviceUUID.value) }
+                    if (containsMe) {
+                        for (stale in list) {
+                            if (stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                                updatedMembers.remove(stale.id)
+                            }
+                        }
+                    } else {
+                        val newest = list.maxByOrNull { it.lastActive }
+                        for (stale in list) {
+                            if (stale.id != newest?.id) {
+                                updatedMembers.remove(stale.id)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Remove old mock/test IDs
+            val mockKeys = updatedMembers.keys.filter { it.contains("abc123") || it.startsWith("mock_") }
+            for (k in mockKeys) updatedMembers.remove(k)
+
+            val removedCount = beforeCount - updatedMembers.size
+            if (removedCount > 0) {
+                val newPayload = payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers)
+                updateGroupData(token, newPayload)
+
+                // Clean from local DB
+                val existingLocal = repository.getFamilyMembersOnce()
+                for (localM in existingLocal) {
+                    if (localM.id == "me") continue
+                    if (localM.id == myCloudId || localM.id.endsWith("_" + myDeviceUUID.value)) continue
+                    if (!updatedMembers.containsKey(localM.id)) {
+                        repository.deleteMember(localM)
+                        repository.clearBreadcrumbsForMember(localM.id)
+                    }
+                }
+            }
+            removedCount
+        } catch (_: Exception) { 0 }
     }
 }

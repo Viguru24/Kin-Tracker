@@ -86,6 +86,8 @@ fun SettingsHub(
     activityLogs: List<ActivityLog>,
     onClearLogs: () -> Unit,
     onOpenFeedback: () -> Unit,
+    onCleanDuplicates: (() -> Unit)? = null,
+    onDeleteMember: ((FamilyMember) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(SettingsTab.CIRCLE) }
@@ -141,7 +143,9 @@ fun SettingsHub(
                     members = members,
                     myDeviceUUID = myDeviceUUID,
                     onOpenAddDevice = onOpenAddDevice,
-                    onJoinGroupWithPin = onJoinGroupWithPin
+                    onJoinGroupWithPin = onJoinGroupWithPin,
+                    onCleanDuplicates = onCleanDuplicates,
+                    onDeleteMember = onDeleteMember
                 )
                 SettingsTab.PROFILE -> ProfileTabContent(
                     name = myDeviceName,
@@ -197,7 +201,9 @@ private fun CircleTabContent(
     members: List<FamilyMember>,
     myDeviceUUID: String,
     onOpenAddDevice: () -> Unit,
-    onJoinGroupWithPin: (String) -> Unit
+    onJoinGroupWithPin: (String) -> Unit,
+    onCleanDuplicates: (() -> Unit)? = null,
+    onDeleteMember: ((FamilyMember) -> Unit)? = null
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showJoinSheet by remember { mutableStateOf(false) }
@@ -268,13 +274,34 @@ private fun CircleTabContent(
         }
 
         // ── Connected Family Members ──
-        Text(
-            text = "CONNECTED FAMILY MEMBERS (${members.size})",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = SecondarySlate,
-            modifier = Modifier.padding(start = 4.dp, top = 4.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "CONNECTED FAMILY MEMBERS (${members.size})",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = SecondarySlate
+            )
+            if (onCleanDuplicates != null) {
+                Surface(
+                    onClick = onCleanDuplicates,
+                    shape = RoundedCornerShape(8.dp),
+                    color = RadarCyan.copy(alpha = 0.08f),
+                    border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.25f))
+                ) {
+                    Text(
+                        "🧹 Clean Duplicates",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = RadarCyan,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
 
         members.forEach { member ->
             val isMe = member.id == "me" || member.id.endsWith("_$myDeviceUUID")
@@ -337,18 +364,37 @@ private fun CircleTabContent(
                         }
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (member.batteryPercentage > 20) Color(0xFFF1F8E9) else Color(0xFFFFEBEE),
-                        border = BorderStroke(1.dp, if (member.batteryPercentage > 20) Color(0xFF81C784) else Color(0xFFE57373))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (member.batteryPercentage > 20) Color(0xFFF1F8E9) else Color(0xFFFFEBEE),
+                            border = BorderStroke(1.dp, if (member.batteryPercentage > 20) Color(0xFF81C784) else Color(0xFFE57373))
                         ) {
-                            Text(if (member.isCharging) "⚡" else "🔋", fontSize = 11.sp)
-                            Text("${member.batteryPercentage}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(if (member.isCharging) "⚡" else "🔋", fontSize = 11.sp)
+                                Text("${member.batteryPercentage}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828))
+                            }
+                        }
+
+                        if (!isMe && onDeleteMember != null) {
+                            IconButton(
+                                onClick = { onDeleteMember(member) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove ${member.name}",
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }

@@ -730,7 +730,7 @@ fun MemberCard(
                     ) {
                         Text(if (isMemberPaused) "👁️" else "⏸️", fontSize = 14.sp)
                         Text(
-                            text = if (isMemberPaused) "Un-pause & Show on Screen" else "Pause & Remove from Screen",
+                            text = if (isMemberPaused) "Un-pause Tracking (Show on Map)" else "Pause Tracking (Hide from Map)",
                             color = if (isMemberPaused) Color(0xFF00FF87) else TextPrimary,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold

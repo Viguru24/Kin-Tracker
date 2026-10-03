@@ -1519,11 +1519,15 @@ fun RadarMap(
             }
 
             // 1c. FLOATING PAUSED DEVICES BANNER (Temporarily removed from screen until un-pause)
+            var isPausedBannerDismissed by remember { mutableStateOf(false) }
             val pausedMembers = members.filter {
                 it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true)
             }
+            LaunchedEffect(pausedMembers.isEmpty()) {
+                if (pausedMembers.isEmpty()) isPausedBannerDismissed = false
+            }
             AnimatedVisibility(
-                visible = pausedMembers.isNotEmpty(),
+                visible = pausedMembers.isNotEmpty() && !isPausedBannerDismissed,
                 enter = fadeIn() + slideInVertically(),
                 exit = fadeOut() + slideOutVertically()
             ) {
@@ -1542,6 +1546,24 @@ fun RadarMap(
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "⏸️ Paused Devices (${pausedMembers.size}) — Hidden from Map",
+                                color = ActiveAmber,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            IconButton(
+                                onClick = { isPausedBannerDismissed = true },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Text("✕", color = SecondarySlate, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         pausedMembers.forEach { pMember ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1553,16 +1575,15 @@ fun RadarMap(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("⏸️", fontSize = 16.sp)
                                     Column {
                                         Text(
-                                            text = "${pMember.name} is Paused",
-                                            color = ActiveAmber,
-                                            fontSize = 11.sp,
+                                            text = pMember.name,
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = "Temporarily removed from screen",
+                                            text = "Paused • Hidden from map",
                                             color = com.example.ui.theme.TextSecondary,
                                             fontSize = 9.sp
                                         )
@@ -1578,7 +1599,7 @@ fun RadarMap(
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(28.dp),
+                                    modifier = Modifier.height(26.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                                 ) {
                                     Text(

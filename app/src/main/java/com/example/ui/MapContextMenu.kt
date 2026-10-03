@@ -307,10 +307,10 @@ fun MapContextMenu(
                         Text(if (isMemberPaused) "👁️" else "⏸️", fontSize = 16.sp)
                         Text(
                             text = when {
-                                member.id == "me" && isMemberPaused -> "Un-pause & Show My Device on Screen"
-                                member.id == "me" -> "Pause & Remove My Device from Screen"
-                                isMemberPaused -> "Un-pause & Show ${member.name} on Screen"
-                                else -> "Pause & Remove ${member.name} from Screen"
+                                member.id == "me" && isMemberPaused -> "Un-pause My Device (Show on Map)"
+                                member.id == "me" -> "Pause My Device (Hide from Map)"
+                                isMemberPaused -> "Un-pause ${member.name} (Show on Map)"
+                                else -> "Pause ${member.name} (Hide from Map)"
                             },
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
@@ -336,7 +336,7 @@ fun MapContextMenu(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("🗑️", fontSize = 16.sp)
-                            Text("Permanently Remove ${member.name}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Permanently Remove ${member.name} from Circle", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
