@@ -90,8 +90,22 @@ data class MemberVisualState(
 data class ClusterLayoutResult(
     val adjustedCoordinates: Map<String, GeoPoint>,
     val clusterAnchorPoints: Map<String, GeoPoint>,
-    val clusters: List<List<String>>
+    val clusters: List<List<String>>,
+    /** memberId -> barrier key ("home", "zone:<id>", "work") for members locked stationary inside a barrier. */
+    val barrierMembership: Map<String, String> = emptyMap()
 )
+
+/** True when the status text explicitly describes travel (not inferred from noisy GPS speed). */
+private fun statusIndicatesTravel(m: FamilyMember): Boolean {
+    if (classifyTransitMode(0.0, m.statusText, m.id) != TransitMode.STATIONARY) return true
+    val s = m.statusText
+    return s.contains("walk", ignoreCase = true) ||
+        s.contains("moving", ignoreCase = true) ||
+        s.contains("driving", ignoreCase = true) ||
+        s.contains("bike", ignoreCase = true) ||
+        s.contains("transit", ignoreCase = true) ||
+        s.contains("commute", ignoreCase = true)
+}
 
 fun computeClusterLayout(
     members: List<FamilyMember>,
@@ -102,11 +116,15 @@ fun computeClusterLayout(
     isWorkCalibrated: Boolean,
     workLat: Double,
     workLng: Double,
-    workRadiusMeters: Double
+    workRadiusMeters: Double,
+    previousBarrierMembership: Map<String, String> = emptyMap(),
+    exitBufferMeters: Double = 45.0,
+    barrierBreakoutSpeedMph: Double = 4.0
 ): ClusterLayoutResult {
     val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
     val clusterAnchorPoints = mutableMapOf<String, GeoPoint>()
     val clusters = mutableListOf<List<String>>()
+    val barrierMembership = mutableMapOf<String, String>()
 
     val activeMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
     val homeClusterMembers = mutableListOf<String>()
@@ -115,51 +133,59 @@ fun computeClusterLayout(
     val unassignedMembers = mutableListOf<FamilyMember>()
 
     activeMembers.forEach { m ->
-        val transit = classifyTransitMode(m.speedMph, m.statusText, m.id)
-        val isActivelyMoving = transit != TransitMode.STATIONARY ||
-            m.speedMph >= 0.6 ||
-            m.isComingHome ||
-            m.statusText.contains("walk", ignoreCase = true) ||
-            m.statusText.contains("moving", ignoreCase = true) ||
-            m.statusText.contains("driving", ignoreCase = true) ||
-            m.statusText.contains("bike", ignoreCase = true) ||
-            m.statusText.contains("transit", ignoreCase = true) ||
-            m.statusText.contains("commute", ignoreCase = true)
+        // Hysteresis: a member already locked inside a barrier only leaves once beyond radius + exit buffer.
+        // This stops GPS drift at the boundary from flipping cluster membership (which re-slots every face).
+        val prevBarrier = previousBarrierMembership[m.id]
+
+        val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
+        } else Double.MAX_VALUE
+        val homeLimit = if (prevBarrier == "home") homeRadiusMeters + exitBufferMeters else homeRadiusMeters
+        val atHomeStatus = m.statusText.contains("At Home", ignoreCase = true)
+        val isHome = (homeLat != 0.0 && homeLng != 0.0) && (distToHome <= homeLimit || atHomeStatus)
+
+        val matchedZone = safeZones.firstOrNull { zone ->
+            val limit = if (prevBarrier == "zone:${zone.id}") zone.radiusMeters + exitBufferMeters else zone.radiusMeters
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= limit
+        }
+        val workLimit = if (prevBarrier == "work") workRadiusMeters + exitBufferMeters else workRadiusMeters
+        val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workLimit
+
+        val inAnyBarrier = isHome || matchedZone != null || isInsideWork
+
+        // Inside a barrier, ignore low GPS-noise speeds; only explicit travel or a real speed breaks the lock.
+        val isActivelyMoving = if (inAnyBarrier) {
+            m.isComingHome || (!atHomeStatus && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
+        } else {
+            m.isComingHome || m.speedMph >= 0.6 || statusIndicatesTravel(m) ||
+                classifyTransitMode(m.speedMph, m.statusText, m.id) != TransitMode.STATIONARY
+        }
 
         if (isActivelyMoving) {
             adjustedCoordinates[m.id] = GeoPoint(m.y, m.x)
             return@forEach
         }
 
-        val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
-        } else Double.MAX_VALUE
-        val isHome = distToHome <= homeRadiusMeters || m.statusText.contains("At Home", ignoreCase = true)
-
-        val matchedZone = safeZones.firstOrNull { zone ->
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= zone.radiusMeters
-        }
-        val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workRadiusMeters
-
         if (isHome) {
             homeClusterMembers.add(m.id)
+            barrierMembership[m.id] = "home"
         } else if (matchedZone != null) {
             safeZoneClusterMembers.getOrPut(matchedZone.id) { mutableListOf() }.add(m.id)
+            barrierMembership[m.id] = "zone:${matchedZone.id}"
         } else if (isInsideWork) {
             workClusterMembers.add(m.id)
+            barrierMembership[m.id] = "work"
         } else {
             unassignedMembers.add(m)
         }
     }
 
-    // A. Form Home Cluster
-    if (homeClusterMembers.size > 1 && homeLat != 0.0 && homeLng != 0.0) {
+    // A. Form Home Cluster (a lone member is pinned to the Home centre so GPS drift never moves them)
+    if (homeClusterMembers.size > 1) {
         clusters.add(homeClusterMembers.sorted())
     } else if (homeClusterMembers.size == 1) {
-        val mId = homeClusterMembers[0]
-        val member = activeMembers.first { it.id == mId }
-        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+        adjustedCoordinates[homeClusterMembers[0]] = GeoPoint(homeLat, homeLng)
     }
 
     // B. Form Safe Zone Clusters
@@ -169,20 +195,16 @@ fun computeClusterLayout(
             if (zoneMembers.size > 1) {
                 clusters.add(zoneMembers.sorted())
             } else if (zoneMembers.size == 1) {
-                val mId = zoneMembers[0]
-                val member = activeMembers.first { it.id == mId }
-                adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+                adjustedCoordinates[zoneMembers[0]] = GeoPoint(zone.latitude, zone.longitude)
             }
         }
     }
 
     // C. Form Work Cluster
-    if (workClusterMembers.size > 1 && workLat != 0.0 && workLng != 0.0) {
+    if (workClusterMembers.size > 1) {
         clusters.add(workClusterMembers.sorted())
     } else if (workClusterMembers.size == 1) {
-        val mId = workClusterMembers[0]
-        val member = activeMembers.first { it.id == mId }
-        adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+        adjustedCoordinates[workClusterMembers[0]] = GeoPoint(workLat, workLng)
     }
 
     // D. Form Ad-Hoc Co-Located Clusters for members outside zones (within 40m)
@@ -267,7 +289,7 @@ fun computeClusterLayout(
         }
     }
 
-    return ClusterLayoutResult(adjustedCoordinates, clusterAnchorPoints, clusters)
+    return ClusterLayoutResult(adjustedCoordinates, clusterAnchorPoints, clusters, barrierMembership)
 }
 
 @Composable
@@ -385,14 +407,20 @@ fun RadarMap(
     val visualCoordinates = remember { java.util.concurrent.ConcurrentHashMap<String, GeoPoint>() }
     val memberVisualStates = remember { mutableMapOf<String, MemberVisualState>() }
 
-    // Synchronize incoming member target updates with barrier-aware static locking
-    LaunchedEffect(members, safeZones, homeLat, homeLng, isWorkCalibrated, workLat, workLng, isLocationPaused) {
-        val now = android.os.SystemClock.uptimeMillis()
-        val activeMembers = members.filter {
+    // Sticky barrier membership carried between layout passes (hysteresis so faces don't re-slot on GPS drift)
+    val stickyBarrierMembership = remember { mutableMapOf<String, String>() }
+    val activeLayoutMembers = remember(members, isLocationPaused) {
+        members.filter {
             !(it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true))
         }
-        val clusterLayout = computeClusterLayout(
-            members = activeMembers,
+    }
+    // Single shared layout used by BOTH the motion engine and the marker renderer so they never disagree
+    val sharedClusterLayout = remember(
+        activeLayoutMembers, safeZones, homeLat, homeLng, homeRadiusMeters,
+        isWorkCalibrated, workLat, workLng, workRadiusMeters
+    ) {
+        computeClusterLayout(
+            members = activeLayoutMembers,
             safeZones = safeZones,
             homeLat = homeLat,
             homeLng = homeLng,
@@ -400,8 +428,19 @@ fun RadarMap(
             isWorkCalibrated = isWorkCalibrated,
             workLat = workLat,
             workLng = workLng,
-            workRadiusMeters = workRadiusMeters
-        )
+            workRadiusMeters = workRadiusMeters,
+            previousBarrierMembership = stickyBarrierMembership.toMap()
+        ).also {
+            stickyBarrierMembership.clear()
+            stickyBarrierMembership.putAll(it.barrierMembership)
+        }
+    }
+
+    // Synchronize incoming member target updates with barrier-aware static locking
+    LaunchedEffect(sharedClusterLayout, activeLayoutMembers) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val activeMembers = activeLayoutMembers
+        val clusterLayout = sharedClusterLayout
         val adjustedCoordinates = clusterLayout.adjustedCoordinates
 
         activeMembers.forEach { m ->
@@ -419,39 +458,13 @@ fun RadarMap(
                     m.statusText.contains("transit", ignoreCase = true) ||
                     m.statusText.contains("commute", ignoreCase = true)
 
-                // Check barrier containment (Home, Safe Zones, Work)
-                val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
-                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
-                } else Double.MAX_VALUE
-                val isAtHome = distToHome <= homeRadiusMeters || m.statusText.contains("At Home", ignoreCase = true)
+                // Locked = parked inside Home / Safe Zone / Work per the shared sticky layout
+                val isLocked = clusterLayout.barrierMembership.containsKey(m.id)
 
-                val matchedSafeZone = safeZones.firstOrNull { zone ->
-                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= zone.radiusMeters
-                }
-                val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
-                    com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workRadiusMeters
-
-                val isInsideBarrier = isAtHome || (matchedSafeZone != null) || isInsideWork
-
-                // Break-out condition: member must exceed barrier boundary + 20m hysteresis AND maintain speed >= 1.5 mph
-                val isBreakingOut = when {
-                    isAtHome -> distToHome > (homeRadiusMeters + 20.0) && m.speedMph >= 1.5
-                    matchedSafeZone != null -> {
-                        val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, matchedSafeZone.latitude, matchedSafeZone.longitude)
-                        d > (matchedSafeZone.radiusMeters + 20.0) && m.speedMph >= 1.5
-                    }
-                    isInsideWork -> {
-                        val d = com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng)
-                        d > (workRadiusMeters + 20.0) && m.speedMph >= 1.5
-                    }
-                    else -> false
-                }
-
-                // If actively traveling (walking, biking, driving, transit), member is ALWAYS moving!
-                val isReportedMoving = if (isActivelyTraveling) {
-                    true
-                } else if (isInsideBarrier && !isBreakingOut) {
+                val isReportedMoving = if (isLocked) {
                     false
+                } else if (isActivelyTraveling) {
+                    true
                 } else {
                     m.speedMph >= 1.5
                 }
@@ -459,7 +472,7 @@ fun RadarMap(
                 val assignedClusterPos = adjustedCoordinates[m.id] ?: GeoPoint(m.y, m.x)
 
                 if (state == null) {
-                    val initialGeo = if (isInsideBarrier && !isBreakingOut && !isActivelyTraveling) assignedClusterPos else GeoPoint(m.y, m.x)
+                    val initialGeo = if (isLocked) assignedClusterPos else GeoPoint(m.y, m.x)
                     memberVisualStates[m.id] = MemberVisualState(
                         currentGeo = initialGeo,
                         targetGeo = initialGeo,
@@ -470,7 +483,7 @@ fun RadarMap(
                     )
                     visualCoordinates[m.id] = initialGeo
                 } else {
-                    if (isInsideBarrier && !isBreakingOut && !isActivelyTraveling) {
+                    if (isLocked) {
                         // Locked static inside barrier — zero GPS jitter motion
                         state.isMoving = false
                         state.speedMph = 0.0
@@ -822,17 +835,7 @@ fun RadarMap(
 
 
                 // --- LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
-                val layoutResult = computeClusterLayout(
-                    members = members,
-                    safeZones = safeZones,
-                    homeLat = homeLat,
-                    homeLng = homeLng,
-                    homeRadiusMeters = homeRadiusMeters,
-                    isWorkCalibrated = isWorkCalibrated,
-                    workLat = workLat,
-                    workLng = workLng,
-                    workRadiusMeters = workRadiusMeters
-                )
+                val layoutResult = sharedClusterLayout
                 val adjustedCoordinates = layoutResult.adjustedCoordinates
                 val clusterAnchorPoints = layoutResult.clusterAnchorPoints
                 val clusters = layoutResult.clusters
@@ -880,13 +883,8 @@ fun RadarMap(
                 sortedMembers.forEach { member ->
 
                     val visualGeo = memberVisualStates[member.id]?.currentGeo
-                    val isMemberMoving = memberVisualStates[member.id]?.isMoving == true
-                    val inCluster = adjustedCoordinates.containsKey(member.id) && clusterAnchorPoints.containsKey(member.id)
-                    val displayGeo = if (inCluster && !isMemberMoving) {
-                        adjustedCoordinates[member.id]!!
-                    } else {
-                        visualGeo ?: GeoPoint(member.y, member.x)
-                    }
+                    // Always draw at the animated position (motion loop owns it) so redraws never teleport faces
+                    val displayGeo = visualGeo ?: adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
                     val trueGeo = visualGeo ?: GeoPoint(member.y, member.x)
                     val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
                     val isSelected = member.id == selectedMemberId ||
@@ -996,8 +994,8 @@ fun RadarMap(
                     mapView.overlays.add(memberMarker)
                     val visualState = memberVisualStates.getOrPut(member.id) {
                         MemberVisualState(
-                            currentGeo = GeoPoint(member.y, member.x),
-                            targetGeo = GeoPoint(member.y, member.x),
+                            currentGeo = displayGeo,
+                            targetGeo = displayGeo,
                             speedMph = member.speedMph,
                             bearingDeg = 0.0,
                             lastTargetUpdateTime = System.currentTimeMillis(),
