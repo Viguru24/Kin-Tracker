@@ -88,6 +88,7 @@ fun SettingsHub(
     onOpenFeedback: () -> Unit,
     onCleanDuplicates: (() -> Unit)? = null,
     onDeleteMember: ((FamilyMember) -> Unit)? = null,
+    onToggleMemberTracking: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(SettingsTab.CIRCLE) }
@@ -145,7 +146,10 @@ fun SettingsHub(
                     onOpenAddDevice = onOpenAddDevice,
                     onJoinGroupWithPin = onJoinGroupWithPin,
                     onCleanDuplicates = onCleanDuplicates,
-                    onDeleteMember = onDeleteMember
+                    onDeleteMember = onDeleteMember,
+                    isLocationPaused = isLocationPaused,
+                    onToggleLocationPaused = onToggleLocationPaused,
+                    onToggleMemberTracking = onToggleMemberTracking
                 )
                 SettingsTab.PROFILE -> ProfileTabContent(
                     name = myDeviceName,
@@ -203,7 +207,10 @@ private fun CircleTabContent(
     onOpenAddDevice: () -> Unit,
     onJoinGroupWithPin: (String) -> Unit,
     onCleanDuplicates: (() -> Unit)? = null,
-    onDeleteMember: ((FamilyMember) -> Unit)? = null
+    onDeleteMember: ((FamilyMember) -> Unit)? = null,
+    isLocationPaused: Boolean = false,
+    onToggleLocationPaused: (Boolean) -> Unit = {},
+    onToggleMemberTracking: ((String) -> Unit)? = null
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showJoinSheet by remember { mutableStateOf(false) }
@@ -306,6 +313,7 @@ private fun CircleTabContent(
         members.forEach { member ->
             val isMe = member.id == "me" || member.id.endsWith("_$myDeviceUUID")
             val isOnline = (System.currentTimeMillis() - member.lastActive) < 15 * 60 * 1000L || isMe
+            val isMemberPaused = member.isLocationPaused || (isMe && isLocationPaused) || member.statusText.contains("Paused", ignoreCase = true)
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -346,13 +354,18 @@ private fun CircleTabContent(
                                         Text("THIS PHONE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = RadarCyan, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                                     }
                                 }
+                                if (isMemberPaused) {
+                                    Surface(color = ActiveAmber.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+                                        Text("⏸️ PAUSED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = ActiveAmber, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    }
+                                }
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = member.statusText.ifBlank { "Live GPS" },
+                                    text = if (isMemberPaused) "Hidden from map" else member.statusText.ifBlank { "Live GPS" },
                                     fontSize = 11.sp,
-                                    color = if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate
+                                    color = if (isMemberPaused) ActiveAmber else if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate
                                 )
                                 Text("•", fontSize = 10.sp, color = SecondarySlate)
                                 Text(
@@ -380,6 +393,24 @@ private fun CircleTabContent(
                             ) {
                                 Text(if (member.isCharging) "⚡" else "🔋", fontSize = 11.sp)
                                 Text("${member.batteryPercentage}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828))
+                            }
+                        }
+
+                        if (isMemberPaused && onToggleMemberTracking != null) {
+                            Button(
+                                onClick = {
+                                    if (isMe) {
+                                        onToggleLocationPaused(false)
+                                    } else {
+                                        onToggleMemberTracking(member.id)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = GlowingEmerald),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(28.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("Un-pause", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
                             }
                         }
 

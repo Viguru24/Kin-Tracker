@@ -337,35 +337,43 @@ class CloudSyncManager(
 
                 // 1. DEDUPLICATE BY UUID:
                 // Multiple devices cannot have the exact same hardware UUID suffix.
-                // Keep only the one with the latest lastActive timestamp!
                 val membersByUuid = updatedMembers.values.groupBy { m ->
                     if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
                 }.filterKeys { it.length >= 4 }
 
-                for ((_, list) in membersByUuid) {
+                for ((uuidKey, list) in membersByUuid) {
                     if (list.size > 1) {
-                        val newest = list.maxByOrNull { it.lastActive }
-                        for (stale in list) {
-                            if (stale.id != newest?.id && stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
-                                updatedMembers.remove(stale.id)
+                        val isMyUuid = myDeviceUUID.value.length >= 4 && uuidKey == myDeviceUUID.value
+                        if (isMyUuid) {
+                            for (stale in list) {
+                                if (stale.id != myCloudId) {
+                                    updatedMembers.remove(stale.id)
+                                }
+                            }
+                        } else {
+                            val newest = list.maxByOrNull { it.lastActive }
+                            for (stale in list) {
+                                if (stale.id != newest?.id) {
+                                    updatedMembers.remove(stale.id)
+                                }
                             }
                         }
                     }
                 }
 
                 // 2. DEDUPLICATE BY NORMALIZED NAME:
-                // If two or more devices share the exact same clean name (e.g. multiple "Louis's S23", or an older "Dad" when I am active "Dad"),
-                // keep only the one with the latest lastActive timestamp!
+                // Refuse duplicates with the same clean name (e.g. multiple "Louis's S23" or an older duplicate "Dad")
                 val membersByName = updatedMembers.values.groupBy { m ->
                     m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
                 }.filterKeys { it.isNotBlank() }
 
-                for ((_, list) in membersByName) {
+                for ((nameKey, list) in membersByName) {
                     if (list.size > 1) {
-                        val containsMe = list.any { it.id == myCloudId || it.id.endsWith("_" + myDeviceUUID.value) }
-                        if (containsMe) {
+                        val isMyName = nameKey == myCleanNameNoRole || nameKey == cleanMyName
+                        if (isMyName) {
+                            // My active phone takes absolute precedence for my name; evict all other duplicates!
                             for (stale in list) {
-                                if (stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                                if (stale.id != myCloudId) {
                                     updatedMembers.remove(stale.id)
                                 }
                             }
@@ -453,13 +461,33 @@ class CloudSyncManager(
 
             val incomingCloudMembers = newPayload.members.values
             val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
+            val cleanMyName = myName.lowercase().trim()
+            val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
 
             for (cloudM in incomingCloudMembers) {
                 // Do not ingest self device (already tracked locally with GPS as "me")
-                // IMPORTANT: also skip registering self as an audio transmitter — this was
-                // causing the phone to see the tablet's isAudioTransmitter=true and mark
-                // itself as broadcasting, lighting up the UI without actually streaming audio.
-                if (cloudM.id == myCloudId || cloudM.id.endsWith("_" + myDeviceUUID.value)) continue
+                // AND REFUSE DUPLICATES: Never allow another duplicate of this phone to appear!
+                val cleanCloudName = cloudM.name.lowercase().trim()
+                val cleanKey = cleanCloudName
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+
+                val isSelfOrDuplicateOfMe = cloudM.id == myCloudId ||
+                        (myDeviceUUID.value.length >= 4 && cloudM.id.endsWith("_" + myDeviceUUID.value)) ||
+                        cloudM.name.trim().equals(myName.trim(), ignoreCase = true) ||
+                        cleanCloudName == cleanMyName ||
+                        cleanKey == myCleanNameNoRole
+
+                if (isSelfOrDuplicateOfMe) {
+                    val staleLocalDups = existingLocal.filter {
+                        it.id != "me" && (it.id == cloudM.id || it.id.endsWith("_" + myDeviceUUID.value) || it.name.trim().equals(myName.trim(), ignoreCase = true))
+                    }
+                    staleLocalDups.forEach {
+                        repository.deleteMember(it)
+                        repository.clearBreadcrumbsForMember(it.id)
+                    }
+                    continue
+                }
 
                 // Register other family members' IP and transmitter state for the audio UI
                 com.example.data.RoomAudioStreamManager.registerMemberAudioState(
@@ -468,11 +496,6 @@ class CloudSyncManager(
                     isTransmitting = cloudM.isAudioTransmitter,
                     memberName = cloudM.name
                 )
-
-                val cleanCloudName = cloudM.name.lowercase().trim()
-                val cleanKey = cleanCloudName
-                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
-                    .trim()
 
                 // Check if user explicitly deleted this member locally (never block THIS active device):
                 val isCurrentDevice = cloudM.id == myCloudId || (myDeviceUUID.value.isNotBlank() && cloudM.id.endsWith("_" + myDeviceUUID.value))
@@ -671,8 +694,6 @@ class CloudSyncManager(
                 val resolvedName = when {
                     // User has renamed this member locally on this device — always honour it
                     !locallyEditedName.isNullOrBlank() -> locallyEditedName
-                    // Two devices registered with the same cloud name — disambiguate
-                    cloudM.name.trim().equals(myName.trim(), ignoreCase = true) -> "${cloudM.name} (Other Device)"
                     // Use the cloud name as-is
                     cloudM.name.isNotBlank() -> cloudM.name
                     else -> cloudM.name
@@ -1296,17 +1317,29 @@ class CloudSyncManager(
             val beforeCount = updatedMembers.size
             val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
 
+            val cleanMyName = myDeviceName.value.lowercase().trim()
+            val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+
             // 1. Deduplicate by UUID
             val membersByUuid = updatedMembers.values.groupBy { m ->
                 if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
             }.filterKeys { it.length >= 4 }
 
-            for ((_, list) in membersByUuid) {
+            for ((uuidKey, list) in membersByUuid) {
                 if (list.size > 1) {
-                    val newest = list.maxByOrNull { it.lastActive }
-                    for (stale in list) {
-                        if (stale.id != newest?.id && stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
-                            updatedMembers.remove(stale.id)
+                    val isMyUuid = myDeviceUUID.value.length >= 4 && uuidKey == myDeviceUUID.value
+                    if (isMyUuid) {
+                        for (stale in list) {
+                            if (stale.id != myCloudId) {
+                                updatedMembers.remove(stale.id)
+                            }
+                        }
+                    } else {
+                        val newest = list.maxByOrNull { it.lastActive }
+                        for (stale in list) {
+                            if (stale.id != newest?.id) {
+                                updatedMembers.remove(stale.id)
+                            }
                         }
                     }
                 }
@@ -1317,12 +1350,12 @@ class CloudSyncManager(
                 m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
             }.filterKeys { it.isNotBlank() }
 
-            for ((_, list) in membersByName) {
+            for ((nameKey, list) in membersByName) {
                 if (list.size > 1) {
-                    val containsMe = list.any { it.id == myCloudId || it.id.endsWith("_" + myDeviceUUID.value) }
-                    if (containsMe) {
+                    val isMyName = nameKey == myCleanNameNoRole || nameKey == cleanMyName
+                    if (isMyName) {
                         for (stale in list) {
-                            if (stale.id != myCloudId && !stale.id.endsWith("_" + myDeviceUUID.value)) {
+                            if (stale.id != myCloudId) {
                                 updatedMembers.remove(stale.id)
                             }
                         }

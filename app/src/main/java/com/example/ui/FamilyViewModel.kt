@@ -90,7 +90,42 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         repository = FamilyRepository(database.familyDao())
         proximityEngine = ProximityEngine(repository, _uiEvents)
         
-        familyMembers = repository.familyMembers.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        familyMembers = combine(
+            repository.familyMembers,
+            myDeviceName,
+            myDeviceUUID
+        ) { list, myNameStr, myUuidStr ->
+            val myNameVal = myNameStr.lowercase().trim()
+            val myCloudIdVal = "device_" + myNameVal.replace("\\s".toRegex(), "") + "_" + myUuidStr
+
+            val hasMe = list.any { it.id == "me" }
+            val filtered = list.filter { m ->
+                if (m.id == "me") return@filter true
+                if (hasMe && (m.id == myCloudIdVal || (myUuidStr.length >= 4 && m.id.endsWith("_$myUuidStr")) || m.name.lowercase().trim().equals(myNameVal, ignoreCase = true))) {
+                    return@filter false
+                }
+                true
+            }
+
+            val seenUuids = mutableSetOf<String>()
+            val seenNames = mutableSetOf<String>()
+            val deduped = mutableListOf<FamilyMember>()
+
+            for (m in filtered.sortedByDescending { it.lastActive }) {
+                val uuid = if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
+                val cleanName = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+
+                if (m.id != "me") {
+                    if (uuid.length >= 4 && seenUuids.contains(uuid)) continue
+                    if (cleanName.isNotBlank() && seenNames.contains(cleanName)) continue
+                }
+
+                if (uuid.length >= 4) seenUuids.add(uuid)
+                if (cleanName.isNotBlank()) seenNames.add(cleanName)
+                deduped.add(m)
+            }
+            deduped
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         activityLogs = repository.activityLogs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         groupPinMappings = repository.groupPinMappings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         safeZones = repository.safeZones.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -671,7 +706,18 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           activeGroupCreatorId.value = prefs.getString("activeGroupCreatorId", "336a12") ?: "336a12"
           
           var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
-          if (dUuid.isBlank()) { dUuid = java.util.UUID.randomUUID().toString().substring(0, 6); prefs.edit().putString("myDeviceUUID", dUuid).apply() }
+          if (dUuid.isBlank()) {
+              val androidId = try {
+                  android.provider.Settings.Secure.getString(getApplication<Application>().contentResolver, android.provider.Settings.Secure.ANDROID_ID)
+              } catch (_: Exception) { "" }
+              dUuid = if (!androidId.isNullOrBlank()) {
+                  val md5 = java.security.MessageDigest.getInstance("MD5").digest(androidId.toByteArray())
+                  md5.take(3).joinToString("") { "%02x".format(it) }
+              } else {
+                  java.util.UUID.randomUUID().toString().substring(0, 6)
+              }
+              prefs.edit().putString("myDeviceUUID", dUuid).apply()
+          }
           myDeviceUUID.value = dUuid
 
           val savedToken = prefs.getString("groupSyncToken", "81e5632c_pin_group") ?: "81e5632c_pin_group"
