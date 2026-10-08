@@ -11,7 +11,7 @@ const db = require('./db');
 const { setupAudioRelay, getAudioRelayStats } = require('./audioRelay');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4666;
 
 // Security & Middlewares
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -218,8 +218,10 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(`🚀 Kin-Tracker Sovereign GPS Server v2.0.0`);
     console.log(`📡 Listening on: http://0.0.0.0:${PORT}`);
+    console.log(`🖥️ Web Dashboard: http://localhost:${PORT}/dashboard`);
     console.log(`🎙️ Cloud Audio Relay active at ws://0.0.0.0:${PORT}/audio`);
-    console.log(`🛡️ Life360-Style Invite System Active`);
+    console.log(`🛡️ Sovereign Life360-Style Invite System Active`);
     console.log(`====================================================`);
 });
+
 

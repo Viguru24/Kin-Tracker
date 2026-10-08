@@ -6,7 +6,7 @@ async function runTests() {
     console.log('🧪 Starting Kin-Tracker VPS Dashboard & Admin API Tests...');
 
     // Require index to boot Express server
-    process.env.PORT = 3456;
+    process.env.PORT = 4666;
     process.env.ADMIN_KEY = 'test_secret_4666';
     const serverModule = require('../src/index');
 
@@ -17,7 +17,7 @@ async function runTests() {
         return new Promise((resolve, reject) => {
             const reqOptions = {
                 hostname: '127.0.0.1',
-                port: 3456,
+                port: 4666,
                 path,
                 method: options.method || 'GET',
                 headers: {

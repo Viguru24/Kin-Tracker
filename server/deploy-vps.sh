@@ -37,6 +37,8 @@ pm2 startup || true
 
 echo ""
 echo "============================================================"
-echo "✅ Kin-Tracker Server is running on port 3000!"
-echo "📡 Test with: curl http://localhost:3000/health"
+echo "✅ Kin-Tracker Server is running on port 4666!"
+echo "📡 Test with: curl http://localhost:4666/health"
+echo "🖥️ Open Dashboard at: http://localhost:4666/dashboard"
 echo "============================================================"
+
