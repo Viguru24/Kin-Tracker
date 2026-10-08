@@ -4,6 +4,7 @@ const os = require('os');
 const db = require('../db');
 const { getAudioRelayStats } = require('../audioRelay');
 const { generateInviteCode } = require('../utils/codeGenerator');
+const { ringMemberPhone, stopRingMemberPhone } = require('../syncBridge');
 
 // Configurable Admin Key (default to 4666 or process.env.ADMIN_KEY)
 const ADMIN_KEY = process.env.ADMIN_KEY || '4666';
@@ -254,7 +255,7 @@ router.post('/members/:memberId/update', requireAdmin, (req, res) => {
 });
 
 // 9. TOGGLE ALARM / SOS FOR MEMBER
-router.post('/members/:memberId/toggle-alarm', requireAdmin, (req, res) => {
+router.post('/members/:memberId/toggle-alarm', requireAdmin, async (req, res) => {
     try {
         const { memberId } = req.params;
         const member = db.getMember(memberId);
@@ -264,19 +265,45 @@ router.post('/members/:memberId/toggle-alarm', requireAdmin, (req, res) => {
 
         const isCurrentlyAlarm = member.statusText === '🚨 ALARM';
         if (isCurrentlyAlarm) {
-            member.statusText = 'Active';
-            db.logEvent('ALARM', `Admin resolved SOS alarm for ${member.name}`, { memberId });
+            const result = await stopRingMemberPhone(memberId);
+            return res.json({ success: true, isAlarm: false, isRinging: false, member: result.member || member });
         } else {
-            member.statusText = '🚨 ALARM';
-            db.logEvent('ALARM', `🚨 Admin triggered test SOS alarm for ${member.name}`, { memberId });
+            const result = await ringMemberPhone(memberId, 20000);
+            return res.json({ success: true, isAlarm: true, isRinging: true, member: result.member || member });
         }
-
-        member.lastActive = Date.now();
-        db.saveMember(member);
-
-        return res.json({ success: true, isAlarm: !isCurrentlyAlarm, member });
     } catch (err) {
         console.error('[Admin Toggle Alarm Error]', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 9b. EXPLICIT RING MEMBER PHONE (Over-the-Air High-Decibel Siren)
+router.post('/members/:memberId/ring', requireAdmin, async (req, res) => {
+    try {
+        const { memberId } = req.params;
+        const durationMs = parseInt(req.body?.durationMs, 10) || 20000;
+        const result = await ringMemberPhone(memberId, durationMs);
+        if (!result.success) {
+            return res.status(404).json(result);
+        }
+        return res.json({ success: true, message: `Ringing ${result.member.name}'s phone`, ...result });
+    } catch (err) {
+        console.error('[Admin Ring Member Error]', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 9c. EXPLICIT STOP RINGING MEMBER PHONE
+router.post('/members/:memberId/stop-ring', requireAdmin, async (req, res) => {
+    try {
+        const { memberId } = req.params;
+        const result = await stopRingMemberPhone(memberId);
+        if (!result.success) {
+            return res.status(404).json(result);
+        }
+        return res.json({ success: true, message: `Stopped ringing ${result.member.name}'s phone`, ...result });
+    } catch (err) {
+        console.error('[Admin Stop Ring Error]', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 });

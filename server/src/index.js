@@ -52,48 +52,7 @@ app.use(express.static(path.join(__dirname, '../public')));
     }
 })();
 
-const https = require('https');
-
-
-// Real-Time Production VPS Sync Bridge (Keeps local dashboard 100% in sync with real family phones)
-async function syncLiveProductionFamily() {
-    return new Promise((resolve) => {
-        https.get('https://api.cosmowhisper.com/sync/81e5632c_pin_group', (res) => {
-            let raw = '';
-            res.on('data', chunk => raw += chunk);
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(raw);
-                    if (json && json.members) {
-                        const circle = db.getCircleById('circle_default_sovereign') || db.getCircleByInviteCode('4666');
-                        if (circle) {
-                            if (json.homeLat) circle.homeLat = json.homeLat;
-                            if (json.homeLng) circle.homeLng = json.homeLng;
-                            if (json.workLat) circle.workLat = json.workLat;
-                            if (json.workLng) circle.workLng = json.workLng;
-                            if (json.homeRadiusMeters) circle.homeRadiusMeters = json.homeRadiusMeters;
-                            if (json.workRadiusMeters) circle.workRadiusMeters = json.workRadiusMeters;
-                            circle.lastUpdated = json.lastUpdated || Date.now();
-                            db.saveCircle(circle);
-
-                            Object.values(json.members).forEach(m => {
-                                if (m && m.id) {
-                                    db.saveMember({
-                                        ...m,
-                                        circleId: circle.id
-                                    });
-                                }
-                            });
-                        }
-                    }
-                    resolve(true);
-                } catch (_) {
-                    resolve(false);
-                }
-            });
-        }).on('error', () => resolve(false));
-    });
-}
+const { syncLiveProductionFamily } = require('./syncBridge');
 
 // Initial live fetch and recurring 4s polling bridge
 syncLiveProductionFamily();

@@ -352,7 +352,9 @@ const dbOperations = {
             dataDir: DATA_DIR,
             eventsCount: (this.events || []).length
         };
-    }
+    },
+
+    getCanonicalPersonKey
 };
 
 module.exports = dbOperations;

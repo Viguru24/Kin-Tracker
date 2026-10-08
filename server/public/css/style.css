@@ -1217,4 +1217,213 @@ body {
     font-family: var(--font-main);
 }
 
+/* MEMBER CARD RING BUTTON & ACTIONS */
+.member-card-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.member-actions-col {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-ring-phone {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    background: rgba(0, 240, 255, 0.12);
+    border: 1px solid rgba(0, 240, 255, 0.3);
+    color: var(--primary);
+    transition: all 0.2s ease;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+}
+
+.btn-ring-phone:hover {
+    background: rgba(0, 240, 255, 0.25);
+    border-color: var(--primary);
+    box-shadow: 0 0 16px var(--primary-glow);
+    transform: scale(1.04);
+}
+
+.btn-ring-phone.ringing {
+    background: linear-gradient(135deg, #ff3366, #ff0044) !important;
+    border-color: #ff3366 !important;
+    color: #ffffff !important;
+    animation: ringStrobe 0.8s infinite alternate ease-in-out;
+    box-shadow: 0 0 20px rgba(255, 51, 102, 0.7) !important;
+}
+
+@keyframes ringStrobe {
+    0% { transform: scale(1); box-shadow: 0 0 10px rgba(255, 51, 102, 0.5); }
+    100% { transform: scale(1.08); box-shadow: 0 0 25px rgba(255, 51, 102, 0.9); }
+}
+
+/* MODAL RINGING HUB & QUICK LINKS */
+.modal-title-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.modal-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #1e293b;
+    border: 2px solid var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    box-shadow: 0 0 14px var(--primary-glow);
+}
+
+.ring-action-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, rgba(0, 240, 255, 0.08), rgba(168, 85, 247, 0.08));
+    border: 1px solid rgba(0, 240, 255, 0.25);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 0 20px rgba(0, 240, 255, 0.05);
+}
+
+.ring-action-banner.ringing-active {
+    background: linear-gradient(135deg, rgba(255, 51, 102, 0.2), rgba(255, 0, 68, 0.1));
+    border-color: var(--danger);
+    box-shadow: 0 0 20px rgba(255, 51, 102, 0.3);
+}
+
+.ring-banner-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.ring-pulse-icon {
+    font-size: 26px;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(0, 240, 255, 0.15);
+    border: 1px solid var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ring-action-banner.ringing-active .ring-pulse-icon {
+    background: rgba(255, 51, 102, 0.25);
+    border-color: var(--danger);
+    animation: ringWobble 0.5s infinite;
+}
+
+@keyframes ringWobble {
+    0%, 100% { transform: rotate(0deg) scale(1); }
+    25% { transform: rotate(-15deg) scale(1.1); }
+    75% { transform: rotate(15deg) scale(1.1); }
+}
+
+.ring-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.ring-subtitle {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.btn-ring-main {
+    padding: 10px 20px;
+    font-size: 0.9375rem;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+}
+
+.member-quick-links {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+/* LEAFLET CUSTOM POPUP */
+.leaflet-popup-content-wrapper {
+    background: rgba(15, 23, 42, 0.95) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    border: 1px solid var(--border-glass-glow) !important;
+    border-radius: var(--radius-md) !important;
+    color: var(--text-main) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7) !important;
+    padding: 6px !important;
+}
+
+.leaflet-popup-tip {
+    background: rgba(15, 23, 42, 0.95) !important;
+    border: 1px solid var(--border-glass-glow) !important;
+}
+
+.leaflet-popup-content {
+    margin: 8px 12px !important;
+    line-height: 1.4 !important;
+}
+
+.map-popup-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 180px;
+}
+
+.map-popup-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.map-popup-avatar {
+    font-size: 20px;
+}
+
+.map-popup-name {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.map-popup-stats {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+}
+
+.map-popup-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.map-popup-actions .btn {
+    flex: 1;
+    font-size: 0.75rem;
+    padding: 5px 8px;
+}
+
+
 

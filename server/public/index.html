@@ -346,13 +346,42 @@
         </div>
     </div>
 
-    <!-- MODAL: MEMBER CONTROL & TELEPORT -->
+    <!-- MODAL: MEMBER CONTROL & REMOTE PHONE RINGING -->
     <div id="memberControlModal" class="modal-backdrop hidden">
         <div class="glass-card config-modal animate-fade-in">
             <div class="modal-header">
-                <h3 id="memberModalTitle">📱 Device Control & Telemetry</h3>
+                <div class="modal-title-group">
+                    <div id="ctrlHeaderAvatar" class="modal-avatar">📱</div>
+                    <div>
+                        <h3 id="memberModalTitle">Family Member Controls</h3>
+                        <p id="memberModalSubtitle" class="text-dim text-xs">Sovereign Over-the-Air Device Command</p>
+                    </div>
+                </div>
                 <button class="modal-close" data-close="memberControlModal">✕</button>
             </div>
+
+            <!-- PROMINENT OVER-THE-AIR PHONE RING SECTION -->
+            <div class="ring-action-banner">
+                <div class="ring-banner-left">
+                    <div class="ring-pulse-icon" id="ringPulseIcon">🔔</div>
+                    <div>
+                        <div class="ring-title" id="ringActionTitle">Ring Phone Loudly</div>
+                        <div class="ring-subtitle" id="ringActionSubtitle">Sounds a high-decibel siren on their phone (even if on silent)</div>
+                    </div>
+                </div>
+                <div class="ring-banner-actions">
+                    <button type="button" id="ctrlPrimaryRingBtn" class="btn btn-primary btn-glow btn-ring-main">
+                        <span id="ringBtnIcon">🔔</span>
+                        <span id="ringBtnText">Ring Phone Now</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="member-quick-links">
+                <button type="button" id="ctrlLocateOnMapBtn" class="btn btn-xs btn-outline">📍 Focus on Radar Map</button>
+                <a id="ctrlCallPhoneLink" href="#" class="btn btn-xs btn-outline hidden" target="_blank">📞 Call Mobile</a>
+            </div>
+
             <form id="memberControlForm">
                 <input type="hidden" id="ctrlMemberId">
                 <div class="form-row">
@@ -412,7 +441,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-close="memberControlModal">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-glow">Update Device</button>
+                    <button type="submit" class="btn btn-primary btn-glow">Save Changes</button>
                 </div>
             </form>
         </div>

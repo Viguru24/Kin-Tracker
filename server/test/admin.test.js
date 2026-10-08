@@ -6,7 +6,8 @@ async function runTests() {
     console.log('🧪 Starting Kin-Tracker VPS Dashboard & Admin API Tests...');
 
     // Require index to boot Express server
-    process.env.PORT = 4666;
+    const TEST_PORT = process.env.TEST_PORT || 4677;
+    process.env.PORT = TEST_PORT;
     process.env.ADMIN_KEY = 'test_secret_4666';
     const serverModule = require('../src/index');
 
@@ -17,7 +18,7 @@ async function runTests() {
         return new Promise((resolve, reject) => {
             const reqOptions = {
                 hostname: '127.0.0.1',
-                port: 4666,
+                port: TEST_PORT,
                 path,
                 method: options.method || 'GET',
                 headers: {
@@ -130,15 +131,36 @@ async function runTests() {
         assert.strictEqual(alarmRes.body.isAlarm, true);
         console.log('   ✅ SOS Alarm triggered and logged in event stream.');
 
-        // 8. Event Stream Log check
-        console.log('8️⃣ Testing Event Stream Log API...');
+        // 8. Explicit Remote Ring & Stop Ring endpoints
+        console.log('8️⃣ Testing Explicit Ring Phone (/ring) & Stop Ringing (/stop-ring)...');
+        const ringRes = await makeRequest('/api/admin/members/device_test_1/ring', {
+            method: 'POST',
+            headers: authHeaders,
+            body: { durationMs: 10000 }
+        });
+        assert.strictEqual(ringRes.statusCode, 200);
+        assert.strictEqual(ringRes.body.isRinging, true);
+        assert.strictEqual(ringRes.body.member.statusText, '🚨 ALARM');
+        console.log('   ✅ Remote Ring Phone triggered.');
+
+        const stopRingRes = await makeRequest('/api/admin/members/device_test_1/stop-ring', {
+            method: 'POST',
+            headers: authHeaders
+        });
+        assert.strictEqual(stopRingRes.statusCode, 200);
+        assert.strictEqual(stopRingRes.body.isRinging, false);
+        assert.strictEqual(stopRingRes.body.member.statusText, 'Active');
+        console.log('   ✅ Remote Stop Ringing executed and status restored.');
+
+        // 9. Event Stream Log check
+        console.log('9️⃣ Testing Event Stream Log API...');
         const eventRes = await makeRequest('/api/admin/events', { headers: authHeaders });
         assert.strictEqual(eventRes.statusCode, 200);
         assert(eventRes.body.events.length > 0);
         console.log(`   ✅ ${eventRes.body.events.length} event(s) in VPS event buffer.`);
 
-        // 9. Backup Export check
-        console.log('9️⃣ Testing DB Backup Export...');
+        // 10. Backup Export check
+        console.log('🔟 Testing DB Backup Export...');
         const backupRes = await makeRequest('/api/admin/backup/export', { headers: authHeaders });
         assert.strictEqual(backupRes.statusCode, 200);
         assert(backupRes.body.circles);

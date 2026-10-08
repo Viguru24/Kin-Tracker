@@ -25,7 +25,8 @@
         pollTimer: null,
         audioWs: null,
         audioCtx: null,
-        isPlayingAudio: false
+        isPlayingAudio: false,
+        ringingTimers: {} // memberId -> remaining seconds
     };
 
     // DOM Element References
@@ -85,6 +86,17 @@
         cfgSetWorkCurrentGPS: document.getElementById('cfgSetWorkCurrentGPS'),
         memberControlModal: document.getElementById('memberControlModal'),
         memberControlForm: document.getElementById('memberControlForm'),
+        ctrlHeaderAvatar: document.getElementById('ctrlHeaderAvatar'),
+        memberModalTitle: document.getElementById('memberModalTitle'),
+        memberModalSubtitle: document.getElementById('memberModalSubtitle'),
+        ringPulseIcon: document.getElementById('ringPulseIcon'),
+        ringActionTitle: document.getElementById('ringActionTitle'),
+        ringActionSubtitle: document.getElementById('ringActionSubtitle'),
+        ctrlPrimaryRingBtn: document.getElementById('ctrlPrimaryRingBtn'),
+        ringBtnIcon: document.getElementById('ringBtnIcon'),
+        ringBtnText: document.getElementById('ringBtnText'),
+        ctrlLocateOnMapBtn: document.getElementById('ctrlLocateOnMapBtn'),
+        ctrlCallPhoneLink: document.getElementById('ctrlCallPhoneLink'),
         ctrlMemberId: document.getElementById('ctrlMemberId'),
         ctrlMemberName: document.getElementById('ctrlMemberName'),
         ctrlMemberEmoji: document.getElementById('ctrlMemberEmoji'),
@@ -608,6 +620,109 @@
         return '📱';
     }
 
+    // Audio Chime Synthesizer for Browser
+    function playDashboardRingChime() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            const now = ctx.currentTime;
+
+            // Two-tone cyber sonar chime
+            const osc1 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(880, now);
+            osc1.frequency.exponentialRampToValueAtTime(1760, now + 0.15);
+            gain1.gain.setValueAtTime(0.35, now);
+            gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+            osc1.connect(gain1);
+            gain1.connect(ctx.destination);
+            osc1.start(now);
+            osc1.stop(now + 0.3);
+
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.type = 'triangle';
+            osc2.frequency.setValueAtTime(1320, now + 0.18);
+            osc2.frequency.exponentialRampToValueAtTime(2640, now + 0.35);
+            gain2.gain.setValueAtTime(0.35, now + 0.18);
+            gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.start(now + 0.18);
+            osc2.stop(now + 0.5);
+        } catch (_) {}
+    }
+
+    const KNOWN_PHONES = {
+        'dad': '+447802436159',
+        'louis': '+447802436159',
+        'annette': '+447803171262',
+        'mama': '+447803171262',
+        'isabel': '+447760477416',
+        'eloise': ''
+    };
+
+    function resolvePhoneNumber(member) {
+        if (!member) return '';
+        if (member.phone && member.phone.trim()) return member.phone.trim();
+        const clean = ((member.name || '') + ' ' + (member.id || '')).toLowerCase();
+        for (const [k, p] of Object.entries(KNOWN_PHONES)) {
+            if (clean.includes(k) && p) return p;
+        }
+        return '';
+    }
+
+    async function toggleRingPhone(memberId) {
+        const member = state.members.find(m => m.id === memberId) || state.members.find(m => m.name.toLowerCase() === memberId.toLowerCase());
+        const isAlarm = member && member.statusText === '🚨 ALARM';
+        const targetName = member ? member.name : memberId;
+
+        try {
+            if (isAlarm) {
+                await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/stop-ring`, { method: 'POST' });
+                showToast(`🔕 Stopped ringing ${targetName}'s phone`, 'info');
+                if (state.ringingTimers[memberId]) {
+                    clearInterval(state.ringingTimers[memberId]);
+                    delete state.ringingTimers[memberId];
+                }
+            } else {
+                playDashboardRingChime();
+                await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/ring`, {
+                    method: 'POST',
+                    body: JSON.stringify({ durationMs: 20000 })
+                });
+                showToast(`🚨 Ringing ${targetName}'s phone at MAX volume!`, 'error');
+                startRingCountdown(memberId, 20);
+            }
+            await loadCircles(false);
+            if (member && !el.memberControlModal.classList.contains('hidden') && el.ctrlMemberId.value === member.id) {
+                const refreshed = state.members.find(m => m.id === member.id);
+                if (refreshed) openMemberControlModal(refreshed);
+            }
+        } catch (err) {
+            showToast(`Failed to ring phone: ${err.message}`, 'error');
+        }
+    }
+
+    function startRingCountdown(memberId, seconds) {
+        if (state.ringingTimers[memberId]) {
+            clearInterval(state.ringingTimers[memberId]);
+        }
+        let remaining = seconds;
+        state.ringingTimers[memberId] = setInterval(() => {
+            remaining--;
+            if (remaining <= 0) {
+                clearInterval(state.ringingTimers[memberId]);
+                delete state.ringingTimers[memberId];
+                loadCircles(false);
+            } else {
+                renderCurrentCircle();
+            }
+        }, 1000);
+    }
+
     function updateMapMarkers(members, circle) {
         if (!state.map) return;
 
@@ -651,16 +766,53 @@
                 iconAnchor: [20, 48]
             });
 
+            const popupContent = `
+                <div class="map-popup-card">
+                    <div class="map-popup-header">
+                        <span class="map-popup-avatar">${emoji}</span>
+                        <div>
+                            <div class="map-popup-name">${m.name}</div>
+                            <div class="text-xs text-dim">${m.statusText || 'Active'}</div>
+                        </div>
+                    </div>
+                    <div class="map-popup-stats">
+                        <span>🔋 ${m.batteryPercentage}% ${m.isCharging ? '⚡' : ''}</span>
+                        <span>${m.speedMph > 2 ? m.speedMph + ' mph' : 'Stationary'}</span>
+                    </div>
+                    <div class="map-popup-actions">
+                        <button class="btn btn-xs ${isAlarm ? 'btn-danger' : 'btn-cyan'}" onclick="window.__kinTrackerRing('${m.id}')">
+                            ${isAlarm ? '🔕 Silence' : '🔔 Ring Phone'}
+                        </button>
+                        <button class="btn btn-xs btn-outline" onclick="window.__kinTrackerOpenMember('${m.id}')">
+                            ⚙️ Details
+                        </button>
+                    </div>
+                </div>
+            `;
+
             if (state.markers[m.id]) {
                 state.markers[m.id].setLatLng([lat, lng]);
                 state.markers[m.id].setIcon(icon);
+                if (state.markers[m.id].getPopup()) {
+                    state.markers[m.id].getPopup().setContent(popupContent);
+                }
             } else {
                 const marker = L.marker([lat, lng], { icon }).addTo(state.map);
-                marker.on('click', () => openMemberControlModal(m));
+                marker.bindPopup(popupContent, { offset: [0, -35] });
                 state.markers[m.id] = marker;
             }
         });
     }
+
+    // Expose global bridge helpers for Leaflet inline popups
+    window.__kinTrackerRing = function(memberId) {
+        toggleRingPhone(memberId);
+    };
+
+    window.__kinTrackerOpenMember = function(memberId) {
+        const m = state.members.find(item => item.id === memberId);
+        if (m) openMemberControlModal(m);
+    };
 
     function fitMapToAll() {
         const bounds = [];
@@ -694,28 +846,47 @@
                 (m.speedMph > 5 ? 'moving' : 'home');
 
             const relativeTime = getRelativeTime(m.lastActive);
+            const isRinging = isAlarm;
 
             card.innerHTML = `
-                <div class="member-main">
-                    <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}">
-                        ${getSafeEmoji(m)}
+                <div class="member-card-content">
+                    <div class="member-main">
+                        <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}">
+                            ${getSafeEmoji(m)}
+                        </div>
+                        <div class="member-name-group">
+                            <div class="member-name">${m.name}</div>
+                            <div class="member-status-line">
+                                <span class="member-badge ${badgeClass}">${m.statusText || 'Active'}</span>
+                                ${m.speedMph > 2 ? `<span>${m.speedMph} mph</span>` : ''}
+                            </div>
+                        </div>
                     </div>
-                    <div class="member-name-group">
-                        <div class="member-name">${m.name}</div>
-                        <div class="member-status-line">
-                            <span class="member-badge ${badgeClass}">${m.statusText || 'Active'}</span>
-                            ${m.speedMph > 2 ? `<span>${m.speedMph} mph</span>` : ''}
+                    <div class="member-actions-col">
+                        <button class="btn-ring-phone ${isRinging ? 'ringing' : ''}" title="Ring ${m.name}'s phone loudly">
+                            <span>${isRinging ? '🚨' : '🔔'}</span>
+                            <span>${isRinging ? 'Ringing...' : 'Ring Phone'}</span>
+                        </button>
+                        <div class="member-telemetry-col">
+                            <div class="battery-pill ${m.isCharging ? 'charging' : (m.batteryPercentage < 20 ? 'low' : '')}">
+                                ${m.isCharging ? '⚡' : '🔋'} ${m.batteryPercentage}%
+                            </div>
+                            <div class="member-last-active">${relativeTime}</div>
                         </div>
                     </div>
                 </div>
-                <div class="member-telemetry-col">
-                    <div class="battery-pill ${m.isCharging ? 'charging' : (m.batteryPercentage < 20 ? 'low' : '')}">
-                        ${m.isCharging ? '⚡' : '🔋'} ${m.batteryPercentage}%
-                    </div>
-                    <div class="member-last-active">${relativeTime}</div>
-                </div>
             `;
 
+            // Ring Button Click
+            const ringBtn = card.querySelector('.btn-ring-phone');
+            if (ringBtn) {
+                ringBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleRingPhone(m.id);
+                });
+            }
+
+            // Entire Card Click -> Opens Modal
             card.addEventListener('click', () => openMemberControlModal(m));
             el.membersList.appendChild(card);
         });
@@ -777,7 +948,51 @@
         el.ctrlMemberCharging.checked = Boolean(member.isCharging);
         el.ctrlMemberPaused.checked = Boolean(member.isLocationPaused);
 
+        // Header Avatar & Info
+        if (el.ctrlHeaderAvatar) {
+            el.ctrlHeaderAvatar.innerText = getSafeEmoji(member);
+            el.ctrlHeaderAvatar.style.borderColor = member.avatarColorHex || '#00ff88';
+        }
+        if (el.memberModalTitle) {
+            el.memberModalTitle.innerText = `${member.name}'s Device`;
+        }
+        if (el.memberModalSubtitle) {
+            const rel = getRelativeTime(member.lastActive);
+            el.memberModalSubtitle.innerText = `Battery: ${member.batteryPercentage}% ${member.isCharging ? '⚡' : ''} • Last active: ${rel}`;
+        }
+
+        // Phone call link
+        const phone = resolvePhoneNumber(member);
+        if (el.ctrlCallPhoneLink) {
+            if (phone) {
+                el.ctrlCallPhoneLink.href = `tel:${phone}`;
+                el.ctrlCallPhoneLink.innerText = `📞 Call ${phone}`;
+                el.ctrlCallPhoneLink.classList.remove('hidden');
+            } else {
+                el.ctrlCallPhoneLink.classList.add('hidden');
+            }
+        }
+
+        // Ringing Hub State
         const isAlarm = member.statusText === '🚨 ALARM';
+        const ringBanner = document.querySelector('.ring-action-banner');
+        if (ringBanner) {
+            if (isAlarm) {
+                ringBanner.classList.add('ringing-active');
+            } else {
+                ringBanner.classList.remove('ringing-active');
+            }
+        }
+
+        if (el.ringPulseIcon) el.ringPulseIcon.innerText = isAlarm ? '🚨' : '🔔';
+        if (el.ringActionTitle) el.ringActionTitle.innerText = isAlarm ? `🚨 Ringing ${member.name}'s Phone...` : `Ring ${member.name}'s Phone Loudly`;
+        if (el.ringActionSubtitle) el.ringActionSubtitle.innerText = isAlarm ? 'Phone is sounding maximum volume sovereign siren' : 'Sounds a high-decibel siren on their phone (even if on silent)';
+        if (el.ringBtnIcon) el.ringBtnIcon.innerText = isAlarm ? '🔕' : '🔔';
+        if (el.ringBtnText) el.ringBtnText.innerText = isAlarm ? 'Silence Siren' : 'Ring Phone Now';
+        if (el.ctrlPrimaryRingBtn) {
+            el.ctrlPrimaryRingBtn.className = isAlarm ? 'btn btn-danger btn-glow btn-ring-main' : 'btn btn-primary btn-glow btn-ring-main';
+        }
+
         el.ctrlTriggerAlarmBtn.innerText = isAlarm ? '✅ Silence SOS Alarm' : '🚨 Trigger SOS Alarm';
         el.ctrlTriggerAlarmBtn.className = isAlarm ? 'btn btn-sm btn-emerald' : 'btn btn-sm btn-danger';
 
@@ -1079,11 +1294,36 @@
             }
         });
 
+        // Primary Modal Ring Button
+        if (el.ctrlPrimaryRingBtn) {
+            el.ctrlPrimaryRingBtn.addEventListener('click', async () => {
+                const memberId = el.ctrlMemberId.value;
+                if (!memberId) return;
+                await toggleRingPhone(memberId);
+            });
+        }
+
+        // Locate & Focus on Map
+        if (el.ctrlLocateOnMapBtn) {
+            el.ctrlLocateOnMapBtn.addEventListener('click', () => {
+                const lat = Number(el.ctrlMemberLat.value);
+                const lng = Number(el.ctrlMemberLng.value);
+                if (lat && lng && state.map) {
+                    el.memberControlModal.classList.add('hidden');
+                    state.map.flyTo([lat, lng], 19, { animate: true, duration: 1.2 });
+                    const memberId = el.ctrlMemberId.value;
+                    if (state.markers[memberId]) {
+                        state.markers[memberId].openPopup();
+                    }
+                }
+            });
+        }
+
         // Trigger / Silence Alarm
         el.ctrlTriggerAlarmBtn.addEventListener('click', async () => {
             const memberId = el.ctrlMemberId.value;
             try {
-                const res = await apiRequest(`/api/admin/members/${memberId}/toggle-alarm`, { method: 'POST' });
+                const res = await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/toggle-alarm`, { method: 'POST' });
                 el.memberControlModal.classList.add('hidden');
                 showToast(res.isAlarm ? '🚨 SOS Distress Alarm Triggered' : '✅ SOS Alarm Resolved', res.isAlarm ? 'error' : 'success');
                 await loadCircles(false);
