@@ -37,21 +37,31 @@ echo.
 adb devices -l
 echo.
 
-for /f "skip=1 tokens=1" %%D in ('adb devices') do (
+for /f "skip=1 tokens=1,2" %%D in ('adb devices') do (
     if not "%%D"=="" if not "%%D"=="*" (
-        echo [^>^>] Installing on: %%D
-        adb -s %%D install -r "%APK%"
-        if errorlevel 1 (
-            echo [FAIL] Install failed on %%D
+        if "%%E"=="unauthorized" (
+            echo.
+            echo [!] ACTION REQUIRED on device %%D:
+            echo     The device is UNLOCKED/UNAUTHORIZED.
+            echo     Please unlock the phone screen and tap "Allow USB debugging" ^(check "Always allow"^).
+            echo.
+        ) else if "%%E"=="offline" (
+            echo [!] Device %%D is OFFLINE. Try reconnecting the USB cable.
         ) else (
+            echo [^>^>] Installing on: %%D ^(%%E^)
+            adb -s %%D install -r -d -g "%APK%"
+            if errorlevel 1 (
+                echo [FAIL] Install failed on %%D. Retrying standard install...
+                adb -s %%D install -r "%APK%"
+            )
             echo [OK]   Installed. Launching app on %%D...
             adb -s %%D shell am start -n "%PACKAGE%/%ACTIVITY%"
+            echo.
         )
-        echo.
     )
 )
 
 echo ============================================
-echo   Done! All connected devices updated.
+echo   Done! All authorized devices updated.
 echo ============================================
 pause
