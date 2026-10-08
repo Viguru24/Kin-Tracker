@@ -25,10 +25,9 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Initialize default sovereign family circle if database is fresh
 (function initDefaultCircle() {
-    // Default circle for existing Kin-Tracker installations (legacy PIN 4666 / token 81e5632c_pin_group)
-    const existing = db.getCircleByInviteCode('4666') || db.getCircleByInviteCode('RADAR-1');
-    if (!existing) {
-        const defaultCircle = {
+    let circle = db.getCircleByInviteCode('4666') || db.getCircleByInviteCode('RADAR-1') || db.getCircleById('circle_default_sovereign');
+    if (!circle) {
+        circle = {
             id: 'circle_default_sovereign',
             name: 'Family Circle',
             inviteCode: 'KT-4666',
@@ -41,16 +40,94 @@ app.use(express.static(path.join(__dirname, '../public')));
             isHomeCalibrated: true,
             workLat: 51.375800,
             workLng: -0.098000,
-            isWorkCalibrated: false,
+            isWorkCalibrated: true,
             homeRadiusMeters: 140.0,
             workRadiusMeters: 75.0,
             memberIds: []
         };
-        db.saveCircle(defaultCircle);
-        // Also map legacy token "81e5632c_pin_group"
-        db.mapInviteAlias('81E5632C_PIN_GROUP', defaultCircle.id);
-        db.mapInviteAlias('4666', defaultCircle.id);
+        db.saveCircle(circle);
+        db.mapInviteAlias('81E5632C_PIN_GROUP', circle.id);
+        db.mapInviteAlias('4666', circle.id);
         console.log('[Init] Seeded default Family Circle with Invite Code "KT-4666" and PIN "4666"');
+    }
+
+    // If circle has no members yet, seed default family roster
+    const currentMembers = db.getCircleMembers(circle.id);
+    if (currentMembers.length === 0) {
+        const homeLat = circle.homeLat || 51.329480;
+        const homeLng = circle.homeLng || -0.119095;
+        const defaultFamily = [
+            {
+                id: 'device_louis_dad',
+                circleId: circle.id,
+                name: 'Louis (Dad)',
+                avatarEmoji: '👑',
+                avatarColorHex: '#00FF88',
+                x: homeLng + 0.0003,
+                y: homeLat + 0.0002,
+                batteryPercentage: 94,
+                isCharging: false,
+                speedMph: 0.0,
+                statusText: 'At Home',
+                isComingHome: false,
+                etaMinutes: 0,
+                lastActive: Date.now(),
+                isLocationPaused: false
+            },
+            {
+                id: 'device_annette_mama',
+                circleId: circle.id,
+                name: 'Annette (Mama)',
+                avatarEmoji: '🌸',
+                avatarColorHex: '#FF77AA',
+                x: circle.workLng || (homeLng + 0.021),
+                y: circle.workLat || (homeLat + 0.046),
+                batteryPercentage: 82,
+                isCharging: true,
+                speedMph: 0.0,
+                statusText: 'At Work',
+                isComingHome: false,
+                etaMinutes: 0,
+                lastActive: Date.now(),
+                isLocationPaused: false
+            },
+            {
+                id: 'device_eloise',
+                circleId: circle.id,
+                name: 'Eloise',
+                avatarEmoji: '🎀',
+                avatarColorHex: '#00F0FF',
+                x: homeLng - 0.012,
+                y: homeLat + 0.015,
+                batteryPercentage: 68,
+                isCharging: false,
+                speedMph: 16.5,
+                statusText: 'Moving 16.5 mph',
+                isComingHome: true,
+                etaMinutes: 12,
+                lastActive: Date.now(),
+                isLocationPaused: false
+            },
+            {
+                id: 'device_isabel',
+                circleId: circle.id,
+                name: 'Isabel',
+                avatarEmoji: '⭐',
+                avatarColorHex: '#FFB800',
+                x: homeLng - 0.0004,
+                y: homeLat - 0.0003,
+                batteryPercentage: 89,
+                isCharging: false,
+                speedMph: 0.0,
+                statusText: 'At Home',
+                isComingHome: false,
+                etaMinutes: 0,
+                lastActive: Date.now(),
+                isLocationPaused: false
+            }
+        ];
+        defaultFamily.forEach(m => db.saveMember(m));
+        console.log('[Init] Seeded family members: Louis (Dad), Annette (Mama), Eloise, Isabel');
     }
 })();
 

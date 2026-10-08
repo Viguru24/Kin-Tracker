@@ -198,10 +198,11 @@
             attributionControl: false
         }).setView([51.329480, -0.119095], 14);
 
-        // Dark tile layer (CartoDB Dark Matter)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            subdomains: 'abcd',
-            maxZoom: 20
+        // High-contrast dark radar tile layer via unmetered OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            subdomains: ['a', 'b', 'c'],
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
         }).addTo(state.map);
 
         // Map Click Calibration Handler
