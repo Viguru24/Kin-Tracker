@@ -143,8 +143,16 @@ class CloudSyncManager(
                 }
             }
             
+            val myNameClean = myName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
             val matchesMe = payload?.members?.values?.any { member ->
-                (member.id == myCloudId || member.name.equals(myName, ignoreCase = true)) && member.statusText == "🚨 ALARM"
+                val memberNameClean = member.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val isSamePerson = member.id == myCloudId ||
+                    (myDeviceUUID.value.length >= 4 && member.id.endsWith("_" + myDeviceUUID.value)) ||
+                    member.id.contains(myDeviceUUID.value) ||
+                    member.name.trim().equals(myName.trim(), ignoreCase = true) ||
+                    (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
+                
+                isSamePerson && member.statusText == "🚨 ALARM"
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(application)
@@ -405,10 +413,24 @@ class CloudSyncManager(
 
                     isExplicitlyDeleted || isOldMock || isStaleUnknown
                 }.keys
-                for (k in keysToRemove) {
-                    updatedMembers.remove(k)
+                // 4. PRESERVE NEWEST TIMESTAMPS FOR ALL OTHER MEMBERS:
+                // Ensure we never downgrade other members' locations with stale local/cloud data
+                val existingLocalBeforePut = repository.getFamilyMembersOnce()
+                for ((k, cloudM) in updatedMembers) {
+                    if (k != myCloudId) {
+                        val localM = existingLocalBeforePut.firstOrNull { it.id == k }
+                        if (localM != null && localM.lastActive > cloudM.lastActive && localM.x != 0.0 && localM.y != 0.0) {
+                            updatedMembers[k] = cloudM.copy(
+                                x = localM.x,
+                                y = localM.y,
+                                speedMph = localM.speedMph,
+                                statusText = localM.statusText,
+                                lastActive = localM.lastActive
+                            )
+                        }
+                    }
                 }
-                
+
                 updatedMembers[myCloudId] = myCloudMember
                 payload.copy(
                     homeLat = if (payload.isHomeCalibrated) payload.homeLat else getHomeLat(),
@@ -608,13 +630,19 @@ class CloudSyncManager(
                     }
                 }
 
+                // Prevent stale cloud snapshot from overwriting newer local coordinates
+                val hasNewerLocalData = matchingLocal != null && matchingLocal.lastActive > cloudM.lastActive && matchingLocal.x != 0.0 && matchingLocal.y != 0.0
+                val targetMemberX = if (hasNewerLocalData) matchingLocal!!.x else cloudM.x
+                val targetMemberY = if (hasNewerLocalData) matchingLocal!!.y else cloudM.y
+                val targetLastActive = if (hasNewerLocalData) matchingLocal!!.lastActive else cloudM.lastActive
+
                 // Compute speed and movement:
-                val movedDistanceKm = if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && cloudM.x != 0.0 && cloudM.y != 0.0) {
-                    Math.hypot((matchingLocal.x - cloudM.x) * 111.0 * Math.cos(Math.toRadians(cloudM.y)), (matchingLocal.y - cloudM.y) * 111.0)
+                val movedDistanceKm = if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && targetMemberX != 0.0 && targetMemberY != 0.0) {
+                    Math.hypot((matchingLocal.x - targetMemberX) * 111.0 * Math.cos(Math.toRadians(targetMemberY)), (matchingLocal.y - targetMemberY) * 111.0)
                 } else 0.0
 
-                val timeDeltaSec = if (matchingLocal != null && matchingLocal.lastActive > 0L && cloudM.lastActive > matchingLocal.lastActive) {
-                    (cloudM.lastActive - matchingLocal.lastActive) / 1000.0
+                val timeDeltaSec = if (matchingLocal != null && matchingLocal.lastActive > 0L && targetLastActive > matchingLocal.lastActive) {
+                    (targetLastActive - matchingLocal.lastActive) / 1000.0
                 } else 0.0
 
                 // When remote GPS reports 0.0 speed, derive speed only when moving significantly
@@ -631,14 +659,22 @@ class CloudSyncManager(
                 // Check if member is at Home base (within 150m perimeter or explicit At Home status)
                 val homeLat = getHomeLat()
                 val homeLng = getHomeLng()
-                val distToHomeKm = if (homeLat != 0.0 && homeLng != 0.0 && cloudM.x != 0.0 && cloudM.y != 0.0) {
-                    Math.hypot((cloudM.x - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat)), (cloudM.y - homeLat) * 111.0)
+                val distToHomeKm = if (homeLat != 0.0 && homeLng != 0.0 && targetMemberX != 0.0 && targetMemberY != 0.0) {
+                    Math.hypot((targetMemberX - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat)), (targetMemberY - homeLat) * 111.0)
                 } else 999.0
 
                 val isMemberAtHome = distToHomeKm <= 0.15 || cloudM.statusText.contains("At Home", ignoreCase = true) || cloudM.statusText.contains("at Home")
 
+                // Check if member is inside a designated Safe Zone (e.g. Woodcote High School)
+                val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
+                val matchedSafeZone = customSafeZones.firstOrNull { zone ->
+                    targetMemberX != 0.0 && targetMemberY != 0.0 &&
+                    com.example.data.GeoUtils.distanceMeters(targetMemberY, targetMemberX, zone.latitude, zone.longitude) <= (zone.radiusMeters + 15.0)
+                }
+                val isMemberAtSafeZone = matchedSafeZone != null && !isMemberAtHome
+
                 // True movement requires sustained speed >= 1.2 mph or derived speed from rapid relocation
-                val isMoving = if (isMemberAtHome) false else (resolvedSpeedMph >= 1.2 || derivedSpeedMph >= 1.5)
+                val isMoving = if (isMemberAtHome || isMemberAtSafeZone) false else (resolvedSpeedMph >= 1.2 || derivedSpeedMph >= 1.5)
                 val remoteSince = cloudM.locationSince
                 val wasMemberAtHome = matchingLocal?.statusText?.contains("At Home", ignoreCase = true) == true
                 val hasStatusTransitioned = isMemberAtHome != wasMemberAtHome
@@ -649,12 +685,12 @@ class CloudSyncManager(
                 } else {
                     val now = System.currentTimeMillis()
                     when {
-                        // 1. If remote sent a stale Home timestamp while away at a shop/new place, reject it and preserve/create away arrival
+                        // 1. If remote sent a stale Home timestamp while away at a shop/school, reject it and preserve/create away arrival
                         isRemoteSinceStaleHomeTimestamp -> {
                             if (matchingLocal != null && matchingLocal.locationSince > 0L && (now - matchingLocal.locationSince) < 6 * 3600 * 1000L && movedDistanceKm <= 0.08) {
                                 matchingLocal.locationSince
                             } else {
-                                now - (48 * 60 * 1000L) // Set to recent arrival at shop (~48m ago)
+                                now - (48 * 60 * 1000L)
                             }
                         }
                         // 2. If remote provided a valid arrival timestamp that is consistent with the current location:
@@ -666,7 +702,7 @@ class CloudSyncManager(
                             now
                         }
                         // 4. If previously recorded stationary timestamp exists and member hasn't moved away, keep it!
-                        matchingLocal != null && matchingLocal.locationSince > 0L && (isMemberAtHome || movedDistanceKm <= 0.08) -> {
+                        matchingLocal != null && matchingLocal.locationSince > 0L && (isMemberAtHome || isMemberAtSafeZone || movedDistanceKm <= 0.08) -> {
                             matchingLocal.locationSince
                         }
                         else -> now
@@ -677,12 +713,17 @@ class CloudSyncManager(
                 val isLocallyPaused = kPrefs.getBoolean("is_member_paused_${cloudM.id}", false) ||
                         kPrefs.getBoolean("is_member_paused_$cleanKey", false)
                 val isMemberLocPaused = cloudM.isLocationPaused || isLocallyPaused || cloudM.statusText.contains("Paused", ignoreCase = true)
-                val finalStatus = if (isMemberLocPaused) "⏸️ Paused (Home Sleep)" else if (isMemberAtHome) "At Home (Live GPS)" else activeStatus
-                val finalSpeedMph = if (isMemberAtHome || isMemberLocPaused) 0.0 else resolvedSpeedMph
-                val finalComingHome = if (isMemberAtHome || isMemberLocPaused) false else cloudM.isComingHome
-                val finalEta = if (isMemberAtHome || isMemberLocPaused) 0 else cloudM.etaMinutes
-                val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else cloudM.x
-                val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else cloudM.y
+                val finalStatus = when {
+                    isMemberLocPaused -> "⏸️ Paused (Home Sleep)"
+                    isMemberAtHome -> "At Home (Live GPS)"
+                    isMemberAtSafeZone && resolvedSpeedMph < 1.2 -> "At ${matchedSafeZone!!.name}"
+                    else -> activeStatus
+                }
+                val finalSpeedMph = if (isMemberAtHome || isMemberLocPaused || (isMemberAtSafeZone && resolvedSpeedMph < 0.6)) 0.0 else resolvedSpeedMph
+                val finalComingHome = if (isMemberAtHome || isMemberLocPaused || isMemberAtSafeZone) false else cloudM.isComingHome
+                val finalEta = if (isMemberAtHome || isMemberLocPaused || isMemberAtSafeZone) 0 else cloudM.etaMinutes
+                val finalX = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLng else if (isMemberAtSafeZone && resolvedSpeedMph < 0.6) matchedSafeZone!!.longitude else targetMemberX
+                val finalY = if (isMemberAtHome && resolvedSpeedMph < 0.6) homeLat else if (isMemberAtSafeZone && resolvedSpeedMph < 0.6) matchedSafeZone!!.latitude else targetMemberY
 
                 // Synchronize circle-wide device name.
                 // IMPORTANT: respect any local rename the user has made on THIS device.
@@ -711,7 +752,7 @@ class CloudSyncManager(
                     etaMinutes = finalEta, avatarEmoji = cloudM.avatarEmoji,
                     phoneNumber = if (matchingLocal?.phoneNumber?.isNotBlank() == true) matchingLocal.phoneNumber else resolvedPhone,
                     photoPath = if (matchingLocal?.photoPath?.isNotBlank() == true) matchingLocal.photoPath else resolvedPhoto,
-                    lastActive = cloudM.lastActive,
+                    lastActive = targetLastActive,
                     locationSince = locationSince,
                     isLocationPaused = isMemberLocPaused
                 )

@@ -442,10 +442,22 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 savePreferences()
             }
 
-            // Ensure Woodcote Primary School is registered as a safe zone
+            // Ensure Woodcote High School & Woodcote Primary School are registered as safe zones
             try {
                 val existingZones = repository.getAllSafeZonesOnce()
-                if (existingZones.none { it.name.contains("Woodcote", ignoreCase = true) || it.name.contains("School", ignoreCase = true) }) {
+                if (existingZones.none { it.id == "zone_woodcote_high_school" || (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("High", ignoreCase = true)) || it.name.contains("Woodcoat", ignoreCase = true) }) {
+                    repository.insertSafeZone(
+                        SafeZone(
+                            id = "zone_woodcote_high_school",
+                            name = "Woodcote High School",
+                            latitude = 51.3205711,
+                            longitude = -0.1292201,
+                            radiusMeters = 100.0,
+                            iconName = "school"
+                        )
+                    )
+                }
+                if (existingZones.none { it.id == "zone_woodcote_school" || (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true)) }) {
                     repository.insertSafeZone(
                         SafeZone(
                             id = "zone_woodcote_school",
@@ -469,12 +481,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val contactsPrefs = getApplication<Application>().getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             
-            // Clear any legacy deletion tombstone flags in SharedPreferences so all real family members and devices can sync
-            // This covers hardcoded names and any device-ID-based keys for family members & daughter tablets
-            val unblockKeywords = listOf("eloise", "isabel", "annette", "dad", "louis", "tab", "tablet", "daughter", "c538c8")
+            // Clear any legacy deletion tombstone flags in SharedPreferences for canonical family members
+            val unblockKeywords = listOf("deleted_eloise", "deleted_isabel", "deleted_annette", "deleted_member_eloise", "deleted_member_isabel", "deleted_member_annette")
             deletedMembersPrefs.edit().apply {
                 for (key in deletedMembersPrefs.all.keys) {
-                    if (unblockKeywords.any { key.contains(it, ignoreCase = true) }) {
+                    if (unblockKeywords.any { key.equals(it, ignoreCase = true) }) {
                         remove(key)
                     }
                 }
@@ -930,16 +941,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun deleteFamilyMember(memberId: String) = viewModelScope.launch {
+    fun deleteFamilyMember(memberId: String) {
         val cleanId = memberId.lowercase().trim()
-        val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
-        val isSelf = memberId == "me" || memberId == myDeviceUUID.value || memberId == myCloudIdVal
-        if (isSelf) {
-            _uiEvents.emit("Cannot remove your own active device.")
-            return@launch
-        }
-
-        // 1. Permanently record deletion in SharedPreferences immediately before suspension
         val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
         prefs.edit()
             .putBoolean("deleted_$cleanId", true)
@@ -955,41 +958,54 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             .remove("is_member_paused_$memberId")
             .commit()
 
-        val allCurrent = repository.getFamilyMembersOnce()
-        val target = allCurrent.firstOrNull { it.id == memberId }
-            ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
-        val targetName = target?.name ?: memberId
-        val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-
-        val isCommonRole = cleanName in setOf("you", "dad", "louis", "wife", "mama", "mom", "mother", "daughter", "son", "isabel", "annette", "eloise")
-        if (!isCommonRole && cleanName.isNotBlank()) {
-            prefs.edit()
-                .putBoolean("deleted_$cleanName", true)
-                .putBoolean("deleted_member_$cleanName", true)
-                .apply()
-        }
-
-        // 2. Delete the target record(s) from local database (NEVER delete 'me' or active device)
-        for (m in allCurrent) {
-            if (m.id == "me" || m.id == myCloudIdVal || (myDeviceUUID.value.isNotBlank() && m.id.endsWith("_" + myDeviceUUID.value))) continue
-            val matchesExactId = m.id == memberId || m.id == cleanId
-            val matchesTargetId = target != null && m.id == target.id
-            if (matchesExactId || matchesTargetId) {
-                repository.deleteMember(m)
-                repository.clearBreadcrumbsForMember(m.id)
+        viewModelScope.launch {
+            val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+            val isSelf = memberId == "me" || memberId == myDeviceUUID.value || memberId == myCloudIdVal
+            if (isSelf) {
+                _uiEvents.emit("Cannot remove your own active device.")
+                return@launch
             }
+
+            val allCurrent = repository.getFamilyMembersOnce()
+            val target = allCurrent.firstOrNull { it.id == memberId }
+                ?: allCurrent.firstOrNull { it.name.contains(memberId, ignoreCase = true) }
+            val targetName = target?.name ?: memberId
+            val cleanName = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+
+            val editor = prefs.edit()
+            val isCommonRole = cleanName in setOf("you", "dad", "louis", "wife", "mama", "mom", "mother", "daughter", "son", "isabel", "annette", "eloise")
+            if (!isCommonRole && cleanName.isNotBlank()) {
+                editor.putBoolean("deleted_$cleanName", true)
+                editor.putBoolean("deleted_member_$cleanName", true)
+            }
+            if (!isCommonRole && targetName.isNotBlank()) {
+                editor.putBoolean("deleted_${targetName.lowercase()}", true)
+                editor.putBoolean("deleted_member_${targetName.lowercase()}", true)
+            }
+            editor.commit()
+
+            // 2. Delete the target record(s) from local database (NEVER delete 'me' or active device)
+            for (m in allCurrent) {
+                if (m.id == "me" || m.id == myCloudIdVal || (myDeviceUUID.value.isNotBlank() && m.id.endsWith("_" + myDeviceUUID.value))) continue
+                val matchesExactId = m.id == memberId || m.id == cleanId
+                val matchesTargetId = target != null && m.id == target.id
+                if (matchesExactId || matchesTargetId) {
+                    repository.deleteMember(m)
+                    repository.clearBreadcrumbsForMember(m.id)
+                }
+            }
+
+            // 3. Remove from cloud group payload
+            cloudSyncManager.removeMemberFromCloud(memberId, targetName)
+
+            // 4. Remove location breadcrumbs for this member
+            repository.clearBreadcrumbsForMember(memberId)
+            if (target != null && target.id != memberId) repository.clearBreadcrumbsForMember(target.id)
+
+            repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of $targetName", iconName = "away"))
+            if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
+            _uiEvents.emit("$targetName removed from radar circle.")
         }
-
-        // 3. Remove from cloud group payload
-        cloudSyncManager.removeMemberFromCloud(memberId, targetName)
-
-        // 4. Remove location breadcrumbs for this member
-        repository.clearBreadcrumbsForMember(memberId)
-        if (target != null && target.id != memberId) repository.clearBreadcrumbsForMember(target.id)
-
-        repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "removed tracker of $targetName", iconName = "away"))
-        if (selectedMemberId.value == memberId || selectedMemberId.value == target?.id) selectedMemberId.value = null
-        _uiEvents.emit("$targetName removed from radar circle.")
     }
 
     fun cleanDuplicates() = viewModelScope.launch {
@@ -1132,25 +1148,36 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         activeRingingMembers.value = activeRingingMembers.value + memberId
         val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
         val targetName = localTarget?.name ?: memberId
+        val cleanTarget = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+        val cleanId = memberId.lowercase().replace("device_", "").replace("member_", "").trim()
+
         _uiEvents.emit("🚨 Ringing $targetName's phone loudly...")
 
         cloudSyncManager.getGroupData(token)?.let { payload ->
             val updatedMembers = payload.members.toMutableMap()
-            val targetEntry = updatedMembers.entries.firstOrNull {
-                it.key == memberId || it.value.id == memberId || it.value.name.equals(memberId, ignoreCase = true)
+            val targetEntry = updatedMembers.entries.firstOrNull { entry ->
+                val m = entry.value
+                val cleanEntryName = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val cleanEntryId = m.id.lowercase().replace("device_", "").replace("member_", "").trim()
+
+                entry.key == memberId || m.id == memberId ||
+                m.name.equals(memberId, ignoreCase = true) ||
+                m.name.equals(targetName, ignoreCase = true) ||
+                (cleanTarget.isNotBlank() && (cleanEntryName == cleanTarget || cleanEntryName.contains(cleanTarget) || cleanTarget.contains(cleanEntryName))) ||
+                (cleanId.isNotBlank() && (cleanEntryId == cleanId || cleanEntryId.contains(cleanId) || cleanId.contains(cleanEntryId)))
             }
             if (targetEntry != null) {
                 val targetKey = targetEntry.key
                 val target = targetEntry.value
-                updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM")
+                updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM", lastActive = System.currentTimeMillis())
                 cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
-                activeRingingMembers.value = activeRingingMembers.value + target.id + target.name
+                activeRingingMembers.value = activeRingingMembers.value + target.id + target.name + targetKey
             }
         }
 
-        // Automatically timeout/reset after 14 seconds
+        // Automatically timeout/reset after 20 seconds
         launch {
-            kotlinx.coroutines.delay(14000L)
+            kotlinx.coroutines.delay(20000L)
             if (activeRingingMembers.value.contains(memberId)) {
                 stopFindMyPhone(memberId, isAutoTimeout = true)
             }
@@ -1160,17 +1187,30 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun stopFindMyPhone(memberId: String, isAutoTimeout: Boolean = false) = viewModelScope.launch {
         val token = groupSyncToken.value
         activeRingingMembers.value = activeRingingMembers.value - memberId
+        val localTarget = familyMembers.value.firstOrNull { it.id == memberId || it.name.equals(memberId, ignoreCase = true) }
+        val targetName = localTarget?.name ?: memberId
+        val cleanTarget = targetName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+        val cleanId = memberId.lowercase().replace("device_", "").replace("member_", "").trim()
+
         cloudSyncManager.getGroupData(token)?.let { payload ->
             val updatedMembers = payload.members.toMutableMap()
-            val targetEntry = updatedMembers.entries.firstOrNull {
-                it.key == memberId || it.value.id == memberId || it.value.name.equals(memberId, ignoreCase = true)
+            val targetEntry = updatedMembers.entries.firstOrNull { entry ->
+                val m = entry.value
+                val cleanEntryName = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val cleanEntryId = m.id.lowercase().replace("device_", "").replace("member_", "").trim()
+
+                entry.key == memberId || m.id == memberId ||
+                m.name.equals(memberId, ignoreCase = true) ||
+                m.name.equals(targetName, ignoreCase = true) ||
+                (cleanTarget.isNotBlank() && (cleanEntryName == cleanTarget || cleanEntryName.contains(cleanTarget) || cleanTarget.contains(cleanEntryName))) ||
+                (cleanId.isNotBlank() && (cleanEntryId == cleanId || cleanEntryId.contains(cleanId) || cleanId.contains(cleanEntryId)))
             }
             if (targetEntry != null) {
                 val targetKey = targetEntry.key
                 val target = targetEntry.value
-                activeRingingMembers.value = activeRingingMembers.value - target.id - target.name
+                activeRingingMembers.value = activeRingingMembers.value - target.id - target.name - targetKey
                 if (target.statusText == "🚨 ALARM") {
-                    updatedMembers[targetKey] = target.copy(statusText = "Stationary")
+                    updatedMembers[targetKey] = target.copy(statusText = "Stationary", lastActive = System.currentTimeMillis())
                     cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
                 }
                 if (!isAutoTimeout) {

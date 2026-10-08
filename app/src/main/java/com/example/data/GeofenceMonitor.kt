@@ -48,19 +48,39 @@ object GeofenceMonitor {
             emptyList()
         }
 
-        val allPlaces = mutableListOf<MonitoredPlace>()
+        val rawPlaces = mutableListOf<MonitoredPlace>()
         if (homeLat != 0.0 && homeLng != 0.0) {
-            allPlaces.add(MonitoredPlace("place_home", "Home", homeLat, homeLng, homeRadius, "home", isHome = true))
+            rawPlaces.add(MonitoredPlace("place_home", "Home", homeLat, homeLng, homeRadius, "home", isHome = true))
         }
         if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
             val isWoodcote = Math.hypot((workLat - 51.3280) * 111.0, (workLng - (-0.1405)) * 111.0) < 0.6
             val placeName = if (isWoodcote) "Woodcote Primary School" else "Work"
             val placeIcon = if (isWoodcote) "school" else "work"
-            allPlaces.add(MonitoredPlace("place_work", placeName, workLat, workLng, workRadius, placeIcon, isWork = !isWoodcote))
+            rawPlaces.add(MonitoredPlace("place_work", placeName, workLat, workLng, workRadius, placeIcon, isWork = !isWoodcote))
         }
         customZones.forEach { zone ->
             if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {
-                allPlaces.add(MonitoredPlace(zone.id, zone.name, zone.latitude, zone.longitude, zone.radiusMeters, zone.iconName))
+                rawPlaces.add(MonitoredPlace(zone.id, zone.name, zone.latitude, zone.longitude, zone.radiusMeters, zone.iconName))
+            }
+        }
+
+        // Deduplicate overlapping places within 120m of each other (prefer named custom zones over generic place_work)
+        val allPlaces = mutableListOf<MonitoredPlace>()
+        for (place in rawPlaces) {
+            val duplicateIdx = allPlaces.indexOfFirst { existing ->
+                val distM = Math.hypot(
+                    (place.longitude - existing.longitude) * 111.0 * Math.cos(Math.toRadians(existing.latitude)),
+                    (place.latitude - existing.latitude) * 111.0
+                ) * 1000.0
+                distM < 120.0
+            }
+            if (duplicateIdx >= 0) {
+                // If the new place is a custom named zone and existing was generic work, replace it
+                if (!place.id.startsWith("place_") && allPlaces[duplicateIdx].id.startsWith("place_")) {
+                    allPlaces[duplicateIdx] = place
+                }
+            } else {
+                allPlaces.add(place)
             }
         }
 
@@ -132,13 +152,14 @@ object GeofenceMonitor {
             val cleanMemberName = member.name
                 .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                 .trim()
+            val personKey = cleanMemberName.lowercase().split(Regex("[\\s,]+")).firstOrNull() ?: cleanMemberName.lowercase()
 
             allPlaces.forEach { place ->
                 val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
                 val yDist = (member.y - place.latitude) * 111.0
                 val distMeters = Math.hypot(xDist, yDist) * 1000.0
 
-                val key = "${cleanMemberName.lowercase()}_${place.id}"
+                val key = "${personKey}_${place.id}"
                 val lastStatus = statusPrefs.getString("status_$key", null)
                 val inCount = statusPrefs.getInt("incount_$key", 0)
                 val outCount = statusPrefs.getInt("outcount_$key", 0)
@@ -162,8 +183,12 @@ object GeofenceMonitor {
                             statusEditor.putString("status_$key", "inside")
                             statusEditor.putInt("incount_$key", 0)
                             val lastAlert = statusPrefs.getLong("alert_arr_$key", 0L)
-                            if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
+                            val lastGlobalPersonAlert = statusPrefs.getLong("global_arr_$personKey", 0L)
+
+                            // Enforce both per-zone and global per-person arrival cooldown to prevent multi-place or repeating spam
+                            if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS && now - lastGlobalPersonAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
                                 statusEditor.putLong("alert_arr_$key", now)
+                                statusEditor.putLong("global_arr_$personKey", now)
                                 val placeDisplayName = if (place.isHome) "Home" else place.name
 
                                 val lastCoLocated = statusPrefs.getLong("colocated_${member.id}", 0L)

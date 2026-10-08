@@ -539,11 +539,17 @@ fun MainScreen(
                     else -> "alert"
                 }
                 val spokenKey = "${rawPerson}_$actionKey"
-                val lastSpoken = MainActivity.globalSpokenTimestamps[spokenKey] ?: 0L
+                val voicePrefs = context.getSharedPreferences("voice_announcement_prefs", Context.MODE_PRIVATE)
+                val lastSpoken = maxOf(
+                    MainActivity.globalSpokenTimestamps[spokenKey] ?: 0L,
+                    voicePrefs.getLong(spokenKey, 0L)
+                )
 
-                // Only announce via voice once every 15 minutes per unique person and action
-                if (now - lastSpoken > 15 * 60 * 1000L) {
+                // Enforce 30-minute strict verbal cooldown per unique person for arrivals, 15 minutes for departures
+                val verbalCooldownMs = if (actionKey == "arrived") 30 * 60 * 1000L else 15 * 60 * 1000L
+                if (now - lastSpoken > verbalCooldownMs) {
                     MainActivity.globalSpokenTimestamps[spokenKey] = now
+                    voicePrefs.edit().putLong(spokenKey, now).apply()
 
                     val formattedSpeech = when {
                         cleanSpeechText.contains("has arrived at home", ignoreCase = true) || cleanSpeechText.contains("has arrived home", ignoreCase = true) -> {

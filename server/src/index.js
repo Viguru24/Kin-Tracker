@@ -179,6 +179,11 @@ app.put('/sync/:token', (req, res) => {
         }
 
         incomingMembers.forEach(m => {
+            const existing = db.getMember(m.id);
+            const isAlarmOrControlUpdate = m.statusText === '🚨 ALARM' || (existing && existing.statusText === '🚨 ALARM') || (existing && m.isLocationPaused !== existing.isLocationPaused);
+            if (!isAlarmOrControlUpdate && existing && existing.lastActive && m.lastActive && Number(m.lastActive) < Number(existing.lastActive)) {
+                return; // Do not overwrite newer member data with stale snapshot
+            }
             db.saveMember({ ...m, circleId: circle.id });
         });
     }

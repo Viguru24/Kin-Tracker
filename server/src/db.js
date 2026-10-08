@@ -118,6 +118,12 @@ const dbOperations = {
     },
 
     saveMember(member) {
+        const existing = db.members[member.id];
+        const isAlarmOrControlUpdate = member.statusText === '🚨 ALARM' || (existing && existing.statusText === '🚨 ALARM') || (existing && member.isLocationPaused !== existing.isLocationPaused);
+        // If an existing record exists with a newer lastActive timestamp, ignore stale snapshot (unless alarm/control status change)
+        if (!isAlarmOrControlUpdate && existing && existing.lastActive && member.lastActive && Number(member.lastActive) < Number(existing.lastActive)) {
+            return existing;
+        }
         db.members[member.id] = member;
         // Also ensure member is in circle's member list
         if (member.circleId && db.circles[member.circleId]) {

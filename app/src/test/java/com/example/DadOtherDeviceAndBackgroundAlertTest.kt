@@ -119,7 +119,13 @@ class DadOtherDeviceAndBackgroundAlertTest {
         )
 
         // Verify it was removed from local database
-        val membersAfter = repository.getFamilyMembersOnce()
+        var membersAfter = repository.getFamilyMembersOnce()
+        for (i in 1..20) {
+            org.robolectric.shadows.ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+            membersAfter = repository.getFamilyMembersOnce()
+            if (!membersAfter.any { it.id == "device_dad_other_999" }) break
+            Thread.sleep(50)
+        }
         assertFalse(
             "Dad's other device should not exist in local database",
             membersAfter.any { it.id == "device_dad_other_999" }

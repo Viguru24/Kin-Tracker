@@ -148,8 +148,16 @@ object BackgroundSyncProcessor {
             if (!fetchSuccess) return
 
             // 2. Check alarm
+            val myNameClean = myName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
             val matchesMe = payload?.members?.values?.any { member ->
-                (member.id == myCloudId || member.name.equals(myName, ignoreCase = true)) && member.statusText == "🚨 ALARM"
+                val memberNameClean = member.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val isSamePerson = member.id == myCloudId ||
+                    (dUuid.length >= 4 && member.id.endsWith("_$dUuid")) ||
+                    member.id.contains(dUuid) ||
+                    member.name.trim().equals(myName.trim(), ignoreCase = true) ||
+                    (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
+                
+                isSamePerson && member.statusText == "🚨 ALARM"
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(context)
@@ -377,6 +385,23 @@ object BackgroundSyncProcessor {
                 updatedMembers.remove(k)
             }
 
+            // Preserve newer timestamps for all other members before uploading
+            val existingLocalBeforePut = repository.getFamilyMembersOnce()
+            for ((k, cloudM) in updatedMembers) {
+                if (k != myCloudId) {
+                    val localM = existingLocalBeforePut.firstOrNull { it.id == k }
+                    if (localM != null && localM.lastActive > cloudM.lastActive && localM.x != 0.0 && localM.y != 0.0) {
+                        updatedMembers[k] = cloudM.copy(
+                            x = localM.x,
+                            y = localM.y,
+                            speedMph = localM.speedMph,
+                            statusText = localM.statusText,
+                            lastActive = localM.lastActive
+                        )
+                    }
+                }
+            }
+
             updatedMembers[myCloudId] = myCloudMember
 
             val newPayload = if (payload != null) {
@@ -411,6 +436,8 @@ object BackgroundSyncProcessor {
             val meLocal = existingLocal.firstOrNull { it.id == "me" }
             if (meLocal != null) evaluatedMembers.add(meLocal)
 
+            val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
+
             payload?.members?.values?.forEach { cloudM ->
                 if (cloudM.id == myCloudId || (dUuid.length >= 4 && cloudM.id.endsWith("_$dUuid"))) return@forEach
 
@@ -439,22 +466,38 @@ object BackgroundSyncProcessor {
                 }
 
                 val matchingLocal = existingLocal.firstOrNull { it.id == cloudM.id }
+                val hasNewerLocal = matchingLocal != null && matchingLocal.lastActive > cloudM.lastActive && matchingLocal.x != 0.0 && matchingLocal.y != 0.0
+                val effX = if (hasNewerLocal) matchingLocal!!.x else cloudM.x
+                val effY = if (hasNewerLocal) matchingLocal!!.y else cloudM.y
+                val effLastActive = if (hasNewerLocal) matchingLocal!!.lastActive else cloudM.lastActive
+
+                val matchedSafeZone = customSafeZones.firstOrNull { zone ->
+                    effX != 0.0 && effY != 0.0 &&
+                    GeoUtils.distanceMeters(effY, effX, zone.latitude, zone.longitude) <= (zone.radiusMeters + 15.0)
+                }
+
+                val finalStatus = when {
+                    isMemberLocPaused -> "⏸️ Paused (Hidden)"
+                    matchedSafeZone != null && cloudM.speedMph < 1.2 -> "At ${matchedSafeZone.name}"
+                    else -> cloudM.statusText
+                }
+
                 val mappedMember = FamilyMember(
                     id = cloudM.id,
                     name = resolvedName,
                     avatarColorHex = cloudM.avatarColorHex,
-                    x = cloudM.x,
-                    y = cloudM.y,
+                    x = effX,
+                    y = effY,
                     batteryPercentage = cloudM.batteryPercentage,
                     isCharging = cloudM.isCharging,
                     speedMph = if (isMemberLocPaused) 0.0 else cloudM.speedMph,
-                    statusText = if (isMemberLocPaused) "⏸️ Paused (Hidden)" else cloudM.statusText,
+                    statusText = finalStatus,
                     isComingHome = if (isMemberLocPaused) false else cloudM.isComingHome,
                     etaMinutes = if (isMemberLocPaused) 0 else cloudM.etaMinutes,
                     avatarEmoji = cloudM.avatarEmoji,
                     phoneNumber = matchingLocal?.phoneNumber ?: "",
                     photoPath = matchingLocal?.photoPath ?: "",
-                    lastActive = cloudM.lastActive,
+                    lastActive = effLastActive,
                     locationSince = cloudM.locationSince,
                     isLocationPaused = isMemberLocPaused
                 )
