@@ -603,7 +603,6 @@ class CloudSyncManager(
                     }
                 }
 
-                if (matchingByName != null) repository.deleteMember(matchingByName)
                 val isOffline = (System.currentTimeMillis() - cloudM.lastActive) > 60_000
 
                 // We no longer bake the time into the status string — the UI computes it live
@@ -746,12 +745,27 @@ class CloudSyncManager(
                     contactsPrefs.edit().putString("edited_name_${cloudM.id}", resolvedName).apply()
                 }
 
+                val fallbackEmoji = when {
+                    cleanKey.contains("dad") || cleanKey.contains("louis") -> "👨"
+                    cleanKey.contains("isabel") -> "👩‍🎓"
+                    cleanKey.contains("annette") -> "👩"
+                    cleanKey.contains("eloise") -> "👧"
+                    else -> ""
+                }
+                val resolvedEmoji = when {
+                    cloudM.avatarEmoji.isNotBlank() -> cloudM.avatarEmoji
+                    matchingLocal?.avatarEmoji?.isNotBlank() == true -> matchingLocal.avatarEmoji
+                    matchingByName?.avatarEmoji?.isNotBlank() == true -> matchingByName.avatarEmoji
+                    fallbackEmoji.isNotBlank() -> fallbackEmoji
+                    else -> ""
+                }
+
                 val mappedLocal = FamilyMember(
                     id = cloudM.id, name = resolvedName, avatarColorHex = cloudM.avatarColorHex,
                     x = finalX, y = finalY, batteryPercentage = cloudM.batteryPercentage,
                     isCharging = cloudM.isCharging, speedMph = finalSpeedMph,
                     statusText = finalStatus, isComingHome = finalComingHome,
-                    etaMinutes = finalEta, avatarEmoji = cloudM.avatarEmoji,
+                    etaMinutes = finalEta, avatarEmoji = resolvedEmoji,
                     phoneNumber = if (matchingLocal?.phoneNumber?.isNotBlank() == true) matchingLocal.phoneNumber else resolvedPhone,
                     photoPath = if (matchingLocal?.photoPath?.isNotBlank() == true) matchingLocal.photoPath else resolvedPhoto,
                     lastActive = targetLastActive,
@@ -759,15 +773,15 @@ class CloudSyncManager(
                     isLocationPaused = isMemberLocPaused
                 )
 
-                if (matchingLocal != null && matchingLocal.id != cloudM.id) {
-                    // Device was renamed and received a new member ID; delete old record from Room
-                    repository.deleteMember(matchingLocal)
-                    repository.insertFamilyMembers(listOf(mappedLocal))
-                } else if (matchingLocal == null) {
-                    repository.insertFamilyMembers(listOf(mappedLocal))
-                } else {
-                    repository.updateMember(mappedLocal)
+                if (matchingByName != null && matchingByName.id != cloudM.id) {
+                    repository.deleteMember(matchingByName)
+                    repository.clearBreadcrumbsForMember(matchingByName.id)
                 }
+                if (matchingLocal != null && matchingLocal.id != cloudM.id) {
+                    repository.deleteMember(matchingLocal)
+                    repository.clearBreadcrumbsForMember(matchingLocal.id)
+                }
+                repository.updateMember(mappedLocal)
                 if (mappedLocal.x != 0.0 && mappedLocal.y != 0.0) {
                     repository.recordBreadcrumbThrottled(mappedLocal.id, mappedLocal.y, mappedLocal.x, mappedLocal.speedMph)
                     com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(
@@ -799,29 +813,6 @@ class CloudSyncManager(
                 if (isExplicitlyDeleted || (isNotInCloud && hasReplacementInCloud) || (isNotInCloud && (localM.id.contains("abc123") || localM.id.startsWith("mock_")))) {
                     repository.deleteMember(localM)
                     repository.clearBreadcrumbsForMember(localM.id)
-                }
-            }
-
-            // Strict local deduplication: if multiple local records exist with the same clean name or known role, keep ONLY the newest one
-            val allCurrentLocal = repository.getFamilyMembersOnce()
-            val seenRoles = mutableSetOf<String>()
-            for (m in allCurrentLocal.sortedByDescending { it.lastActive }) {
-                if (m.id == "me") continue
-                val cleanRole = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-                val canonicalKey = when {
-                    cleanRole.contains("dad") || cleanRole.contains("louis") -> "dad"
-                    cleanRole.contains("eloise") -> "eloise"
-                    cleanRole.contains("isabel") -> "isabel"
-                    cleanRole.contains("annette") -> "annette"
-                    else -> cleanRole
-                }
-                if (canonicalKey.isNotBlank()) {
-                    if (seenRoles.contains(canonicalKey)) {
-                        repository.deleteMember(m)
-                        repository.clearBreadcrumbsForMember(m.id)
-                    } else {
-                        seenRoles.add(canonicalKey)
-                    }
                 }
             }
 

@@ -944,13 +944,18 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteFamilyMember(memberId: String) {
         val cleanId = memberId.lowercase().trim()
         val prefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
-        prefs.edit()
+        val initialEditor = prefs.edit()
             .putBoolean("deleted_$cleanId", true)
             .putBoolean("deleted_member_$cleanId", true)
             .putBoolean("deleted_$memberId", true)
             .putBoolean("deleted_member_$memberId", true)
             .putLong("deleted_time_$cleanId", System.currentTimeMillis())
-            .commit()
+
+        if (memberId.contains("other device", ignoreCase = true) || memberId.contains("dad_other", ignoreCase = true) || memberId.contains("dad's other", ignoreCase = true)) {
+            initialEditor.putBoolean("deleted_dad's other device", true)
+            initialEditor.putBoolean("deleted_member_dad's other device", true)
+        }
+        initialEditor.commit()
 
         val kPrefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
         kPrefs.edit()
