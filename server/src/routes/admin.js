@@ -155,7 +155,8 @@ router.put('/circles/:circleId', requireAdmin, (req, res) => {
 
         const allowedFields = [
             'name', 'homeLat', 'homeLng', 'isHomeCalibrated', 'homeRadiusMeters',
-            'workLat', 'workLng', 'isWorkCalibrated', 'workRadiusMeters', 'inviteCode', 'legacyPin'
+            'workLat', 'workLng', 'isWorkCalibrated', 'workRadiusMeters', 'inviteCode', 'legacyPin',
+            'homeName', 'homeEmoji', 'workName', 'workEmoji', 'iconEmoji', 'iconColor'
         ];
 
         const sanitizedUpdates = {};
@@ -172,11 +173,64 @@ router.put('/circles/:circleId', requireAdmin, (req, res) => {
         });
 
         const updatedCircle = db.updateCircle(circleId, sanitizedUpdates);
-        db.logEvent('CIRCLE', `Admin updated circle settings for "${updatedCircle.name}"`, { circleId });
+        db.logEvent('CIRCLE', `Admin updated circle settings & labels for "${updatedCircle.name}"`, { circleId });
 
         return res.json({ success: true, circle: updatedCircle });
     } catch (err) {
         console.error('[Admin Update Circle Error]', err);
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// SAFE ZONES / PLACES (e.g. Eloisa's School, Annette's Work, Isabel's School)
+router.get('/circles/:circleId/safe-zones', requireAdmin, (req, res) => {
+    try {
+        const { circleId } = req.params;
+        const zones = db.getCircleSafeZones(circleId);
+        return res.json({ success: true, safeZones: zones });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.post('/circles/:circleId/safe-zones', requireAdmin, (req, res) => {
+    try {
+        const { circleId } = req.params;
+        const { id, name, latitude, longitude, radiusMeters, iconName, colorHex } = req.body;
+
+        if (!name || latitude === undefined || longitude === undefined) {
+            return res.status(400).json({ success: false, error: 'Name, latitude, and longitude are required' });
+        }
+
+        const zoneId = id || `zone_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const safeZone = {
+            id: zoneId,
+            circleId: circleId,
+            name: name.trim(),
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            radiusMeters: Number(radiusMeters) || 100,
+            iconName: iconName || '🏫',
+            colorHex: colorHex || '#00F0FF',
+            updatedAt: Date.now()
+        };
+
+        db.saveSafeZone(safeZone);
+        db.logEvent('CIRCLE', `Admin saved place / safe zone: "${safeZone.name}" (${safeZone.iconName})`, { circleId, zoneId });
+
+        return res.json({ success: true, safeZone, safeZones: db.getCircleSafeZones(circleId) });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+router.delete('/circles/:circleId/safe-zones/:zoneId', requireAdmin, (req, res) => {
+    try {
+        const { circleId, zoneId } = req.params;
+        db.deleteSafeZone(zoneId);
+        db.logEvent('CIRCLE', `Admin removed place / safe zone ${zoneId}`, { circleId, zoneId });
+        return res.json({ success: true, message: 'Place / Safe zone deleted', safeZones: db.getCircleSafeZones(circleId) });
+    } catch (err) {
         return res.status(500).json({ success: false, error: err.message });
     }
 });

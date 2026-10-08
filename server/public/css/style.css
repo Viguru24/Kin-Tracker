@@ -1211,11 +1211,73 @@ body {
     transition: all 0.2s ease;
 }
 
+/* CUSTOM PLACES & SAFE ZONES LIST */
+.custom-places-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.place-item-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(18, 28, 51, 0.7);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
+}
+
+.place-item-card:hover {
+    background: rgba(26, 40, 72, 0.85);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.place-item-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.place-icon-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    border: 1px solid var(--border-glass);
+}
+
+.place-name {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.place-meta {
+    font-size: 0.6875rem;
+    color: var(--text-dim);
+}
+
+.place-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* Leaflet Dark Tile Overrides */
 .leaflet-container {
     background: #111827 !important;
     font-family: var(--font-main);
 }
+
 
 /* MEMBER CARD RING BUTTON & ACTIONS */
 .member-card-content {

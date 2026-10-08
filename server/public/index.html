@@ -271,16 +271,20 @@
 
     <!-- MODAL: GEOFENCE & CIRCLE CONFIG -->
     <div id="circleConfigModal" class="modal-backdrop hidden">
-        <div class="glass-card config-modal animate-fade-in">
+        <div class="glass-card config-modal animate-fade-in" style="max-width: 680px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
-                <h3>⚙️ Circle & Geofence Calibration</h3>
+                <h3>⚙️ Places & Safe Zones Manager</h3>
                 <button class="modal-close" data-close="circleConfigModal">✕</button>
             </div>
             <form id="circleConfigForm">
                 <div class="form-row">
-                    <div class="form-group flex-1">
+                    <div class="form-group flex-2">
                         <label>Circle Name</label>
-                        <input type="text" id="cfgCircleName" class="form-control" required>
+                        <input type="text" id="cfgCircleName" class="form-control" placeholder="e.g. Family Circle" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Circle Icon</label>
+                        <input type="text" id="cfgCircleEmoji" class="form-control text-center" placeholder="👑" maxlength="4">
                     </div>
                     <div class="form-group flex-1">
                         <label>Invite Code</label>
@@ -288,9 +292,26 @@
                     </div>
                 </div>
 
-                <!-- HOME GEOFENCE -->
+                <!-- 1. HOME SAFE ZONE (FULLY CUSTOMIZABLE) -->
                 <div class="config-section">
-                    <div class="section-title text-emerald">🏠 Home Safe Zone</div>
+                    <div class="section-title text-emerald" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>🏠 Home Place</span>
+                        <span class="badge-pill secure-badge">Primary Safe Zone</span>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-2">
+                            <label>Place Name</label>
+                            <input type="text" id="cfgHomeName" class="form-control" placeholder="e.g. Home, Family House" value="Home">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Icon / Emoji</label>
+                            <input type="text" id="cfgHomeEmoji" class="form-control text-center" placeholder="🏠" value="🏠" maxlength="4">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Radius (m)</label>
+                            <input type="number" id="cfgHomeRadius" class="form-control mono" min="20" max="2000" value="140" required>
+                        </div>
+                    </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
                             <label>Latitude</label>
@@ -300,22 +321,38 @@
                             <label>Longitude</label>
                             <input type="number" step="any" id="cfgHomeLng" class="form-control mono" required>
                         </div>
-                        <div class="form-group flex-1">
-                            <label>Radius (Meters)</label>
-                            <input type="number" id="cfgHomeRadius" class="form-control mono" min="20" max="1000" value="140" required>
-                        </div>
                     </div>
                     <div class="form-row-actions">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="cfgHomeCalibrated"> Mark Home as Calibrated
+                            <input type="checkbox" id="cfgHomeCalibrated"> Active & Calibrated
                         </label>
-                        <button type="button" id="cfgSetHomeCurrentGPS" class="btn btn-xs btn-outline">📍 Use My Browser GPS</button>
+                        <div class="btn-group">
+                            <button type="button" id="cfgSetHomeCurrentGPS" class="btn btn-xs btn-outline">📍 Browser GPS</button>
+                            <button type="button" id="cfgPickHomeOnMapBtn" class="btn btn-xs btn-emerald">🗺️ Pick on Map</button>
+                        </div>
                     </div>
                 </div>
 
-                <!-- WORK GEOFENCE -->
+                <!-- 2. SECONDARY WORK / OFFICE PLACE (FULLY CUSTOMIZABLE) -->
                 <div class="config-section">
-                    <div class="section-title text-cyan">🏢 Work Safe Zone</div>
+                    <div class="section-title text-cyan" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>🏢 Work Place</span>
+                        <span class="badge-pill">Secondary Safe Zone</span>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-2">
+                            <label>Place Name</label>
+                            <input type="text" id="cfgWorkName" class="form-control" placeholder="e.g. Annette's Work, Office" value="Work">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Icon / Emoji</label>
+                            <input type="text" id="cfgWorkEmoji" class="form-control text-center" placeholder="🏢" value="🏢" maxlength="4">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Radius (m)</label>
+                            <input type="number" id="cfgWorkRadius" class="form-control mono" min="20" max="2000" value="75">
+                        </div>
+                    </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
                             <label>Latitude</label>
@@ -325,26 +362,88 @@
                             <label>Longitude</label>
                             <input type="number" step="any" id="cfgWorkLng" class="form-control mono">
                         </div>
-                        <div class="form-group flex-1">
-                            <label>Radius (Meters)</label>
-                            <input type="number" id="cfgWorkRadius" class="form-control mono" min="20" max="1000" value="75">
-                        </div>
                     </div>
                     <div class="form-row-actions">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="cfgWorkCalibrated"> Mark Work as Calibrated
+                            <input type="checkbox" id="cfgWorkCalibrated"> Active & Calibrated
                         </label>
-                        <button type="button" id="cfgSetWorkCurrentGPS" class="btn btn-xs btn-outline">📍 Use My Browser GPS</button>
+                        <div class="btn-group">
+                            <button type="button" id="cfgSetWorkCurrentGPS" class="btn btn-xs btn-outline">📍 Browser GPS</button>
+                            <button type="button" id="cfgPickWorkOnMapBtn" class="btn btn-xs btn-cyan">🗺️ Pick on Map</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. ADDITIONAL CUSTOM PLACES (Eloisa's School, Isabel's Work, etc.) -->
+                <div class="config-section">
+                    <div class="section-title text-purple" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>📍 Additional Family Places & Schools</span>
+                        <button type="button" id="addNewPlaceBtn" class="btn btn-xs btn-purple">+ Add Place</button>
+                    </div>
+                    <div id="customSafeZonesList" class="custom-places-list">
+                        <!-- Custom Places populated dynamically -->
                     </div>
                 </div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-close="circleConfigModal">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-glow">Save Calibration</button>
+                    <button type="submit" class="btn btn-primary btn-glow">Save Places & Calibration</button>
                 </div>
             </form>
         </div>
     </div>
+
+    <!-- MODAL: ADD / EDIT CUSTOM PLACE -->
+    <div id="customPlaceModal" class="modal-backdrop hidden">
+        <div class="glass-card config-modal animate-fade-in" style="max-width: 480px;">
+            <div class="modal-header">
+                <h3 id="customPlaceModalTitle">📍 Add Family Place</h3>
+                <button class="modal-close" data-close="customPlaceModal">✕</button>
+            </div>
+            <form id="customPlaceForm">
+                <input type="hidden" id="placeId">
+                <div class="form-row">
+                    <div class="form-group flex-2">
+                        <label>Place Name</label>
+                        <input type="text" id="placeNameInput" class="form-control" placeholder="e.g. Eloisa's School, Isabel's Work" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Icon / Emoji</label>
+                        <input type="text" id="placeEmojiInput" class="form-control text-center" placeholder="🏫" value="🏫" maxlength="4" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Latitude</label>
+                        <input type="number" step="any" id="placeLatInput" class="form-control mono" placeholder="51.3294" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Longitude</label>
+                        <input type="number" step="any" id="placeLngInput" class="form-control mono" placeholder="-0.1190" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Geofence Radius (meters)</label>
+                        <input type="number" id="placeRadiusInput" class="form-control mono" min="20" max="2000" value="100" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Map Color</label>
+                        <input type="color" id="placeColorInput" class="form-control color-picker" value="#A855F7">
+                    </div>
+                </div>
+                <div class="form-row-actions">
+                    <button type="button" id="placeSetCurrentGPS" class="btn btn-xs btn-outline">📍 Use Browser GPS</button>
+                    <button type="button" id="placePickOnMapBtn" class="btn btn-xs btn-purple">🗺️ Click on Map to Set</button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="customPlaceModal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-glow">Save Place</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <!-- MODAL: MEMBER CONTROL & REMOTE PHONE RINGING -->
     <div id="memberControlModal" class="modal-backdrop hidden">

@@ -21,7 +21,9 @@
         workCircleLayer: null,
         homeCenterMarker: null,
         workCenterMarker: null,
-        mapClickMode: null, // 'home' or 'work'
+        placeLayers: {},
+        placeMarkers: {},
+        mapClickMode: null, // 'home', 'work', or 'place'
         pollTimer: null,
         audioWs: null,
         audioCtx: null,
@@ -73,17 +75,38 @@
         circleConfigModal: document.getElementById('circleConfigModal'),
         circleConfigForm: document.getElementById('circleConfigForm'),
         cfgCircleName: document.getElementById('cfgCircleName'),
+        cfgCircleEmoji: document.getElementById('cfgCircleEmoji'),
         cfgInviteCode: document.getElementById('cfgInviteCode'),
+        cfgHomeName: document.getElementById('cfgHomeName'),
+        cfgHomeEmoji: document.getElementById('cfgHomeEmoji'),
         cfgHomeLat: document.getElementById('cfgHomeLat'),
         cfgHomeLng: document.getElementById('cfgHomeLng'),
         cfgHomeRadius: document.getElementById('cfgHomeRadius'),
         cfgHomeCalibrated: document.getElementById('cfgHomeCalibrated'),
+        cfgWorkName: document.getElementById('cfgWorkName'),
+        cfgWorkEmoji: document.getElementById('cfgWorkEmoji'),
         cfgWorkLat: document.getElementById('cfgWorkLat'),
         cfgWorkLng: document.getElementById('cfgWorkLng'),
         cfgWorkRadius: document.getElementById('cfgWorkRadius'),
         cfgWorkCalibrated: document.getElementById('cfgWorkCalibrated'),
         cfgSetHomeCurrentGPS: document.getElementById('cfgSetHomeCurrentGPS'),
         cfgSetWorkCurrentGPS: document.getElementById('cfgSetWorkCurrentGPS'),
+        cfgPickHomeOnMapBtn: document.getElementById('cfgPickHomeOnMapBtn'),
+        cfgPickWorkOnMapBtn: document.getElementById('cfgPickWorkOnMapBtn'),
+        customSafeZonesList: document.getElementById('customSafeZonesList'),
+        addNewPlaceBtn: document.getElementById('addNewPlaceBtn'),
+        customPlaceModal: document.getElementById('customPlaceModal'),
+        customPlaceForm: document.getElementById('customPlaceForm'),
+        customPlaceModalTitle: document.getElementById('customPlaceModalTitle'),
+        placeId: document.getElementById('placeId'),
+        placeNameInput: document.getElementById('placeNameInput'),
+        placeEmojiInput: document.getElementById('placeEmojiInput'),
+        placeLatInput: document.getElementById('placeLatInput'),
+        placeLngInput: document.getElementById('placeLngInput'),
+        placeRadiusInput: document.getElementById('placeRadiusInput'),
+        placeColorInput: document.getElementById('placeColorInput'),
+        placeSetCurrentGPS: document.getElementById('placeSetCurrentGPS'),
+        placePickOnMapBtn: document.getElementById('placePickOnMapBtn'),
         memberControlModal: document.getElementById('memberControlModal'),
         memberControlForm: document.getElementById('memberControlForm'),
         ctrlHeaderAvatar: document.getElementById('ctrlHeaderAvatar'),
@@ -248,6 +271,11 @@
                     isWorkCalibrated: true
                 });
                 showToast(`🏢 Work calibrated to ${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'success');
+            } else if (state.mapClickMode === 'place') {
+                el.placeLatInput.value = lat.toFixed(6);
+                el.placeLngInput.value = lng.toFixed(6);
+                el.customPlaceModal.classList.remove('hidden');
+                showToast(`📍 Place coordinates set to ${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'info');
             }
             exitMapCalibrateMode();
         });
@@ -262,7 +290,8 @@
     function enterMapCalibrateMode(mode) {
         state.mapClickMode = mode;
         el.mapCalibrateBanner.classList.remove('hidden');
-        el.mapCalibrateText.innerText = `Click on the map to set ${mode === 'home' ? '🏠 Home' : '🏢 Work'} coordinates`;
+        const label = mode === 'home' ? '🏠 Home' : mode === 'work' ? '🏢 Work' : '📍 Custom Place';
+        el.mapCalibrateText.innerText = `Click on the map to set ${label} coordinates`;
         el.radarMap.style.cursor = 'crosshair';
     }
 
@@ -406,6 +435,11 @@
     function updateMapGeofences(circle) {
         if (!state.map) return;
 
+        const homeName = circle.homeName || 'HOME';
+        const homeEmoji = circle.homeEmoji || '🏠';
+        const workName = circle.workName || 'WORK';
+        const workEmoji = circle.workEmoji || '🏢';
+
         // HOME GEOFENCE
         if (circle.homeLat && circle.homeLng) {
             const homeLatLng = [circle.homeLat, circle.homeLng];
@@ -423,16 +457,19 @@
                 state.homeCircleLayer.setRadius(circle.homeRadiusMeters || 140);
             }
 
+            const homeIcon = L.divIcon({
+                className: 'custom-radar-pin',
+                html: `<div class="radar-pin-container"><div class="radar-pin-avatar" style="border-color:#00ff88">${homeEmoji}</div><div class="radar-pin-label">${homeName.toUpperCase()}</div></div>`,
+                iconSize: [40, 50],
+                iconAnchor: [20, 45]
+            });
+
             if (!state.homeCenterMarker) {
-                const homeIcon = L.divIcon({
-                    className: 'custom-radar-pin',
-                    html: '<div class="radar-pin-container"><div class="radar-pin-avatar" style="border-color:#00ff88">🏠</div><div class="radar-pin-label">HOME</div></div>',
-                    iconSize: [40, 50],
-                    iconAnchor: [20, 45]
-                });
                 state.homeCenterMarker = L.marker(homeLatLng, { icon: homeIcon }).addTo(state.map);
+                state.homeCenterMarker.on('click', openCircleConfigModal);
             } else {
                 state.homeCenterMarker.setLatLng(homeLatLng);
+                state.homeCenterMarker.setIcon(homeIcon);
             }
         }
 
@@ -453,18 +490,84 @@
                 state.workCircleLayer.setRadius(circle.workRadiusMeters || 75);
             }
 
+            const workIcon = L.divIcon({
+                className: 'custom-radar-pin',
+                html: `<div class="radar-pin-container"><div class="radar-pin-avatar" style="border-color:#00f0ff">${workEmoji}</div><div class="radar-pin-label">${workName.toUpperCase()}</div></div>`,
+                iconSize: [40, 50],
+                iconAnchor: [20, 45]
+            });
+
             if (!state.workCenterMarker) {
-                const workIcon = L.divIcon({
-                    className: 'custom-radar-pin',
-                    html: '<div class="radar-pin-container"><div class="radar-pin-avatar" style="border-color:#00f0ff">🏢</div><div class="radar-pin-label">WORK</div></div>',
-                    iconSize: [40, 50],
-                    iconAnchor: [20, 45]
-                });
                 state.workCenterMarker = L.marker(workLatLng, { icon: workIcon }).addTo(state.map);
+                state.workCenterMarker.on('click', openCircleConfigModal);
             } else {
                 state.workCenterMarker.setLatLng(workLatLng);
+                state.workCenterMarker.setIcon(workIcon);
             }
         }
+
+        // ADDITIONAL CUSTOM PLACES / SAFE ZONES (Eloisa's School, Isabel's Work, etc.)
+        const safeZones = circle.safeZones || [];
+        const currentZoneIds = new Set(safeZones.map(z => z.id));
+
+        // Remove obsolete zone layers
+        Object.keys(state.placeLayers).forEach(id => {
+            if (!currentZoneIds.has(id)) {
+                state.map.removeLayer(state.placeLayers[id]);
+                delete state.placeLayers[id];
+            }
+        });
+        Object.keys(state.placeMarkers).forEach(id => {
+            if (!currentZoneIds.has(id)) {
+                state.map.removeLayer(state.placeMarkers[id]);
+                delete state.placeMarkers[id];
+            }
+        });
+
+        // Add or update custom places
+        safeZones.forEach(zone => {
+            const lat = Number(zone.latitude);
+            const lng = Number(zone.longitude);
+            if (!lat || !lng) return;
+
+            const color = zone.colorHex || '#A855F7';
+            const emoji = zone.iconName || '🏫';
+            const radius = Number(zone.radiusMeters) || 100;
+            const zoneLatLng = [lat, lng];
+
+            // Perimeter circle
+            if (state.placeLayers[zone.id]) {
+                state.placeLayers[zone.id].setLatLng(zoneLatLng);
+                state.placeLayers[zone.id].setRadius(radius);
+                state.placeLayers[zone.id].setStyle({ color, fillColor: color });
+            } else {
+                state.placeLayers[zone.id] = L.circle(zoneLatLng, {
+                    radius,
+                    color,
+                    fillColor: color,
+                    fillOpacity: 0.15,
+                    weight: 2,
+                    dashArray: '3, 6'
+                }).addTo(state.map);
+            }
+
+            // Marker Pin
+            const placeIcon = L.divIcon({
+                className: 'custom-radar-pin',
+                html: `<div class="radar-pin-container"><div class="radar-pin-avatar" style="border-color:${color}; box-shadow: 0 0 14px ${color}88;">${emoji}</div><div class="radar-pin-label">${zone.name.toUpperCase()}</div></div>`,
+                iconSize: [40, 50],
+                iconAnchor: [20, 45]
+            });
+
+            if (state.placeMarkers[zone.id]) {
+                state.placeMarkers[zone.id].setLatLng(zoneLatLng);
+                state.placeMarkers[zone.id].setIcon(placeIcon);
+            } else {
+                const marker = L.marker(zoneLatLng, { icon: placeIcon }).addTo(state.map);
+                marker.on('click', () => openCustomPlaceModal(zone));
+                state.placeMarkers[zone.id] = marker;
+            }
+        });
     }
 
     function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -902,24 +1005,118 @@
         return `${Math.floor(diffSec / 86400)}d ago`;
     }
 
-    // 7. GEOFENCE CONFIGURATION MODAL
+    // 7. GEOFENCE CONFIGURATION & PLACES MANAGER
     function openCircleConfigModal() {
         const circle = getCurrentCircle();
         if (!circle) return;
 
-        el.cfgCircleName.value = circle.name || '';
+        el.cfgCircleName.value = circle.name || 'Family Circle';
+        if (el.cfgCircleEmoji) el.cfgCircleEmoji.value = circle.iconEmoji || '👑';
         el.cfgInviteCode.value = circle.inviteCode || circle.legacyPin || '';
+
+        // Home Custom Names & Icons
+        if (el.cfgHomeName) el.cfgHomeName.value = circle.homeName || 'Home';
+        if (el.cfgHomeEmoji) el.cfgHomeEmoji.value = circle.homeEmoji || '🏠';
         el.cfgHomeLat.value = circle.homeLat || '';
         el.cfgHomeLng.value = circle.homeLng || '';
         el.cfgHomeRadius.value = circle.homeRadiusMeters || 140;
         el.cfgHomeCalibrated.checked = Boolean(circle.isHomeCalibrated);
 
+        // Work Custom Names & Icons (e.g. Annette's Work)
+        if (el.cfgWorkName) el.cfgWorkName.value = circle.workName || 'Work';
+        if (el.cfgWorkEmoji) el.cfgWorkEmoji.value = circle.workEmoji || '🏢';
         el.cfgWorkLat.value = circle.workLat || '';
         el.cfgWorkLng.value = circle.workLng || '';
         el.cfgWorkRadius.value = circle.workRadiusMeters || 75;
         el.cfgWorkCalibrated.checked = Boolean(circle.isWorkCalibrated);
 
+        // Render additional custom places (Eloisa's School, Isabel's Work, etc.)
+        renderCustomPlacesList(circle.safeZones || [], circle.id);
+
         el.circleConfigModal.classList.remove('hidden');
+    }
+
+    function renderCustomPlacesList(safeZones, circleId) {
+        if (!el.customSafeZonesList) return;
+        el.customSafeZonesList.innerHTML = '';
+
+        if (!safeZones || safeZones.length === 0) {
+            el.customSafeZonesList.innerHTML = '<div class="text-dim text-xs">No additional places configured. Click "+ Add Place" above to add schools, workplaces, or family spots.</div>';
+            return;
+        }
+
+        safeZones.forEach(zone => {
+            const card = document.createElement('div');
+            card.className = 'place-item-card';
+            card.innerHTML = `
+                <div class="place-item-left">
+                    <div class="place-icon-badge" style="border-color: ${zone.colorHex || '#A855F7'}">${zone.iconName || '🏫'}</div>
+                    <div>
+                        <div class="place-name">${zone.name}</div>
+                        <div class="place-meta">${Number(zone.latitude).toFixed(5)}, ${Number(zone.longitude).toFixed(5)} &bull; ${zone.radiusMeters || 100}m radius</div>
+                    </div>
+                </div>
+                <div class="place-actions">
+                    <button type="button" class="btn btn-xs btn-outline btn-locate-place" title="Locate on map">🗺️</button>
+                    <button type="button" class="btn btn-xs btn-secondary btn-edit-place">✏️ Edit</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger btn-delete-place">🗑️</button>
+                </div>
+            `;
+
+            card.querySelector('.btn-locate-place').addEventListener('click', (e) => {
+                e.stopPropagation();
+                el.circleConfigModal.classList.add('hidden');
+                if (state.map) {
+                    state.map.flyTo([Number(zone.latitude), Number(zone.longitude)], 16);
+                }
+            });
+
+            card.querySelector('.btn-edit-place').addEventListener('click', (e) => {
+                e.stopPropagation();
+                openCustomPlaceModal(zone);
+            });
+
+            card.querySelector('.btn-delete-place').addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (!confirm(`Delete place "${zone.name}"?`)) return;
+                try {
+                    await apiRequest(`/api/admin/circles/${circleId}/safe-zones/${zone.id}`, { method: 'DELETE' });
+                    showToast(`Deleted place "${zone.name}"`, 'success');
+                    await loadCircles(false);
+                    const updated = getCurrentCircle();
+                    if (updated) renderCustomPlacesList(updated.safeZones || [], circleId);
+                } catch (err) {
+                    showToast(`Failed to delete place: ${err.message}`, 'error');
+                }
+            });
+
+            el.customSafeZonesList.appendChild(card);
+        });
+    }
+
+    function openCustomPlaceModal(place = null) {
+        if (!el.customPlaceModal) return;
+        if (place) {
+            el.customPlaceModalTitle.innerText = `✏️ Edit Place: ${place.name}`;
+            el.placeId.value = place.id;
+            el.placeNameInput.value = place.name;
+            el.placeEmojiInput.value = place.iconName || '🏫';
+            el.placeLatInput.value = place.latitude;
+            el.placeLngInput.value = place.longitude;
+            el.placeRadiusInput.value = place.radiusMeters || 100;
+            el.placeColorInput.value = place.colorHex || '#A855F7';
+        } else {
+            el.customPlaceModalTitle.innerText = `📍 Add Family Place / School / Work`;
+            el.placeId.value = '';
+            el.placeNameInput.value = '';
+            el.placeEmojiInput.value = '🏫';
+            const currentCircle = getCurrentCircle();
+            el.placeLatInput.value = currentCircle?.homeLat || '';
+            el.placeLngInput.value = currentCircle?.homeLng || '';
+            el.placeRadiusInput.value = 100;
+            el.placeColorInput.value = '#A855F7';
+        }
+        el.customPlaceModal.classList.remove('hidden');
     }
 
     async function saveGeofenceLocation(circleId, updates) {
@@ -1220,6 +1417,7 @@
         el.cancelMapCalibrateBtn.addEventListener('click', exitMapCalibrateMode);
 
         // Circle Config Modal
+        // Circle Config Modal Form Submission
         el.openCircleConfigBtn.addEventListener('click', openCircleConfigModal);
         el.circleConfigForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1228,10 +1426,15 @@
 
             const updates = {
                 name: el.cfgCircleName.value.trim(),
+                iconEmoji: el.cfgCircleEmoji ? el.cfgCircleEmoji.value.trim() : '👑',
+                homeName: el.cfgHomeName ? el.cfgHomeName.value.trim() : 'Home',
+                homeEmoji: el.cfgHomeEmoji ? el.cfgHomeEmoji.value.trim() : '🏠',
                 homeLat: Number(el.cfgHomeLat.value),
                 homeLng: Number(el.cfgHomeLng.value),
                 homeRadiusMeters: Number(el.cfgHomeRadius.value),
                 isHomeCalibrated: el.cfgHomeCalibrated.checked,
+                workName: el.cfgWorkName ? el.cfgWorkName.value.trim() : 'Work',
+                workEmoji: el.cfgWorkEmoji ? el.cfgWorkEmoji.value.trim() : '🏢',
                 workLat: Number(el.cfgWorkLat.value),
                 workLng: Number(el.cfgWorkLng.value),
                 workRadiusMeters: Number(el.cfgWorkRadius.value),
@@ -1240,10 +1443,24 @@
 
             await saveGeofenceLocation(circle.id, updates);
             el.circleConfigModal.classList.add('hidden');
-            showToast('Geofence settings updated successfully', 'success');
+            showToast('Places & calibration settings updated successfully', 'success');
         });
 
-        // Browser GPS for Home & Work in Config Modal
+        // Browser GPS & Map Picking for Home & Work in Config Modal
+        if (el.cfgPickHomeOnMapBtn) {
+            el.cfgPickHomeOnMapBtn.addEventListener('click', () => {
+                el.circleConfigModal.classList.add('hidden');
+                enterMapCalibrateMode('home');
+            });
+        }
+
+        if (el.cfgPickWorkOnMapBtn) {
+            el.cfgPickWorkOnMapBtn.addEventListener('click', () => {
+                el.circleConfigModal.classList.add('hidden');
+                enterMapCalibrateMode('work');
+            });
+        }
+
         el.cfgSetHomeCurrentGPS.addEventListener('click', () => {
             if (!navigator.geolocation) return showToast('Geolocation not supported in browser', 'error');
             navigator.geolocation.getCurrentPosition((pos) => {
@@ -1263,6 +1480,63 @@
                 showToast('Work set to current browser GPS position', 'info');
             }, (err) => showToast(err.message, 'error'));
         });
+
+        // Custom Places (Schools, Workplaces, Family Spots)
+        if (el.addNewPlaceBtn) {
+            el.addNewPlaceBtn.addEventListener('click', () => openCustomPlaceModal(null));
+        }
+
+        if (el.placeSetCurrentGPS) {
+            el.placeSetCurrentGPS.addEventListener('click', () => {
+                if (!navigator.geolocation) return showToast('Geolocation not supported', 'error');
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    el.placeLatInput.value = pos.coords.latitude.toFixed(6);
+                    el.placeLngInput.value = pos.coords.longitude.toFixed(6);
+                    showToast('Place set to browser GPS', 'info');
+                }, (err) => showToast(err.message, 'error'));
+            });
+        }
+
+        if (el.placePickOnMapBtn) {
+            el.placePickOnMapBtn.addEventListener('click', () => {
+                el.customPlaceModal.classList.add('hidden');
+                enterMapCalibrateMode('place');
+            });
+        }
+
+        if (el.customPlaceForm) {
+            el.customPlaceForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const circle = getCurrentCircle();
+                if (!circle) return;
+
+                const placeData = {
+                    id: el.placeId.value.trim() || undefined,
+                    name: el.placeNameInput.value.trim(),
+                    iconName: el.placeEmojiInput.value.trim() || '🏫',
+                    latitude: Number(el.placeLatInput.value),
+                    longitude: Number(el.placeLngInput.value),
+                    radiusMeters: Number(el.placeRadiusInput.value) || 100,
+                    colorHex: el.placeColorInput.value || '#A855F7'
+                };
+
+                try {
+                    await apiRequest(`/api/admin/circles/${circle.id}/safe-zones`, {
+                        method: 'POST',
+                        body: JSON.stringify(placeData)
+                    });
+                    el.customPlaceModal.classList.add('hidden');
+                    showToast(`Saved place "${placeData.name}"`, 'success');
+                    await loadCircles(false);
+                    const updated = getCurrentCircle();
+                    if (updated && !el.circleConfigModal.classList.contains('hidden')) {
+                        renderCustomPlacesList(updated.safeZones || [], updated.id);
+                    }
+                } catch (err) {
+                    showToast(`Failed to save place: ${err.message}`, 'error');
+                }
+            });
+        }
 
         // Member Control Form
         el.memberControlForm.addEventListener('submit', async (e) => {
