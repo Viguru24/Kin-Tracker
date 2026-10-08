@@ -719,13 +719,14 @@ class CloudSyncManager(
                     cleanKey.contains("eloise") -> "👧"
                     else -> ""
                 }
-                val resolvedEmoji = when {
+                val rawEmoji = when {
                     cloudM.avatarEmoji.isNotBlank() -> cloudM.avatarEmoji
                     matchingLocal?.avatarEmoji?.isNotBlank() == true -> matchingLocal.avatarEmoji
                     matchingByName?.avatarEmoji?.isNotBlank() == true -> matchingByName.avatarEmoji
                     fallbackEmoji.isNotBlank() -> fallbackEmoji
                     else -> ""
                 }
+                val resolvedEmoji = com.example.data.IdentityUtils.sanitizeAvatarEmoji(rawEmoji, resolvedName, cloudM.id)
 
                 val mappedLocal = FamilyMember(
                     id = cloudM.id, name = resolvedName, avatarColorHex = cloudM.avatarColorHex,

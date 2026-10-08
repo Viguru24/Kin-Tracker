@@ -594,6 +594,20 @@
         return adjustedCoordinates;
     }
 
+    function getSafeEmoji(m) {
+        if (!m) return '📱';
+        const raw = (m.avatarEmoji || '').trim();
+        if (raw && !raw.includes('ð') && !raw.includes('Ÿ') && !raw.includes('\ufffd') && !/^[ðŸ‘¨‘§¨\s\?]+$/.test(raw)) {
+            return raw;
+        }
+        const clean = ((m.name || '') + ' ' + (m.id || '')).toLowerCase();
+        if (clean.includes('eloise') || clean.includes('eloisa')) return '👧';
+        if (clean.includes('annette') || clean.includes('mama') || clean.includes('wife')) return '👩';
+        if (clean.includes('isabel')) return '🐼';
+        if (clean.includes('louis') || clean.includes('dad') || clean.includes('father')) return '📱';
+        return '📱';
+    }
+
     function updateMapMarkers(members, circle) {
         if (!state.map) return;
 
@@ -617,7 +631,7 @@
 
             const isAlarm = m.statusText === '🚨 ALARM';
             const color = m.avatarColorHex || '#00ff88';
-            const emoji = m.avatarEmoji || '📱';
+            const emoji = getSafeEmoji(m);
 
             const markerHtml = `
                 <div class="radar-pin-container">
@@ -684,7 +698,7 @@
             card.innerHTML = `
                 <div class="member-main">
                     <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}">
-                        ${m.avatarEmoji || '📱'}
+                        ${getSafeEmoji(m)}
                     </div>
                     <div class="member-name-group">
                         <div class="member-name">${m.name}</div>
@@ -753,7 +767,7 @@
     function openMemberControlModal(member) {
         el.ctrlMemberId.value = member.id;
         el.ctrlMemberName.value = member.name || '';
-        el.ctrlMemberEmoji.value = member.avatarEmoji || '📱';
+        el.ctrlMemberEmoji.value = getSafeEmoji(member);
         el.ctrlMemberColor.value = member.avatarColorHex || '#00ff88';
         el.ctrlMemberLat.value = member.y || '';
         el.ctrlMemberLng.value = member.x || '';

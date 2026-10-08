@@ -79,6 +79,27 @@ function getCanonicalPersonKey(name, id) {
     return clean.replace(/\s+/g, '') || id;
 }
 
+function cleanAvatarEmoji(emoji, name, id) {
+    const personKey = getCanonicalPersonKey(name, id);
+    if (typeof emoji === 'string') {
+        const clean = emoji.trim();
+        if (clean.includes('ð') || clean.includes('Ÿ') || clean.includes('\ufffd') || /^[ðŸ‘¨‘§¨\s\?]+$/.test(clean)) {
+            if (personKey === 'canonical_eloise') return '👧';
+            if (personKey === 'canonical_mama') return '👩';
+            if (personKey === 'canonical_isabel') return '🐼';
+            if (personKey === 'canonical_dad') return '📱';
+        }
+        if (clean.length > 0 && !clean.includes('ð')) {
+            return clean;
+        }
+    }
+    if (personKey === 'canonical_eloise') return '👧';
+    if (personKey === 'canonical_mama') return '👩';
+    if (personKey === 'canonical_isabel') return '🐼';
+    if (personKey === 'canonical_dad') return '📱';
+    return emoji || '📱';
+}
+
 const dbOperations = {
     // CIRCLES
     getCircleById(circleId) {
@@ -171,6 +192,8 @@ const dbOperations = {
     },
 
     saveMember(member) {
+        if (!member) return null;
+        member.avatarEmoji = cleanAvatarEmoji(member.avatarEmoji, member.name, member.id);
         const existing = db.members[member.id];
         const isAlarmOrControlUpdate = member.statusText === '🚨 ALARM' || (existing && existing.statusText === '🚨 ALARM') || (existing && member.isLocationPaused !== existing.isLocationPaused);
         // If an existing record exists with a newer lastActive timestamp, ignore stale snapshot (unless alarm/control status change)

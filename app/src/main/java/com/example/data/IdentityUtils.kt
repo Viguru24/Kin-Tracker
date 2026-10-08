@@ -35,4 +35,21 @@ object IdentityUtils {
         if (uuidA.length >= 4 && uuidA == uuidB) return true
         return false
     }
+
+    /**
+     * Sanitizes and heals any character encoding glitches / mojibake in emoji strings.
+     */
+    fun sanitizeAvatarEmoji(emoji: String, name: String, id: String = ""): String {
+        val clean = emoji.trim()
+        if (clean.isBlank() || clean.contains("ð") || clean.contains("Ÿ") || clean.contains("\ufffd") || clean.contains("?")) {
+            return when (getCanonicalPersonKey(name, id)) {
+                "canonical_eloise" -> "👧"
+                "canonical_mama" -> "👩"
+                "canonical_isabel" -> "🐼"
+                "canonical_dad" -> "📱"
+                else -> if (clean.isNotBlank() && !clean.contains("ð") && !clean.contains("?") && !clean.contains("\ufffd")) clean else "📱"
+            }
+        }
+        return clean
+    }
 }
