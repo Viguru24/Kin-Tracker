@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.*
 import com.example.ui.FamilyViewModel
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -164,8 +163,10 @@ class CanonicalDeduplicationTest {
         val viewModel = FamilyViewModel(application)
         viewModel.isSimulationModeEnabled.value = false
         ShadowLooper.idleMainLooper()
+        kotlinx.coroutines.delay(200)
+        ShadowLooper.idleMainLooper()
 
-        val emittedMembers = viewModel.familyMembers.first { it.isNotEmpty() }
+        val emittedMembers = viewModel.familyMembers.value
         
         // Assert total member count is strictly 3 (Me/Dad, Eloise, Mama) - NO duplicates!
         assertEquals(3, emittedMembers.size)
