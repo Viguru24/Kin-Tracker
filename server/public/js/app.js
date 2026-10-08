@@ -198,11 +198,16 @@
             attributionControl: false
         }).setView([51.329480, -0.119095], 14);
 
-        // High-contrast dark radar tile layer via unmetered OpenStreetMap
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            subdomains: ['a', 'b', 'c'],
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
+        // Native Dark Radar Map via Esri World Dark Gray Base (No API key, 100% reliable)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 16,
+            attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+        }).addTo(state.map);
+
+        // Dark Gray Reference Overlay (Labels, Streets, Borders)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 16,
+            opacity: 0.9
         }).addTo(state.map);
 
         // Map Click Calibration Handler
