@@ -110,7 +110,38 @@ const dbOperations = {
     getCircleMembers(circleId) {
         const circle = db.circles[circleId];
         if (!circle || !circle.memberIds) return [];
-        return circle.memberIds.map(id => db.members[id]).filter(Boolean);
+
+        const rawMembers = circle.memberIds.map(id => db.members[id]).filter(Boolean);
+        const membersByPerson = {};
+
+        rawMembers.forEach(m => {
+            const cleanName = (m.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
+            const parts = (m.id || '').split('_');
+            const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
+
+            // Canonical person grouping key
+            const isKnownRole = ['dad', 'louis', 'eloise', 'isabel', 'annette', 'mom', 'mama', 'wife', 'you'].includes(cleanName);
+            const personKey = isKnownRole ? cleanName : (uuid ? `uuid_${uuid}` : (cleanName || m.id));
+
+            if (!membersByPerson[personKey] || Number(m.lastActive || 0) > Number(membersByPerson[personKey].lastActive || 0)) {
+                membersByPerson[personKey] = m;
+            }
+        });
+
+        const deduplicated = Object.values(membersByPerson);
+        const validIds = new Set(deduplicated.map(m => m.id));
+
+        // Automatically clean up obsolete duplicate IDs from server database
+        if (circle.memberIds.length !== deduplicated.length) {
+            const obsoleteIds = circle.memberIds.filter(id => !validIds.has(id));
+            obsoleteIds.forEach(oldId => {
+                delete db.members[oldId];
+            });
+            circle.memberIds = deduplicated.map(m => m.id);
+            saveDb();
+        }
+
+        return deduplicated;
     },
 
     getMember(memberId) {
@@ -125,13 +156,36 @@ const dbOperations = {
             return existing;
         }
         db.members[member.id] = member;
-        // Also ensure member is in circle's member list
+        // Also ensure member is in circle's member list and deduplicate against older records for the same person
         if (member.circleId && db.circles[member.circleId]) {
-            if (!db.circles[member.circleId].memberIds) {
-                db.circles[member.circleId].memberIds = [];
+            const circle = db.circles[member.circleId];
+            if (!circle.memberIds) {
+                circle.memberIds = [];
             }
-            if (!db.circles[member.circleId].memberIds.includes(member.id)) {
-                db.circles[member.circleId].memberIds.push(member.id);
+            const cleanName = (member.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
+            const parts = (member.id || '').split('_');
+            const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
+            const isKnownRole = ['dad', 'louis', 'eloise', 'isabel', 'annette', 'mom', 'mama', 'wife', 'you'].includes(cleanName);
+
+            // Remove any other older member record in this circle representing the same person or UUID
+            circle.memberIds = circle.memberIds.filter(id => {
+                if (id === member.id) return true;
+                const other = db.members[id];
+                if (!other) return false;
+                const otherClean = (other.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
+                const otherParts = (other.id || '').split('_');
+                const otherUuid = otherParts.length >= 3 && otherParts[otherParts.length - 1].length >= 4 ? otherParts[otherParts.length - 1] : '';
+                
+                const matchesPerson = (isKnownRole && otherClean === cleanName) || (uuid && otherUuid && uuid === otherUuid);
+                if (matchesPerson) {
+                    delete db.members[id];
+                    return false;
+                }
+                return true;
+            });
+
+            if (!circle.memberIds.includes(member.id)) {
+                circle.memberIds.push(member.id);
             }
         }
         saveDb();

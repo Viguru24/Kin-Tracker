@@ -537,11 +537,13 @@ class CloudSyncManager(
                     }
 
                 val matchingByName = existingLocal.firstOrNull {
-                    it.id != "me" && it.id != cloudM.id && !it.id.startsWith("device_") &&
+                    it.id != "me" && it.id != cloudM.id &&
                     (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
                      (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
                      (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")) ||
-                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")))
+                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")) ||
+                     (cleanCloudName.contains("dad") && it.name.lowercase().contains("dad")) ||
+                     (cleanCloudName.contains("louis") && it.name.lowercase().contains("louis")))
                 }
 
                 val contactsPrefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
@@ -797,6 +799,29 @@ class CloudSyncManager(
                 if (isExplicitlyDeleted || (isNotInCloud && hasReplacementInCloud) || (isNotInCloud && (localM.id.contains("abc123") || localM.id.startsWith("mock_")))) {
                     repository.deleteMember(localM)
                     repository.clearBreadcrumbsForMember(localM.id)
+                }
+            }
+
+            // Strict local deduplication: if multiple local records exist with the same clean name or known role, keep ONLY the newest one
+            val allCurrentLocal = repository.getFamilyMembersOnce()
+            val seenRoles = mutableSetOf<String>()
+            for (m in allCurrentLocal.sortedByDescending { it.lastActive }) {
+                if (m.id == "me") continue
+                val cleanRole = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val canonicalKey = when {
+                    cleanRole.contains("dad") || cleanRole.contains("louis") -> "dad"
+                    cleanRole.contains("eloise") -> "eloise"
+                    cleanRole.contains("isabel") -> "isabel"
+                    cleanRole.contains("annette") -> "annette"
+                    else -> cleanRole
+                }
+                if (canonicalKey.isNotBlank()) {
+                    if (seenRoles.contains(canonicalKey)) {
+                        repository.deleteMember(m)
+                        repository.clearBreadcrumbsForMember(m.id)
+                    } else {
+                        seenRoles.add(canonicalKey)
+                    }
                 }
             }
 
