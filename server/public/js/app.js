@@ -195,18 +195,23 @@
 
         state.map = L.map('radarMap', {
             zoomControl: true,
-            attributionControl: false
+            attributionControl: false,
+            maxZoom: 21,
+            minZoom: 2
         }).setView([51.329480, -0.119095], 14);
 
         // Native Dark Radar Map via Esri World Dark Gray Base (No API key, 100% reliable)
+        // Set maxNativeZoom: 16 and maxZoom: 21 so Leaflet seamlessly overzooms tiles up to level 21
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 16,
+            maxNativeZoom: 16,
+            maxZoom: 21,
             attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
         }).addTo(state.map);
 
         // Dark Gray Reference Overlay (Labels, Streets, Borders)
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 16,
+            maxNativeZoom: 16,
+            maxZoom: 21,
             opacity: 0.9
         }).addTo(state.map);
 
@@ -321,7 +326,7 @@
 
         // Render Map Geofences & Members
         updateMapGeofences(circle);
-        updateMapMarkers(state.members);
+        updateMapMarkers(state.members, circle);
 
         // Render Roster List
         renderMembersList(state.members);
@@ -450,9 +455,150 @@
         }
     }
 
-    function updateMapMarkers(members) {
+    function distanceMeters(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    function computeClusterLayout(members, circle) {
+        const homeLat = circle ? Number(circle.homeLat || 0) : 0;
+        const homeLng = circle ? Number(circle.homeLng || 0) : 0;
+        const homeRadius = circle ? Number(circle.homeRadiusMeters || 140) : 140;
+        const workLat = circle ? Number(circle.workLat || 0) : 0;
+        const workLng = circle ? Number(circle.workLng || 0) : 0;
+        const workRadius = circle ? Number(circle.workRadiusMeters || 75) : 75;
+        const isWorkCalibrated = Boolean(circle && circle.isWorkCalibrated);
+
+        const adjustedCoordinates = {};
+        const activeMembers = (members || []).filter(m => Number(m.x) !== 0 && Number(m.y) !== 0);
+
+        const homeClusterMembers = [];
+        const workClusterMembers = [];
+        const unassignedMembers = [];
+
+        function isMemberMoving(m) {
+            if (m.isComingHome) return true;
+            if (m.speedMph && Number(m.speedMph) >= 1.5) return true;
+            const s = (m.statusText || '').toLowerCase();
+            return s.includes('walk') || s.includes('moving') || s.includes('driving') ||
+                   s.includes('bike') || s.includes('transit') || s.includes('commute');
+        }
+
+        activeMembers.forEach(m => {
+            const lat = Number(m.y);
+            const lng = Number(m.x);
+            const atHomeStatus = (m.statusText || '').toLowerCase().includes('home');
+            const atWorkStatus = (m.statusText || '').toLowerCase().includes('work');
+
+            const distToHome = (homeLat && homeLng) ? distanceMeters(lat, lng, homeLat, homeLng) : Infinity;
+            const isHome = (homeLat && homeLng) && (distToHome <= homeRadius || atHomeStatus);
+
+            const distToWork = (isWorkCalibrated && workLat && workLng) ? distanceMeters(lat, lng, workLat, workLng) : Infinity;
+            const isWork = (isWorkCalibrated && workLat && workLng) && (distToWork <= workRadius || atWorkStatus);
+
+            if (isMemberMoving(m)) {
+                adjustedCoordinates[m.id] = [lat, lng];
+                return;
+            }
+
+            if (isHome) {
+                homeClusterMembers.push(m);
+            } else if (isWork) {
+                workClusterMembers.push(m);
+            } else {
+                unassignedMembers.push(m);
+            }
+        });
+
+        function layoutCluster(clusterList, anchorLat, anchorLng, isHomeOrWork = false) {
+            if (clusterList.length === 0) return;
+            if (clusterList.length === 1) {
+                if (isHomeOrWork) {
+                    const spreadRadiusMeters = 14.0;
+                    const angle = -Math.PI / 2.0; // Place above center pin so both Home pin and avatar are visible
+                    const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
+                    const deltaLat = (spreadRadiusMeters * Math.sin(angle)) / 111139.0;
+                    const deltaLng = (spreadRadiusMeters * Math.cos(angle)) / (111139.0 * cosLat);
+                    adjustedCoordinates[clusterList[0].id] = [anchorLat + deltaLat, anchorLng + deltaLng];
+                } else {
+                    adjustedCoordinates[clusterList[0].id] = [Number(clusterList[0].y), Number(clusterList[0].x)];
+                }
+                return;
+            }
+
+            const count = clusterList.length;
+            const spreadRadiusMeters = count === 2 ? 18.0 : count === 3 ? 22.0 : count === 4 ? 26.0 : Math.max(28.0, count * 7.5);
+            const startAngle = count === 2 ? -Math.PI / 2.0 : count === 4 ? -Math.PI / 4.0 : -Math.PI / 2.0;
+            const angleStep = (2.0 * Math.PI) / count;
+            const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
+
+            clusterList.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+
+            for (let idx = 0; idx < count; idx++) {
+                const m = clusterList[idx];
+                const angle = startAngle + (idx * angleStep);
+                const deltaLat = (spreadRadiusMeters * Math.sin(angle)) / 111139.0;
+                const deltaLng = (spreadRadiusMeters * Math.cos(angle)) / (111139.0 * cosLat);
+                adjustedCoordinates[m.id] = [anchorLat + deltaLat, anchorLng + deltaLng];
+            }
+        }
+
+        // Layout Home Cluster
+        if (homeLat && homeLng && homeClusterMembers.length > 0) {
+            layoutCluster(homeClusterMembers, homeLat, homeLng, true);
+        } else {
+            homeClusterMembers.forEach(m => { adjustedCoordinates[m.id] = [Number(m.y), Number(m.x)]; });
+        }
+
+        // Layout Work Cluster
+        if (isWorkCalibrated && workLat && workLng && workClusterMembers.length > 0) {
+            layoutCluster(workClusterMembers, workLat, workLng, true);
+        } else {
+            workClusterMembers.forEach(m => { adjustedCoordinates[m.id] = [Number(m.y), Number(m.x)]; });
+        }
+
+        // Ad-hoc clusters for unassigned members within 40m
+        const visited = new Set();
+        for (let i = 0; i < unassignedMembers.length; i++) {
+            const m1 = unassignedMembers[i];
+            if (visited.has(m1.id)) continue;
+
+            const cluster = [m1];
+            visited.add(m1.id);
+
+            for (let j = i + 1; j < unassignedMembers.length; j++) {
+                const m2 = unassignedMembers[j];
+                if (visited.has(m2.id)) continue;
+                const distM = distanceMeters(Number(m1.y), Number(m1.x), Number(m2.y), Number(m2.x));
+                if (distM < 40.0) {
+                    cluster.push(m2);
+                    visited.add(m2.id);
+                }
+            }
+
+            if (cluster.length > 1) {
+                let sumLat = 0, sumLng = 0;
+                cluster.forEach(m => { sumLat += Number(m.y); sumLng += Number(m.x); });
+                layoutCluster(cluster, sumLat / cluster.length, sumLng / cluster.length, false);
+            } else {
+                adjustedCoordinates[m1.id] = [Number(m1.y), Number(m1.x)];
+            }
+        }
+
+        return adjustedCoordinates;
+    }
+
+    function updateMapMarkers(members, circle) {
         if (!state.map) return;
 
+        const currentCircle = circle || getCurrentCircle();
+        const coordsMap = computeClusterLayout(members, currentCircle);
         const currentMemberIds = new Set(members.map(m => m.id));
 
         // Remove old markers
@@ -465,9 +611,9 @@
 
         // Add or update markers
         members.forEach(m => {
-            const lat = Number(m.y);
-            const lng = Number(m.x);
-            if (!lat || !lng) return;
+            const pos = coordsMap[m.id];
+            if (!pos) return;
+            const [lat, lng] = pos;
 
             const isAlarm = m.statusText === '🚨 ALARM';
             const color = m.avatarColorHex || '#00ff88';
@@ -512,7 +658,7 @@
             if (m.y && m.x) bounds.push([m.y, m.x]);
         });
         if (bounds.length > 0 && state.map) {
-            state.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+            state.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 19 });
         }
     }
 
@@ -829,13 +975,13 @@
         el.focusHomeBtn.addEventListener('click', () => {
             const circle = getCurrentCircle();
             if (circle && circle.homeLat && circle.homeLng && state.map) {
-                state.map.flyTo([circle.homeLat, circle.homeLng], 16);
+                state.map.flyTo([circle.homeLat, circle.homeLng], 18);
             }
         });
         el.focusWorkBtn.addEventListener('click', () => {
             const circle = getCurrentCircle();
             if (circle && circle.workLat && circle.workLng && state.map) {
-                state.map.flyTo([circle.workLat, circle.workLng], 16);
+                state.map.flyTo([circle.workLat, circle.workLng], 18);
             }
         });
 

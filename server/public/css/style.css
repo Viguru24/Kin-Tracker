@@ -1144,6 +1144,12 @@ body {
 .custom-radar-pin {
     background: transparent;
     border: none;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), z-index 0.15s ease;
+    cursor: pointer;
+}
+
+.custom-radar-pin:hover {
+    z-index: 9999 !important;
 }
 
 .radar-pin-container {
@@ -1151,6 +1157,20 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
+    pointer-events: auto;
+}
+
+.custom-radar-pin:hover .radar-pin-avatar {
+    transform: scale(1.15);
+    box-shadow: 0 0 20px var(--primary-glow);
+}
+
+.custom-radar-pin:hover .radar-pin-label {
+    background: rgba(15, 23, 42, 0.98);
+    border-color: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+    transform: translateY(2px);
 }
 
 .radar-pin-avatar {
@@ -1164,7 +1184,7 @@ body {
     font-size: 18px;
     border: 2px solid var(--emerald);
     box-shadow: 0 0 12px rgba(0, 255, 136, 0.5);
-    transition: transform 0.2s;
+    transition: all 0.2s ease;
 }
 
 .radar-pin-avatar.alarm {
@@ -1188,6 +1208,7 @@ body {
     color: var(--text-main);
     white-space: nowrap;
     margin-top: 2px;
+    transition: all 0.2s ease;
 }
 
 /* Leaflet Dark Tile Overrides */
