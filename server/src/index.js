@@ -50,86 +50,55 @@ app.use(express.static(path.join(__dirname, '../public')));
         db.mapInviteAlias('4666', circle.id);
         console.log('[Init] Seeded default Family Circle with Invite Code "KT-4666" and PIN "4666"');
     }
-
-    // If circle has no members yet, seed default family roster
-    const currentMembers = db.getCircleMembers(circle.id);
-    if (currentMembers.length === 0) {
-        const homeLat = circle.homeLat || 51.329480;
-        const homeLng = circle.homeLng || -0.119095;
-        const defaultFamily = [
-            {
-                id: 'device_louis_dad',
-                circleId: circle.id,
-                name: 'Louis (Dad)',
-                avatarEmoji: '👑',
-                avatarColorHex: '#00FF88',
-                x: homeLng + 0.0003,
-                y: homeLat + 0.0002,
-                batteryPercentage: 94,
-                isCharging: false,
-                speedMph: 0.0,
-                statusText: 'At Home',
-                isComingHome: false,
-                etaMinutes: 0,
-                lastActive: Date.now(),
-                isLocationPaused: false
-            },
-            {
-                id: 'device_annette_mama',
-                circleId: circle.id,
-                name: 'Annette (Mama)',
-                avatarEmoji: '🌸',
-                avatarColorHex: '#FF77AA',
-                x: circle.workLng || (homeLng + 0.021),
-                y: circle.workLat || (homeLat + 0.046),
-                batteryPercentage: 82,
-                isCharging: true,
-                speedMph: 0.0,
-                statusText: 'At Work',
-                isComingHome: false,
-                etaMinutes: 0,
-                lastActive: Date.now(),
-                isLocationPaused: false
-            },
-            {
-                id: 'device_eloise',
-                circleId: circle.id,
-                name: 'Eloise',
-                avatarEmoji: '🎀',
-                avatarColorHex: '#00F0FF',
-                x: homeLng - 0.012,
-                y: homeLat + 0.015,
-                batteryPercentage: 68,
-                isCharging: false,
-                speedMph: 16.5,
-                statusText: 'Moving 16.5 mph',
-                isComingHome: true,
-                etaMinutes: 12,
-                lastActive: Date.now(),
-                isLocationPaused: false
-            },
-            {
-                id: 'device_isabel',
-                circleId: circle.id,
-                name: 'Isabel',
-                avatarEmoji: '⭐',
-                avatarColorHex: '#FFB800',
-                x: homeLng - 0.0004,
-                y: homeLat - 0.0003,
-                batteryPercentage: 89,
-                isCharging: false,
-                speedMph: 0.0,
-                statusText: 'At Home',
-                isComingHome: false,
-                etaMinutes: 0,
-                lastActive: Date.now(),
-                isLocationPaused: false
-            }
-        ];
-        defaultFamily.forEach(m => db.saveMember(m));
-        console.log('[Init] Seeded family members: Louis (Dad), Annette (Mama), Eloise, Isabel');
-    }
 })();
+
+const https = require('https');
+
+
+// Real-Time Production VPS Sync Bridge (Keeps local dashboard 100% in sync with real family phones)
+async function syncLiveProductionFamily() {
+    return new Promise((resolve) => {
+        https.get('https://api.cosmowhisper.com/sync/81e5632c_pin_group', (res) => {
+            let raw = '';
+            res.on('data', chunk => raw += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(raw);
+                    if (json && json.members) {
+                        const circle = db.getCircleById('circle_default_sovereign') || db.getCircleByInviteCode('4666');
+                        if (circle) {
+                            if (json.homeLat) circle.homeLat = json.homeLat;
+                            if (json.homeLng) circle.homeLng = json.homeLng;
+                            if (json.workLat) circle.workLat = json.workLat;
+                            if (json.workLng) circle.workLng = json.workLng;
+                            if (json.homeRadiusMeters) circle.homeRadiusMeters = json.homeRadiusMeters;
+                            if (json.workRadiusMeters) circle.workRadiusMeters = json.workRadiusMeters;
+                            circle.lastUpdated = json.lastUpdated || Date.now();
+                            db.saveCircle(circle);
+
+                            Object.values(json.members).forEach(m => {
+                                if (m && m.id) {
+                                    db.saveMember({
+                                        ...m,
+                                        circleId: circle.id
+                                    });
+                                }
+                            });
+                        }
+                    }
+                    resolve(true);
+                } catch (_) {
+                    resolve(false);
+                }
+            });
+        }).on('error', () => resolve(false));
+    });
+}
+
+// Initial live fetch and recurring 4s polling bridge
+syncLiveProductionFamily();
+setInterval(syncLiveProductionFamily, 4000);
+
 
 // Dashboard Route Shortcuts
 app.get(['/dashboard', '/admin'], (req, res) => {
