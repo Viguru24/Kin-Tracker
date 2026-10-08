@@ -56,7 +56,29 @@ function saveDb() {
 // Initial load
 loadDb();
 
-// Database Helper Methods
+function getCanonicalPersonKey(name, id) {
+    const clean = (name || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+    const cleanId = (id || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+    if (clean.includes('louis') || clean.includes('dad') || clean.includes('father') || cleanId.includes('louis') || cleanId.includes('dad')) {
+        return 'canonical_dad';
+    }
+    if (clean.includes('annette') || clean.includes('mama') || clean.includes('wife') || clean.includes('mother') || clean.includes('mom') || cleanId.includes('annette') || cleanId.includes('mama') || cleanId.includes('wife')) {
+        return 'canonical_mama';
+    }
+    if (clean.includes('eloise') || clean.includes('eloisa') || cleanId.includes('eloise') || cleanId.includes('eloisa')) {
+        return 'canonical_eloise';
+    }
+    if (clean.includes('isabel') || clean.includes('isabelle') || cleanId.includes('isabel') || cleanId.includes('isabelle')) {
+        return 'canonical_isabel';
+    }
+    const parts = (id || '').split('_');
+    const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
+    if (uuid) {
+        return `uuid_${uuid}`;
+    }
+    return clean.replace(/\s+/g, '') || id;
+}
+
 const dbOperations = {
     // CIRCLES
     getCircleById(circleId) {
@@ -79,6 +101,13 @@ const dbOperations = {
             }
         }
         return null;
+    },
+
+    mapInviteAlias(alias, circleId) {
+        if (!alias) return;
+        const normalized = alias.replace(/[\s\-_]/g, '').toUpperCase();
+        db.inviteCodes[normalized] = circleId;
+        saveDb();
     },
 
     saveCircle(circle) {
@@ -115,14 +144,7 @@ const dbOperations = {
         const membersByPerson = {};
 
         rawMembers.forEach(m => {
-            const cleanName = (m.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
-            const parts = (m.id || '').split('_');
-            const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
-
-            // Canonical person grouping key
-            const isKnownRole = ['dad', 'louis', 'eloise', 'isabel', 'annette', 'mom', 'mama', 'wife', 'you'].includes(cleanName);
-            const personKey = isKnownRole ? cleanName : (uuid ? `uuid_${uuid}` : (cleanName || m.id));
-
+            const personKey = getCanonicalPersonKey(m.name, m.id);
             if (!membersByPerson[personKey] || Number(m.lastActive || 0) > Number(membersByPerson[personKey].lastActive || 0)) {
                 membersByPerson[personKey] = m;
             }
@@ -162,22 +184,15 @@ const dbOperations = {
             if (!circle.memberIds) {
                 circle.memberIds = [];
             }
-            const cleanName = (member.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
-            const parts = (member.id || '').split('_');
-            const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
-            const isKnownRole = ['dad', 'louis', 'eloise', 'isabel', 'annette', 'mom', 'mama', 'wife', 'you'].includes(cleanName);
+            const personKey = getCanonicalPersonKey(member.name, member.id);
 
-            // Remove any other older member record in this circle representing the same person or UUID
+            // Remove any other older member record in this circle representing the same canonical person
             circle.memberIds = circle.memberIds.filter(id => {
                 if (id === member.id) return true;
                 const other = db.members[id];
                 if (!other) return false;
-                const otherClean = (other.name || '').toLowerCase().replace(/\s*\((you|wife|dad|mama|daughter|older daughter|younger daughter|sister|son|mom|mother|father|other device)\)/gi, '').trim();
-                const otherParts = (other.id || '').split('_');
-                const otherUuid = otherParts.length >= 3 && otherParts[otherParts.length - 1].length >= 4 ? otherParts[otherParts.length - 1] : '';
-                
-                const matchesPerson = (isKnownRole && otherClean === cleanName) || (uuid && otherUuid && uuid === otherUuid);
-                if (matchesPerson) {
+                const otherPersonKey = getCanonicalPersonKey(other.name, other.id);
+                if (otherPersonKey === personKey) {
                     delete db.members[id];
                     return false;
                 }
@@ -232,16 +247,90 @@ const dbOperations = {
         saveDb();
     },
 
+    getAllCircles() {
+        return Object.values(db.circles || {}).map(circle => ({
+            ...circle,
+            members: dbOperations.getCircleMembers(circle.id),
+            shoppingItems: dbOperations.getCircleShoppingItems(circle.id),
+            safeZones: dbOperations.getCircleSafeZones(circle.id)
+        }));
+    },
+
+    updateCircle(circleId, updates) {
+        const circle = db.circles[circleId];
+        if (!circle) return null;
+        Object.assign(circle, updates, { lastUpdated: Date.now() });
+        if (updates.inviteCode) {
+            const normalized = updates.inviteCode.replace(/[\s\-_]/g, '').toUpperCase();
+            db.inviteCodes[normalized] = circle.id;
+        }
+        saveDb();
+        return circle;
+    },
+
+    // EVENT LOGGING (In-memory circular buffer of recent VPS events)
+    events: [],
+    logEvent(type, message, details = {}) {
+        const event = {
+            id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            timestamp: Date.now(),
+            type, // 'LOCATION', 'ALARM', 'SYNC', 'AUDIO', 'ADMIN', 'JOIN'
+            message,
+            details
+        };
+        if (!this.events) this.events = [];
+        this.events.unshift(event);
+        if (this.events.length > 200) {
+            this.events.pop();
+        }
+        return event;
+    },
+
+    getRecentEvents(limit = 50) {
+        if (!this.events) this.events = [];
+        return this.events.slice(0, limit);
+    },
+
+    // DATABASE SNAPSHOT
+    exportDatabase() {
+        return JSON.parse(JSON.stringify(db));
+    },
+
+    importDatabase(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            throw new Error('Invalid database snapshot format');
+        }
+        db = {
+            circles: snapshot.circles || {},
+            inviteCodes: snapshot.inviteCodes || {},
+            members: snapshot.members || {},
+            shoppingItems: snapshot.shoppingItems || {},
+            safeZones: snapshot.safeZones || {}
+        };
+        saveDb();
+        return dbOperations.getStats();
+    },
+
     // RAW STATS
     getStats() {
+        let dbSizeBytes = 0;
+        try {
+            if (fs.existsSync(DB_FILE)) {
+                dbSizeBytes = fs.statSync(DB_FILE).size;
+            }
+        } catch (_) {}
+
         return {
-            circlesCount: Object.keys(db.circles).length,
-            membersCount: Object.keys(db.members).length,
-            shoppingItemsCount: Object.keys(db.shoppingItems).length,
-            safeZonesCount: Object.keys(db.safeZones).length,
-            dataDir: DATA_DIR
+            circlesCount: Object.keys(db.circles || {}).length,
+            membersCount: Object.keys(db.members || {}).length,
+            shoppingItemsCount: Object.keys(db.shoppingItems || {}).length,
+            safeZonesCount: Object.keys(db.safeZones || {}).length,
+            dbSizeBytes,
+            dataDir: DATA_DIR,
+            eventsCount: (this.events || []).length
         };
     }
 };
 
 module.exports = dbOperations;
+

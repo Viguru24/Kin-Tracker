@@ -19,3 +19,5 @@ debug.keystore
 node_modules/
 server/node_modules/
 server/package-lock.json
+server/data/
+

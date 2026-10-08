@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kin-Tracker Sovereign VPS Radar & Command Center</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22 width=%2232%22 height=%2232%22><text y=%2226%22 font-size=%2226%22>📡</text></svg>">
+</head>
+<body class="theme-dark">
+    <!-- BACKGROUND GRID & GLOWS -->
+    <div class="bg-mesh"></div>
+    <div class="radar-scan-line"></div>
+
+    <!-- AUTH LOGIN MODAL OVERLAY -->
+    <div id="authModal" class="modal-backdrop show">
+        <div class="glass-card login-card animate-fade-in">
+            <div class="brand-header text-center">
+                <div class="brand-icon-radar">
+                    <span class="pulse-ring"></span>
+                    <span class="icon-core">📡</span>
+                </div>
+                <h1 class="brand-title">KIN-TRACKER</h1>
+                <p class="brand-subtitle">Sovereign VPS Radar & Command Center</p>
+            </div>
+            
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <label for="adminKeyInput">Admin Access Passcode</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔐</span>
+                        <input type="password" id="adminKeyInput" placeholder="Enter Admin Passcode (Default: 4666)" autofocus autocomplete="current-password" required>
+                    </div>
+                </div>
+                <button type="submit" id="loginBtn" class="btn btn-primary btn-glow btn-block">
+                    <span>Unlock VPS Console</span>
+                    <span class="btn-arrow">→</span>
+                </button>
+                <div id="loginError" class="alert-box error hidden"></div>
+            </form>
+            <div class="login-footer text-center">
+                <span class="badge-pill secure-badge">🔒 End-to-End Sovereign Telemetry</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP DASHBOARD WRAPPER -->
+    <div id="dashboardApp" class="app-container hidden">
+        <!-- TOP NAV / COMMAND BAR -->
+        <header class="app-header glass-nav">
+            <div class="nav-left">
+                <div class="brand-pill">
+                    <div class="radar-dot active"></div>
+                    <span class="brand-name">KIN-TRACKER</span>
+                    <span class="version-tag">VPS v2.0</span>
+                </div>
+
+                <div class="circle-picker-wrapper">
+                    <label for="circleSelect" class="picker-label">Circle:</label>
+                    <select id="circleSelect" class="custom-select">
+                        <option value="">Loading Circles...</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- EMERGENCY GLOBAL ALERT BANNER -->
+            <div id="globalSosBanner" class="sos-banner-compact hidden">
+                <span class="sos-pulse">🚨</span>
+                <span id="sosBannerText">ACTIVE EMERGENCY DISTRESS BEACON</span>
+                <button id="resolveAllSosBtn" class="btn btn-xs btn-danger">Silence Alarm</button>
+            </div>
+
+            <div class="nav-right">
+                <div class="server-telemetry">
+                    <div class="telemetry-item" title="Server Uptime">
+                        <span class="telemetry-label">UPTIME</span>
+                        <span id="serverUptime" class="telemetry-value mono">--:--</span>
+                    </div>
+                    <div class="telemetry-item" title="RAM Footprint">
+                        <span class="telemetry-label">RAM</span>
+                        <span id="serverRam" class="telemetry-value mono">-- MB</span>
+                    </div>
+                    <div class="status-indicator live" id="serverStatusBadge">
+                        <span class="status-dot"></span>
+                        <span class="status-text">ONLINE</span>
+                    </div>
+                </div>
+
+                <div class="nav-actions">
+                    <button id="refreshBtn" class="btn btn-icon" title="Refresh Live Data">🔄</button>
+                    <button id="backupModalBtn" class="btn btn-secondary btn-sm" title="Database Snapshot">💾 Backup</button>
+                    <button id="broadcastBtn" class="btn btn-accent btn-sm" title="Broadcast Message">📢 Broadcast</button>
+                    <button id="logoutBtn" class="btn btn-outline btn-sm" title="Lock Console">🔒 Logout</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- MAIN DASHBOARD CONTENT -->
+        <main class="dashboard-body">
+            <!-- TOP METRICS STATS BAR -->
+            <section class="stats-grid">
+                <!-- STAT 1: ACTIVE KIN -->
+                <div class="glass-card stat-card">
+                    <div class="stat-icon-wrapper cyan">👥</div>
+                    <div class="stat-content">
+                        <div class="stat-label">Active Kin Devices</div>
+                        <div class="stat-number-row">
+                            <span id="statActiveCount" class="stat-number">0</span>
+                            <span id="statTotalCount" class="stat-denom">/ 0 total</span>
+                        </div>
+                        <div class="stat-subtext" id="statKinStatus">All devices reachable</div>
+                    </div>
+                </div>
+
+                <!-- STAT 2: POWER TELEMETRY -->
+                <div class="glass-card stat-card">
+                    <div class="stat-icon-wrapper green">⚡</div>
+                    <div class="stat-content">
+                        <div class="stat-label">Power & Battery Health</div>
+                        <div class="stat-number-row">
+                            <span id="statAvgBattery" class="stat-number">--%</span>
+                            <span id="statChargingCount" class="stat-denom">⚡ 0 charging</span>
+                        </div>
+                        <div class="stat-subtext" id="statBatteryAlert">Normal power states</div>
+                    </div>
+                </div>
+
+                <!-- STAT 3: GEOFENCE RADAR -->
+                <div class="glass-card stat-card">
+                    <div class="stat-icon-wrapper amber">🛡️</div>
+                    <div class="stat-content">
+                        <div class="stat-label">Geofence Zones</div>
+                        <div class="stat-number-row">
+                            <span id="statHomeStatus" class="stat-tag success">Home 140m</span>
+                            <span id="statWorkStatus" class="stat-tag info">Work 75m</span>
+                        </div>
+                        <div class="stat-subtext" id="statGeofenceSubtext">Calibrated & active</div>
+                    </div>
+                </div>
+
+                <!-- STAT 4: CLOUD AUDIO RELAY -->
+                <div class="glass-card stat-card">
+                    <div class="stat-icon-wrapper purple">🎙️</div>
+                    <div class="stat-content">
+                        <div class="stat-label">Cloud Audio Relay</div>
+                        <div class="stat-number-row">
+                            <span id="statAudioStatus" class="stat-tag live-audio">IDLE</span>
+                            <span id="statListenersCount" class="stat-denom">0 listeners</span>
+                        </div>
+                        <div class="stat-subtext" id="statAudioDetails">P2P Sovereign Audio Ready</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SPLIT MAIN WORKSPACE: RADAR MAP + CONTROL ROSTER -->
+            <div class="workspace-grid">
+                <!-- LEFT / CENTER: INTERACTIVE LIVE RADAR MAP -->
+                <section class="glass-card map-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <span class="panel-icon">🗺️</span>
+                            <h2 class="panel-title">Live Sovereign GPS Radar</h2>
+                            <span id="mapCircleName" class="badge-pill">Family Circle</span>
+                        </div>
+                        <div class="map-controls">
+                            <div class="btn-group">
+                                <button id="fitMapBtn" class="btn btn-xs btn-outline" title="Fit all devices">🔍 Fit Kin</button>
+                                <button id="focusHomeBtn" class="btn btn-xs btn-outline" title="Center on Home">🏠 Home</button>
+                                <button id="focusWorkBtn" class="btn btn-xs btn-outline" title="Center on Work">🏢 Work</button>
+                            </div>
+                            <div class="map-mode-selector">
+                                <button id="mapClickCalibrateHomeBtn" class="btn btn-xs btn-emerald" title="Click on map to position Home">📍 Set Home</button>
+                                <button id="mapClickCalibrateWorkBtn" class="btn btn-xs btn-cyan" title="Click on map to position Work">📍 Set Work</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="map-container-wrapper">
+                        <div id="radarMap" class="radar-map"></div>
+                        <!-- MAP OVERLAY CONTROLS -->
+                        <div id="mapCalibrateBanner" class="map-calibrate-banner hidden">
+                            <span id="mapCalibrateText">Click anywhere on the map to set Home coordinates</span>
+                            <button id="cancelMapCalibrateBtn" class="btn btn-xs btn-dark">Cancel</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- RIGHT: FAMILY ROSTER & DEVICE CONTROLS -->
+                <section class="glass-card roster-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <span class="panel-icon">📱</span>
+                            <h2 class="panel-title">Family Devices & Controls</h2>
+                        </div>
+                        <div class="panel-actions">
+                            <button id="openCircleConfigBtn" class="btn btn-xs btn-primary" title="Configure Geofences & Circle">⚙️ Geofence Settings</button>
+                        </div>
+                    </div>
+
+                    <!-- INVITE CODE BANNER -->
+                    <div class="invite-strip">
+                        <div class="invite-info">
+                            <span class="invite-label">CIRCLE INVITE CODE:</span>
+                            <span id="inviteCodeDisplay" class="invite-code mono">KT-4666</span>
+                        </div>
+                        <div class="invite-actions">
+                            <button id="copyInviteBtn" class="btn btn-xs btn-outline" title="Copy Invite Code">📋 Copy</button>
+                            <button id="regenInviteBtn" class="btn btn-xs btn-outline" title="Regenerate Code">🔀 Regen</button>
+                        </div>
+                    </div>
+
+                    <!-- DEVICE CARDS LIST -->
+                    <div id="membersList" class="members-roster-list">
+                        <div class="empty-state">Loading family devices...</div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- LOWER DUAL SECTION: LIVE AUDIO RELAY + REALTIME ACTIVITY FEED -->
+            <div class="lower-grid">
+                <!-- AUDIO RELAY MONITOR -->
+                <section class="glass-card audio-feed-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <span class="panel-icon">🎙️</span>
+                            <h3 class="panel-title">Live Audio Dispatch & Relay</h3>
+                        </div>
+                        <span id="audioBroadcastStatus" class="badge-pill">STANDBY</span>
+                    </div>
+                    <div class="audio-panel-body">
+                        <div class="audio-status-card">
+                            <div class="audio-wave-visualizer" id="audioWave">
+                                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                            </div>
+                            <div class="audio-details">
+                                <div id="audioBroadcasterName" class="audio-broadcaster">No active SOS voice stream</div>
+                                <div id="audioRoomMeta" class="audio-meta">Channels monitored: /audio WebSocket</div>
+                            </div>
+                        </div>
+                        <div class="audio-actions">
+                            <button id="startListenAudioBtn" class="btn btn-sm btn-purple" disabled>🎧 Listen Live in Browser</button>
+                            <button id="stopListenAudioBtn" class="btn btn-sm btn-dark hidden">⏹️ Stop Listening</button>
+                            <span id="browserAudioStatus" class="mono text-xs text-dim">Player idle</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- REAL-TIME EVENT STREAM -->
+                <section class="glass-card event-stream-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <span class="panel-icon">⚡</span>
+                            <h3 class="panel-title">Real-Time VPS Event Stream</h3>
+                        </div>
+                        <button id="clearLogsBtn" class="btn btn-xs btn-outline">Clear View</button>
+                    </div>
+                    <div id="eventStreamContainer" class="event-stream-container">
+                        <!-- Events populated dynamically -->
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- MODAL: GEOFENCE & CIRCLE CONFIG -->
+    <div id="circleConfigModal" class="modal-backdrop hidden">
+        <div class="glass-card config-modal animate-fade-in">
+            <div class="modal-header">
+                <h3>⚙️ Circle & Geofence Calibration</h3>
+                <button class="modal-close" data-close="circleConfigModal">✕</button>
+            </div>
+            <form id="circleConfigForm">
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Circle Name</label>
+                        <input type="text" id="cfgCircleName" class="form-control" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Invite Code</label>
+                        <input type="text" id="cfgInviteCode" class="form-control mono" readonly>
+                    </div>
+                </div>
+
+                <!-- HOME GEOFENCE -->
+                <div class="config-section">
+                    <div class="section-title text-emerald">🏠 Home Safe Zone</div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Latitude</label>
+                            <input type="number" step="any" id="cfgHomeLat" class="form-control mono" required>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Longitude</label>
+                            <input type="number" step="any" id="cfgHomeLng" class="form-control mono" required>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Radius (Meters)</label>
+                            <input type="number" id="cfgHomeRadius" class="form-control mono" min="20" max="1000" value="140" required>
+                        </div>
+                    </div>
+                    <div class="form-row-actions">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="cfgHomeCalibrated"> Mark Home as Calibrated
+                        </label>
+                        <button type="button" id="cfgSetHomeCurrentGPS" class="btn btn-xs btn-outline">📍 Use My Browser GPS</button>
+                    </div>
+                </div>
+
+                <!-- WORK GEOFENCE -->
+                <div class="config-section">
+                    <div class="section-title text-cyan">🏢 Work Safe Zone</div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label>Latitude</label>
+                            <input type="number" step="any" id="cfgWorkLat" class="form-control mono">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Longitude</label>
+                            <input type="number" step="any" id="cfgWorkLng" class="form-control mono">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label>Radius (Meters)</label>
+                            <input type="number" id="cfgWorkRadius" class="form-control mono" min="20" max="1000" value="75">
+                        </div>
+                    </div>
+                    <div class="form-row-actions">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="cfgWorkCalibrated"> Mark Work as Calibrated
+                        </label>
+                        <button type="button" id="cfgSetWorkCurrentGPS" class="btn btn-xs btn-outline">📍 Use My Browser GPS</button>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="circleConfigModal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-glow">Save Calibration</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: MEMBER CONTROL & TELEPORT -->
+    <div id="memberControlModal" class="modal-backdrop hidden">
+        <div class="glass-card config-modal animate-fade-in">
+            <div class="modal-header">
+                <h3 id="memberModalTitle">📱 Device Control & Telemetry</h3>
+                <button class="modal-close" data-close="memberControlModal">✕</button>
+            </div>
+            <form id="memberControlForm">
+                <input type="hidden" id="ctrlMemberId">
+                <div class="form-row">
+                    <div class="form-group flex-2">
+                        <label>Display Name</label>
+                        <input type="text" id="ctrlMemberName" class="form-control" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Avatar Emoji</label>
+                        <input type="text" id="ctrlMemberEmoji" class="form-control text-center" maxlength="4">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Avatar Color</label>
+                        <input type="color" id="ctrlMemberColor" class="form-control color-picker">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Latitude</label>
+                        <input type="number" step="any" id="ctrlMemberLat" class="form-control mono" required>
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Longitude</label>
+                        <input type="number" step="any" id="ctrlMemberLng" class="form-control mono" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label>Battery Level (%)</label>
+                        <input type="number" id="ctrlMemberBattery" class="form-control mono" min="0" max="100">
+                    </div>
+                    <div class="form-group flex-1">
+                        <label>Speed (mph)</label>
+                        <input type="number" step="0.1" id="ctrlMemberSpeed" class="form-control mono" min="0">
+                    </div>
+                    <div class="form-group flex-2">
+                        <label>Status Text</label>
+                        <input type="text" id="ctrlMemberStatus" class="form-control" placeholder="e.g. Active, At Home">
+                    </div>
+                </div>
+
+                <div class="form-row-actions">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="ctrlMemberCharging"> ⚡ Is Charging
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="ctrlMemberPaused"> ⏸️ Pause GPS Tracking
+                    </label>
+                </div>
+
+                <div class="quick-actions-bar">
+                    <button type="button" id="ctrlTriggerAlarmBtn" class="btn btn-sm btn-danger">🚨 Toggle SOS Alarm</button>
+                    <button type="button" id="ctrlKickMemberBtn" class="btn btn-sm btn-outline-danger">🗑️ Remove from Circle</button>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="memberControlModal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-glow">Update Device</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: BROADCAST ALERT -->
+    <div id="broadcastModal" class="modal-backdrop hidden">
+        <div class="glass-card config-modal animate-fade-in">
+            <div class="modal-header">
+                <h3>📢 Broadcast Message to Kin</h3>
+                <button class="modal-close" data-close="broadcastModal">✕</button>
+            </div>
+            <form id="broadcastForm">
+                <div class="form-group">
+                    <label>Broadcast Message / Notification</label>
+                    <textarea id="broadcastMessageInput" class="form-control" rows="3" placeholder="e.g. Family meeting at 6 PM! Or Emergency Alert..." required></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close="broadcastModal">Cancel</button>
+                    <button type="submit" class="btn btn-accent btn-glow">Send Broadcast</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: DATABASE BACKUP & RESTORE -->
+    <div id="backupModal" class="modal-backdrop hidden">
+        <div class="glass-card config-modal animate-fade-in">
+            <div class="modal-header">
+                <h3>💾 Sovereign Database Snapshot</h3>
+                <button class="modal-close" data-close="backupModal">✕</button>
+            </div>
+            <div class="backup-modal-body">
+                <div class="backup-card">
+                    <h4>📤 Export Snapshot</h4>
+                    <p class="text-dim text-sm">Download an instant JSON backup of all circles, members, geofences, and shopping lists.</p>
+                    <button id="downloadBackupBtn" class="btn btn-sm btn-primary">Download Backup JSON</button>
+                </div>
+
+                <div class="backup-card">
+                    <h4>📥 Restore Snapshot</h4>
+                    <p class="text-dim text-sm">Restore database state from a verified JSON backup file.</p>
+                    <input type="file" id="restoreFileInput" accept=".json" class="form-control file-input">
+                    <button id="executeRestoreBtn" class="btn btn-sm btn-danger mt-2" disabled>Execute Restore</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close="backupModal">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- SCRIPTS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

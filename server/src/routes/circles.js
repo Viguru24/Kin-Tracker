@@ -268,6 +268,12 @@ router.post('/:circleId/location', (req, res) => {
         circle.lastUpdated = Date.now();
         db.saveCircle(circle);
 
+        if (updatedMember.statusText === '🚨 ALARM') {
+            db.logEvent('ALARM', `🚨 SOS Distress Triggered by ${updatedMember.name}`, { circleId: circle.id, memberId, lat, lng });
+        } else {
+            db.logEvent('LOCATION', `GPS update: ${updatedMember.name} (${updatedMember.batteryPercentage}% batt, ${updatedMember.speedMph} mph)`, { circleId: circle.id, memberId });
+        }
+
         return res.json({
             success: true,
             member: updatedMember

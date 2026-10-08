@@ -343,50 +343,24 @@ class CloudSyncManager(
                 val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
                 val deletedMembersPrefs = application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
 
-                // 1. DEDUPLICATE BY UUID:
-                // Multiple devices cannot have the exact same hardware UUID suffix.
-                val membersByUuid = updatedMembers.values.groupBy { m ->
-                    if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
-                }.filterKeys { it.length >= 4 }
+                // 1. DEDUPLICATE BY CANONICAL IDENTITY & HARDWARE UUID:
+                val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myName, myDeviceUUID.value)
+                val membersByCanonical = updatedMembers.values.groupBy { com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
 
-                for ((uuidKey, list) in membersByUuid) {
+                for ((canonKey, list) in membersByCanonical) {
                     if (list.size > 1) {
-                        val isMyUuid = myDeviceUUID.value.length >= 4 && uuidKey == myDeviceUUID.value
-                        if (isMyUuid) {
+                        val isMyIdentity = canonKey == myCanonicalKey
+                        if (isMyIdentity) {
+                            // My active phone takes absolute precedence for my identity; evict all other duplicates!
                             for (stale in list) {
                                 if (stale.id != myCloudId) {
                                     updatedMembers.remove(stale.id)
                                 }
                             }
                         } else {
-                            val newest = list.maxByOrNull { it.lastActive }
-                            for (stale in list) {
-                                if (stale.id != newest?.id) {
-                                    updatedMembers.remove(stale.id)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 2. DEDUPLICATE BY NORMALIZED NAME:
-                // Refuse duplicates with the same clean name (e.g. multiple "Louis's S23" or an older duplicate "Dad")
-                val membersByName = updatedMembers.values.groupBy { m ->
-                    m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-                }.filterKeys { it.isNotBlank() }
-
-                for ((nameKey, list) in membersByName) {
-                    if (list.size > 1) {
-                        val isMyName = nameKey == myCleanNameNoRole || nameKey == cleanMyName
-                        if (isMyName) {
-                            // My active phone takes absolute precedence for my name; evict all other duplicates!
-                            for (stale in list) {
-                                if (stale.id != myCloudId) {
-                                    updatedMembers.remove(stale.id)
-                                }
-                            }
-                        } else {
-                            val newest = list.maxByOrNull { it.lastActive }
+                            val newest = list.maxWithOrNull(
+                                compareBy<CloudMember> { it.id.startsWith("device_") }.thenBy { it.lastActive }
+                            )
                             for (stale in list) {
                                 if (stale.id != newest?.id) {
                                     updatedMembers.remove(stale.id)
@@ -486,23 +460,19 @@ class CloudSyncManager(
             val cleanMyName = myName.lowercase().trim()
             val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
 
+            val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myName, myDeviceUUID.value)
+
             for (cloudM in incomingCloudMembers) {
                 // Do not ingest self device (already tracked locally with GPS as "me")
                 // AND REFUSE DUPLICATES: Never allow another duplicate of this phone to appear!
-                val cleanCloudName = cloudM.name.lowercase().trim()
-                val cleanKey = cleanCloudName
-                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "")
-                    .trim()
-
+                val cloudCanonKey = com.example.data.IdentityUtils.getCanonicalPersonKey(cloudM.name, cloudM.id)
                 val isSelfOrDuplicateOfMe = cloudM.id == myCloudId ||
                         (myDeviceUUID.value.length >= 4 && cloudM.id.endsWith("_" + myDeviceUUID.value)) ||
-                        cloudM.name.trim().equals(myName.trim(), ignoreCase = true) ||
-                        cleanCloudName == cleanMyName ||
-                        cleanKey == myCleanNameNoRole
+                        cloudCanonKey == myCanonicalKey
 
                 if (isSelfOrDuplicateOfMe) {
                     val staleLocalDups = existingLocal.filter {
-                        it.id != "me" && (it.id == cloudM.id || it.id.endsWith("_" + myDeviceUUID.value) || it.name.trim().equals(myName.trim(), ignoreCase = true))
+                        it.id != "me" && (it.id == cloudM.id || it.id.endsWith("_" + myDeviceUUID.value) || com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) == myCanonicalKey)
                     }
                     staleLocalDups.forEach {
                         repository.deleteMember(it)
@@ -520,6 +490,9 @@ class CloudSyncManager(
                 )
 
                 // Check if user explicitly deleted this member locally (never block THIS active device):
+                val cleanKey = cloudM.name.lowercase()
+                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
                 val isCurrentDevice = cloudM.id == myCloudId || (myDeviceUUID.value.isNotBlank() && cloudM.id.endsWith("_" + myDeviceUUID.value))
                 if (!isCurrentDevice) {
                     if (deletedMembersPrefs.getBoolean("deleted_${cloudM.id}", false) ||
@@ -537,13 +510,7 @@ class CloudSyncManager(
                     }
 
                 val matchingByName = existingLocal.firstOrNull {
-                    it.id != "me" && it.id != cloudM.id &&
-                    (it.name.trim().equals(cloudM.name.trim(), ignoreCase = true) ||
-                     (cleanCloudName.contains("isabel") && it.name.lowercase().contains("isabel")) ||
-                     (cleanCloudName.contains("annette") && it.name.lowercase().contains("annette")) ||
-                     (cleanCloudName.contains("eloise") && it.name.lowercase().contains("eloise")) ||
-                     (cleanCloudName.contains("dad") && it.name.lowercase().contains("dad")) ||
-                     (cleanCloudName.contains("louis") && it.name.lowercase().contains("louis")))
+                    it.id != "me" && it.id != cloudM.id && com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) == cloudCanonKey
                 }
 
                 val contactsPrefs = application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
@@ -806,9 +773,10 @@ class CloudSyncManager(
                 val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_${localM.id}", false) ||
                     deletedMembersPrefs.getBoolean("deleted_member_${localM.id}", false)
 
+                val localCanonKey = com.example.data.IdentityUtils.getCanonicalPersonKey(localM.name, localM.id)
                 val isNotInCloud = !validCloudIds.contains(localM.id)
                 val hasReplacementInCloud = (localUuid.length >= 4 && validCloudUuids.contains(localUuid)) ||
-                    newPayload.members.values.any { it.name.trim().equals(localM.name.trim(), ignoreCase = true) }
+                    newPayload.members.values.any { com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) == localCanonKey }
 
                 if (isExplicitlyDeleted || (isNotInCloud && hasReplacementInCloud) || (isNotInCloud && (localM.id.contains("abc123") || localM.id.startsWith("mock_")))) {
                     repository.deleteMember(localM)
@@ -1373,26 +1341,22 @@ class CloudSyncManager(
             val updatedMembers = payload.members.toMutableMap()
             val beforeCount = updatedMembers.size
             val myCloudId = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+            val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myDeviceName.value, myDeviceUUID.value)
 
-            val cleanMyName = myDeviceName.value.lowercase().trim()
-            val myCleanNameNoRole = cleanMyName.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
-
-            // 1. Deduplicate by UUID
-            val membersByUuid = updatedMembers.values.groupBy { m ->
-                if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
-            }.filterKeys { it.length >= 4 }
-
-            for ((uuidKey, list) in membersByUuid) {
+            // Deduplicate members by canonical identity
+            val membersByCanonical = updatedMembers.values.groupBy { com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
+            for ((canonKey, list) in membersByCanonical) {
                 if (list.size > 1) {
-                    val isMyUuid = myDeviceUUID.value.length >= 4 && uuidKey == myDeviceUUID.value
-                    if (isMyUuid) {
+                    if (canonKey == myCanonicalKey) {
                         for (stale in list) {
                             if (stale.id != myCloudId) {
                                 updatedMembers.remove(stale.id)
                             }
                         }
                     } else {
-                        val newest = list.maxByOrNull { it.lastActive }
+                        val newest = list.maxWithOrNull(
+                            compareBy<CloudMember> { it.id.startsWith("device_") }.thenBy { it.lastActive }
+                        )
                         for (stale in list) {
                             if (stale.id != newest?.id) {
                                 updatedMembers.remove(stale.id)
@@ -1402,32 +1366,7 @@ class CloudSyncManager(
                 }
             }
 
-            // 2. Deduplicate by normalized name
-            val membersByName = updatedMembers.values.groupBy { m ->
-                m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-            }.filterKeys { it.isNotBlank() }
-
-            for ((nameKey, list) in membersByName) {
-                if (list.size > 1) {
-                    val isMyName = nameKey == myCleanNameNoRole || nameKey == cleanMyName
-                    if (isMyName) {
-                        for (stale in list) {
-                            if (stale.id != myCloudId) {
-                                updatedMembers.remove(stale.id)
-                            }
-                        }
-                    } else {
-                        val newest = list.maxByOrNull { it.lastActive }
-                        for (stale in list) {
-                            if (stale.id != newest?.id) {
-                                updatedMembers.remove(stale.id)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. Remove old mock/test IDs
+            // Remove old mock/test IDs
             val mockKeys = updatedMembers.keys.filter { it.contains("abc123") || it.startsWith("mock_") }
             for (k in mockKeys) updatedMembers.remove(k)
 

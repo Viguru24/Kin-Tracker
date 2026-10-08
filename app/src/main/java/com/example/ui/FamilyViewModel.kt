@@ -95,33 +95,36 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             myDeviceName,
             myDeviceUUID
         ) { list, myNameStr, myUuidStr ->
-            val myNameVal = myNameStr.lowercase().trim()
-            val myCloudIdVal = "device_" + myNameVal.replace("\\s".toRegex(), "") + "_" + myUuidStr
+            val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myNameStr, myUuidStr)
+            val myCloudIdVal = "device_" + myNameStr.lowercase().replace("\\s".toRegex(), "") + "_" + myUuidStr
 
             val hasMe = list.any { it.id == "me" }
             val filtered = list.filter { m ->
                 if (m.id == "me") return@filter true
-                if (hasMe && (m.id == myCloudIdVal || (myUuidStr.length >= 4 && m.id.endsWith("_$myUuidStr")) || m.name.lowercase().trim().equals(myNameVal, ignoreCase = true))) {
-                    return@filter false
+                if (hasMe) {
+                    if (m.id == myCloudIdVal || (myUuidStr.length >= 4 && m.id.endsWith("_$myUuidStr"))) return@filter false
+                    val mCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(m.name, m.id)
+                    if (mCanonicalKey == myCanonicalKey) return@filter false
                 }
                 true
             }
 
-            val seenUuids = mutableSetOf<String>()
-            val seenNames = mutableSetOf<String>()
+            val seenCanonicalKeys = mutableSetOf<String>()
             val deduped = mutableListOf<FamilyMember>()
 
-            for (m in filtered.sortedByDescending { it.lastActive }) {
-                val uuid = if (m.id.startsWith("device_") && m.id.contains("_")) m.id.substringAfterLast("_") else ""
-                val cleanName = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
+            // 1. First prioritize 'me' (local GPS device)
+            val meMember = filtered.firstOrNull { it.id == "me" }
+            if (meMember != null) {
+                seenCanonicalKeys.add(myCanonicalKey)
+                deduped.add(meMember)
+            }
 
-                if (m.id != "me") {
-                    if (uuid.length >= 4 && seenUuids.contains(uuid)) continue
-                    if (cleanName.isNotBlank() && seenNames.contains(cleanName)) continue
-                }
-
-                if (uuid.length >= 4) seenUuids.add(uuid)
-                if (cleanName.isNotBlank()) seenNames.add(cleanName)
+            // 2. Add remaining members sorted: live device_ IDs first, then newest lastActive
+            for (m in filtered.sortedWith(compareByDescending<FamilyMember> { it.id.startsWith("device_") }.thenByDescending { it.lastActive })) {
+                if (m.id == "me") continue
+                val key = com.example.data.IdentityUtils.getCanonicalPersonKey(m.name, m.id)
+                if (seenCanonicalKeys.contains(key)) continue
+                seenCanonicalKeys.add(key)
                 deduped.add(m)
             }
             deduped
@@ -478,6 +481,35 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             val current = repository.getFamilyMembersOnce()
+            val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myDeviceName.value, myDeviceUUID.value)
+
+            // Reconcile and purge any duplicate entries in local SQLite database on startup
+            val groupedByCanonical = current.groupBy { com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
+            for ((canonKey, group) in groupedByCanonical) {
+                if (group.size > 1) {
+                    if (canonKey == myCanonicalKey || group.any { it.id == "me" }) {
+                        // 'me' is our device; remove all other records in SQLite matching our person
+                        for (stale in group) {
+                            if (stale.id != "me") {
+                                repository.deleteMember(stale)
+                                repository.clearBreadcrumbsForMember(stale.id)
+                            }
+                        }
+                    } else {
+                        // For other members (e.g. Eloise, Mama, Isabel), keep the best live hardware device record
+                        val best = group.maxWithOrNull(
+                            compareBy<FamilyMember> { it.id.startsWith("device_") }.thenBy { it.lastActive }
+                        )
+                        for (stale in group) {
+                            if (stale.id != best?.id) {
+                                repository.deleteMember(stale)
+                                repository.clearBreadcrumbsForMember(stale.id)
+                            }
+                        }
+                    }
+                }
+            }
+
             val contactsPrefs = getApplication<Application>().getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE)
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             
@@ -1027,7 +1059,32 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val deletedMembersPrefs = getApplication<Application>().getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE)
             val allCurrent = repository.getFamilyMembersOnce()
+            val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myDeviceName.value, myDeviceUUID.value)
             val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
+
+            val grouped = allCurrent.groupBy { com.example.data.IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
+            for ((canonKey, group) in grouped) {
+                if (group.size > 1) {
+                    if (canonKey == myCanonicalKey || group.any { it.id == "me" }) {
+                        for (stale in group) {
+                            if (stale.id != "me") {
+                                repository.deleteMember(stale)
+                                repository.clearBreadcrumbsForMember(stale.id)
+                            }
+                        }
+                    } else {
+                        val best = group.maxWithOrNull(
+                            compareBy<FamilyMember> { it.id.startsWith("device_") }.thenBy { it.lastActive }
+                        )
+                        for (stale in group) {
+                            if (stale.id != best?.id) {
+                                repository.deleteMember(stale)
+                                repository.clearBreadcrumbsForMember(stale.id)
+                            }
+                        }
+                    }
+                }
+            }
 
             for (m in allCurrent) {
                 if (m.id == "me" || m.id == myCloudIdVal || (myDeviceUUID.value.isNotBlank() && m.id.endsWith("_" + myDeviceUUID.value))) continue

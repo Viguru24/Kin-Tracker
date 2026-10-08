@@ -4,7 +4,9 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const path = require('path');
 const circleRoutes = require('./routes/circles');
+const adminRoutes = require('./routes/admin');
 const db = require('./db');
 const { setupAudioRelay, getAudioRelayStats } = require('./audioRelay');
 
@@ -17,6 +19,9 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('combined'));
+
+// Serve Static Web Dashboard
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Initialize default sovereign family circle if database is fresh
 (function initDefaultCircle() {
@@ -43,11 +48,16 @@ app.use(morgan('combined'));
         };
         db.saveCircle(defaultCircle);
         // Also map legacy token "81e5632c_pin_group"
-        db.inviteCodes['81E5632C_PIN_GROUP'] = defaultCircle.id;
-        db.inviteCodes['4666'] = defaultCircle.id;
+        db.mapInviteAlias('81E5632C_PIN_GROUP', defaultCircle.id);
+        db.mapInviteAlias('4666', defaultCircle.id);
         console.log('[Init] Seeded default Family Circle with Invite Code "KT-4666" and PIN "4666"');
     }
 })();
+
+// Dashboard Route Shortcuts
+app.get(['/dashboard', '/admin'], (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
+});
 
 // Health & Status
 app.get('/health', (req, res) => {
@@ -71,6 +81,7 @@ app.get('/api/info', (req, res) => {
 
 // Main API Routes
 app.use('/api/circles', circleRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Legacy Backward-Compatibility Sync Endpoints (for old client versions if any)
 app.get('/sync/:token', (req, res) => {

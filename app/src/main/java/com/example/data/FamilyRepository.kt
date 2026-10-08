@@ -37,10 +37,12 @@ class FamilyRepository(private val familyDao: FamilyDao) {
         // Query current list of members
         val currentMembers = familyDao.getFamilyMembersOnce()
         
-        // Clean up legacy test IDs if any exist
+        // Clean up legacy test IDs or duplicate non-device records if live devices exist
         for (m in currentMembers) {
             val mClean = m.name.lowercase().trim()
-            if (m.id in listOf("sarah", "mom", "dad", "alex") && !mClean.contains("eloise")) {
+            val mKey = IdentityUtils.getCanonicalPersonKey(m.name, m.id)
+            val hasLiveReplacement = currentMembers.any { it.id != m.id && (it.id == "me" || it.id.startsWith("device_")) && IdentityUtils.getCanonicalPersonKey(it.name, it.id) == mKey }
+            if (m.id in listOf("sarah", "mom", "dad", "alex") || (!m.id.startsWith("device_") && m.id != "me" && hasLiveReplacement)) {
                 familyDao.deleteFamilyMember(m)
                 familyDao.clearBreadcrumbsForMember(m.id)
             }
