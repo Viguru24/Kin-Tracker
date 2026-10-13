@@ -8,6 +8,18 @@ object IdentityUtils {
     fun getCanonicalPersonKey(name: String, id: String = ""): String {
         val clean = name.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
         val cleanId = id.lowercase().replace(Regex("[^a-z0-9]"), " ").trim()
+        val isTablet = clean.contains("tab") || clean.contains("tablet") || clean.contains("ipad") || cleanId.contains("tab")
+
+        if (isTablet) {
+            val owner = when {
+                clean.contains("isabel") || clean.contains("isabelle") || cleanId.contains("isabel") -> "isabel"
+                clean.contains("eloise") || clean.contains("eloisa") || cleanId.contains("eloise") -> "eloise"
+                clean.contains("annette") || clean.contains("mama") || cleanId.contains("annette") -> "mama"
+                clean.contains("louis") || clean.contains("dad") || cleanId.contains("louis") -> "dad"
+                else -> ""
+            }
+            return if (owner.isNotBlank()) "device_${owner}_tab" else "tab_${clean.replace("\\s+".toRegex(), "").ifBlank { id }}"
+        }
 
         return when {
             clean.contains("louis") || clean.contains("dad") || clean.contains("father") || cleanId.contains("louis") || cleanId.contains("dad") -> "canonical_dad"

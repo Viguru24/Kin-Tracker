@@ -164,7 +164,8 @@ object GeofenceMonitor {
                 }
             }
 
-            val cleanMemberName = member.name
+            val isTablet = member.name.contains("tab", ignoreCase = true) || member.name.contains("tablet", ignoreCase = true) || member.name.contains("ipad", ignoreCase = true)
+            val cleanMemberName = if (isTablet) member.name.trim() else member.name
                 .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("('s|s)?\\s*(iPhone|iPad|Tab|Tablet|Phone|Device)", RegexOption.IGNORE_CASE), "")
                 .trim()

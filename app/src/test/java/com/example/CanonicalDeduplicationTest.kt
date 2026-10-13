@@ -77,6 +77,11 @@ class CanonicalDeduplicationTest {
         assertEquals("canonical_isabel", IdentityUtils.getCanonicalPersonKey("Isabelle"))
         assertEquals("canonical_isabel", IdentityUtils.getCanonicalPersonKey("Isabel (Older Daughter)"))
         assertEquals("canonical_isabel", IdentityUtils.getCanonicalPersonKey("", "device_isabel_9900"))
+
+        // Tablets are distinct secondary devices and must NOT merge into the phone
+        assertEquals("device_isabel_tab", IdentityUtils.getCanonicalPersonKey("Isabels Tab"))
+        assertEquals("device_isabel_tab", IdentityUtils.getCanonicalPersonKey("Isabel's Tablet"))
+        assertEquals("device_eloise_tab", IdentityUtils.getCanonicalPersonKey("Eloise's iPad"))
     }
 
     @Test

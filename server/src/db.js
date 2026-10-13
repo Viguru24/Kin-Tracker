@@ -59,6 +59,18 @@ loadDb();
 function getCanonicalPersonKey(name, id) {
     const clean = (name || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
     const cleanId = (id || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+    const isTab = clean.includes('tab') || clean.includes('tablet') || clean.includes('ipad') || cleanId.includes('tab');
+
+    if (isTab) {
+        if (clean.includes('isabel') || cleanId.includes('isabel')) return 'device_isabel_tab';
+        if (clean.includes('eloise') || cleanId.includes('eloise')) return 'device_eloise_tab';
+        if (clean.includes('annette') || cleanId.includes('annette')) return 'device_mama_tab';
+        if (clean.includes('louis') || cleanId.includes('louis') || clean.includes('dad') || cleanId.includes('dad')) return 'device_dad_tab';
+        const parts = (id || '').split('_');
+        const uuid = parts.length >= 3 && parts[parts.length - 1].length >= 4 ? parts[parts.length - 1] : '';
+        return `tab_${uuid || clean.replace(/\s+/g, '')}`;
+    }
+
     if (clean.includes('louis') || clean.includes('dad') || clean.includes('father') || cleanId.includes('louis') || cleanId.includes('dad')) {
         return 'canonical_dad';
     }
