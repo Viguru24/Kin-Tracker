@@ -335,6 +335,7 @@ fun RadarMap(
     onCreateGroupWithPin: (String) -> Unit = {},
     isLocationPaused: Boolean = false,
     onToggleLocationPaused: (Boolean) -> Unit = {},
+    isSettingsOpen: Boolean = false,
     bottomPadding: Dp = 120.dp,
     modifier: Modifier = Modifier
 ) {
@@ -379,8 +380,8 @@ fun RadarMap(
     val hasMovingMembers = remember(members) {
         members.any { it.speedMph >= 0.6 || classifyTransitMode(it.speedMph, it.statusText, it.id) != TransitMode.STATIONARY }
     }
-    LaunchedEffect(hasMovingMembers) {
-        if (hasMovingMembers) {
+    LaunchedEffect(hasMovingMembers, isSettingsOpen) {
+        if (hasMovingMembers && !isSettingsOpen) {
             while (true) {
                 kotlinx.coroutines.delay(400)
                 animTick = (animTick + 1) % 4
@@ -533,7 +534,8 @@ fun RadarMap(
     val currentIsRouteTrailEnabled by rememberUpdatedState(isRouteTrailEnabled)
 
     // High-frequency (60 FPS) continuous road interpolation & camera follow engine
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isSettingsOpen) {
+        if (isSettingsOpen) return@LaunchedEffect
         var lastFrameTime = android.os.SystemClock.uptimeMillis()
         while (isActive) {
             kotlinx.coroutines.delay(16) // ~60 FPS smooth motion

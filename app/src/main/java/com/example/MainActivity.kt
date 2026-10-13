@@ -694,6 +694,7 @@ fun MainScreen(
             onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
             isLocationPaused = isLocationPaused,
             onToggleLocationPaused = { viewModel.toggleLocationPaused(it) },
+            isSettingsOpen = isSettingsOpen,
             bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
@@ -1025,7 +1026,8 @@ fun MainScreen(
                             onOpenFeedback = { isFeedbackOpen = true },
                             onCleanDuplicates = { viewModel.cleanDuplicates() },
                             onDeleteMember = { member -> viewModel.deleteFamilyMember(member.id) },
-                            onToggleMemberTracking = { memberId -> viewModel.toggleMemberTracking(memberId) }
+                            onToggleMemberTracking = { memberId -> viewModel.toggleMemberTracking(memberId) },
+                            onUpdateMember = { member -> viewModel.updateFamilyMember(member) }
                         )
                     }
                 }

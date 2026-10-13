@@ -21,8 +21,8 @@ private val DarkColorScheme = darkColorScheme(
     onPrimary = Color.Black,
     onSecondary = Color.White,
     onTertiary = Color.Black,
-    onBackground = Color(0xFFF0F4F8),
-    onSurface = Color(0xFFF0F4F8)
+    onBackground = Color(0xFF141D26),
+    onSurface = Color(0xFF141D26)
 )
 
 private val LightColorScheme = lightColorScheme(

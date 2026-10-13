@@ -825,128 +825,17 @@ fun AnimatedTransitIcon(
     modifier: Modifier = Modifier,
     size: Dp = 14.dp
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "transit_anim")
-
-    when (mode) {
-        TransitMode.WALKING -> {
-            val rotation by infiniteTransition.animateFloat(
-                initialValue = -12f,
-                targetValue = 12f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(450, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "walk_rot"
-            )
-            val translateY by infiniteTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = -3.5f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(225, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "walk_bounce"
-            )
-            Box(
-                modifier = modifier
-                    .size(size)
-                    .graphicsLayer {
-                        rotationZ = rotation
-                        translationY = translateY
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("👣", fontSize = (size.value * 0.9f).sp)
-            }
-        }
-        TransitMode.CYCLING -> {
-            val rotation by infiniteTransition.animateFloat(
-                initialValue = -14f,
-                targetValue = 14f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(380, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "bike_rot"
-            )
-            val translateY by infiniteTransition.animateFloat(
-                initialValue = -1.5f,
-                targetValue = 1.5f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(190, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "bike_bounce"
-            )
-            Box(
-                modifier = modifier
-                    .size(size)
-                    .graphicsLayer {
-                        rotationZ = rotation
-                        translationY = translateY
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🚲", fontSize = (size.value * 0.9f).sp)
-            }
-        }
-        TransitMode.DRIVING -> {
-            val translateX by infiniteTransition.animateFloat(
-                initialValue = -2.5f,
-                targetValue = 2.5f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(280, easing = FastOutLinearInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "car_glide"
-            )
-            val scale by infiniteTransition.animateFloat(
-                initialValue = 0.96f,
-                targetValue = 1.04f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(140, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "car_pulse"
-            )
-            Box(
-                modifier = modifier
-                    .size(size)
-                    .graphicsLayer {
-                        translationX = translateX
-                        scaleX = scale
-                        scaleY = scale
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🚗", fontSize = (size.value * 0.9f).sp)
-            }
-        }
-        TransitMode.TRAIN -> {
-            val translateX by infiniteTransition.animateFloat(
-                initialValue = -3.5f,
-                targetValue = 3.5f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(450, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "train_glide"
-            )
-            Box(
-                modifier = modifier
-                    .size(size)
-                    .graphicsLayer {
-                        translationX = translateX
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🚆", fontSize = (size.value * 0.9f).sp)
-            }
-        }
-        TransitMode.STATIONARY -> {
-            Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
-                Text("📍", fontSize = (size.value * 0.9f).sp)
-            }
-        }
+    val emoji = when (mode) {
+        TransitMode.WALKING -> "👣"
+        TransitMode.CYCLING -> "🚲"
+        TransitMode.DRIVING -> "🚗"
+        TransitMode.TRAIN -> "🚆"
+        TransitMode.STATIONARY -> "📍"
+    }
+    Box(
+        modifier = modifier.size(size),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(emoji, fontSize = (size.value * 0.9f).sp)
     }
 }

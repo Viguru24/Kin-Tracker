@@ -514,32 +514,8 @@ object MapMarkerRenderer {
         val efm = emojiPaint.fontMetrics
         val textY = ay - (efm.ascent + efm.descent) / 2f
 
-        // Apply animated stepping / riding / driving transforms
-        canvas.save()
-        when (emoji) {
-            "👣" -> {
-                val angle = if (animFrame % 2 == 0) -9f else 9f
-                val dy = if (animFrame % 2 == 0) -1.2f * density else 1.2f * density
-                canvas.rotate(angle, ax, ay)
-                canvas.translate(0f, dy)
-            }
-            "🚲" -> {
-                val angle = if (animFrame % 2 == 0) -10f else 10f
-                val dy = if (animFrame % 2 == 0) -0.8f * density else 0.8f * density
-                canvas.rotate(angle, ax, ay)
-                canvas.translate(0f, dy)
-            }
-            "🚗" -> {
-                val dx = if (animFrame % 2 == 0) -1.2f * density else 1.2f * density
-                canvas.translate(dx, 0f)
-            }
-            "🚆" -> {
-                val dx = if (animFrame % 2 == 0) -1.8f * density else 1.8f * density
-                canvas.translate(dx, 0f)
-            }
-        }
+        // Draw transit emoji cleanly and statically without jitter or bouncing
         canvas.drawText(emoji, ax, textY, emojiPaint)
-        canvas.restore()
     }
 
     private fun loadUprightMarkerBitmap(photoPath: String, targetSize: Int): Bitmap? {

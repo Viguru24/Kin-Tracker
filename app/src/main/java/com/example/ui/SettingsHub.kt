@@ -6,11 +6,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,9 +95,11 @@ fun SettingsHub(
     onCleanDuplicates: (() -> Unit)? = null,
     onDeleteMember: ((FamilyMember) -> Unit)? = null,
     onToggleMemberTracking: ((String) -> Unit)? = null,
+    onUpdateMember: ((FamilyMember) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(SettingsTab.CIRCLE) }
+    var memberToEdit by remember { mutableStateOf<FamilyMember?>(null) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -149,7 +157,8 @@ fun SettingsHub(
                     onDeleteMember = onDeleteMember,
                     isLocationPaused = isLocationPaused,
                     onToggleLocationPaused = onToggleLocationPaused,
-                    onToggleMemberTracking = onToggleMemberTracking
+                    onToggleMemberTracking = onToggleMemberTracking,
+                    onEditMember = { memberToEdit = it }
                 )
                 SettingsTab.PROFILE -> ProfileTabContent(
                     name = myDeviceName,
@@ -158,7 +167,10 @@ fun SettingsHub(
                     phone = myDevicePhone,
                     onUpdate = onUpdateProfile,
                     ghostModeExpiryTime = ghostModeExpiryTime,
-                    onToggleGhostMode = onToggleGhostMode
+                    onToggleGhostMode = onToggleGhostMode,
+                    members = members,
+                    myDeviceUUID = myDeviceUUID,
+                    onEditMember = { memberToEdit = it }
                 )
                 SettingsTab.PLACES -> PlacesTabContent(
                     homeLat = homeLat,
@@ -194,6 +206,22 @@ fun SettingsHub(
             }
         }
     }
+
+    // Modal Profile & Photo Editor Dialog for any circle member (including daughter Isabel and dad)
+    memberToEdit?.let { member ->
+        MemberEditDialog(
+            member = member,
+            onDismiss = { memberToEdit = null },
+            onSave = { updated ->
+                onUpdateMember?.invoke(updated)
+                val isMe = updated.id == "me" || updated.id == myDeviceUUID || updated.id.endsWith("_$myDeviceUUID")
+                if (isMe) {
+                    onUpdateProfile(updated.name, updated.avatarColorHex, updated.avatarEmoji, updated.phoneNumber)
+                }
+                memberToEdit = null
+            }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,7 +238,8 @@ private fun CircleTabContent(
     onDeleteMember: ((FamilyMember) -> Unit)? = null,
     isLocationPaused: Boolean = false,
     onToggleLocationPaused: (Boolean) -> Unit = {},
-    onToggleMemberTracking: ((String) -> Unit)? = null
+    onToggleMemberTracking: ((String) -> Unit)? = null,
+    onEditMember: (FamilyMember) -> Unit = {}
 ) {
     val clipboardManager = LocalClipboardManager.current
     var showJoinSheet by remember { mutableStateOf(false) }
@@ -318,69 +347,137 @@ private fun CircleTabContent(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
-                border = BorderStroke(1.dp, if (isMe) RadarCyan.copy(alpha = 0.4f) else SlateBorder),
+                border = BorderStroke(1.dp, if (isMe) RadarCyan.copy(alpha = 0.5f) else SlateBorder),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Header Row: Avatar, Member Info, and Battery Indicator
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val parsedColor = try {
-                            Color(android.graphics.Color.parseColor(member.avatarColorHex.ifBlank { "#0061A4" }))
-                        } catch (e: Exception) { RadarCyan }
-
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(parsedColor.copy(alpha = 0.15f))
-                                .border(2.dp, parsedColor, CircleShape),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 20.sp)
-                        }
+                            val parsedColor = try {
+                                Color(android.graphics.Color.parseColor(member.avatarColorHex.ifBlank { "#0061A4" }))
+                            } catch (e: Exception) { RadarCyan }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(member.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                if (isMe) {
-                                    Surface(color = RadarCyan.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
-                                        Text("THIS PHONE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = RadarCyan, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(parsedColor.copy(alpha = 0.15f))
+                                    .border(1.5.dp, parsedColor, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
+                                    val bitmap = remember(member.photoPath) {
+                                        try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
                                     }
-                                }
-                                if (isMemberPaused) {
-                                    Surface(color = ActiveAmber.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
-                                        Text("⏸️ PAUSED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = ActiveAmber, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    if (bitmap != null) {
+                                        Image(
+                                            bitmap = bitmap.asImageBitmap(),
+                                            contentDescription = "Profile Photo",
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
                                     }
+                                } else {
+                                    Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
                                 }
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (isMemberPaused) "Hidden from map" else member.statusText.ifBlank { "Live GPS" },
-                                    fontSize = 11.sp,
-                                    color = if (isMemberPaused) ActiveAmber else if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate
-                                )
-                                Text("•", fontSize = 10.sp, color = SecondarySlate)
-                                Text(
-                                    text = if (isOnline) "Live now" else "Offline",
-                                    fontSize = 11.sp,
-                                    color = if (isOnline) GlowingEmerald else ActiveAmber
-                                )
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = member.name,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                    if (isMe) {
+                                        Surface(color = RadarCyan.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+                                            Text(
+                                                "THIS PHONE",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = RadarCyan,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    if (isMemberPaused) {
+                                        Surface(color = ActiveAmber.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+                                            Text(
+                                                "⏸️ PAUSED",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = ActiveAmber,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (isOnline) GlowingEmerald.copy(alpha = 0.12f) else ActiveAmber.copy(alpha = 0.12f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isOnline) GlowingEmerald else ActiveAmber)
+                                            )
+                                            Text(
+                                                text = if (isOnline) "Live now" else "Offline",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isOnline) GlowingEmerald else ActiveAmber
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = if (isMemberPaused) "Hidden from map" else member.statusText.ifBlank { "Live GPS" },
+                                        fontSize = 11.sp,
+                                        color = if (isMemberPaused) ActiveAmber else if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
-                    }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                        Spacer(Modifier.width(8.dp))
+
+                        // Dedicated Battery pill positioned cleanly without crowding text
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (member.batteryPercentage > 20) Color(0xFFF1F8E9) else Color(0xFFFFEBEE),
@@ -392,39 +489,65 @@ private fun CircleTabContent(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(if (member.isCharging) "⚡" else "🔋", fontSize = 11.sp)
-                                Text("${member.batteryPercentage}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828))
-                            }
-                        }
-
-                        if (isMemberPaused && onToggleMemberTracking != null) {
-                            Button(
-                                onClick = {
-                                    if (isMe) {
-                                        onToggleLocationPaused(false)
-                                    } else {
-                                        onToggleMemberTracking(member.id)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = GlowingEmerald),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.height(28.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text("Un-pause", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        if (!isMe && onDeleteMember != null) {
-                            IconButton(
-                                onClick = { onDeleteMember(member) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove ${member.name}",
-                                    tint = ErrorRed,
-                                    modifier = Modifier.size(18.dp)
+                                Text(
+                                    "${member.batteryPercentage}%",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828)
                                 )
+                            }
+                        }
+                    }
+
+                    // Bottom Actions Row: Edit Profile, Un-pause, Delete
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { onEditMember(member) },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.35f)),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = RadarCyan.copy(alpha = 0.04f)),
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp), tint = RadarCyan)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Edit Profile & Photo", fontSize = 11.sp, color = RadarCyan, fontWeight = FontWeight.Bold)
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (isMemberPaused && onToggleMemberTracking != null) {
+                                Button(
+                                    onClick = {
+                                        if (isMe) onToggleLocationPaused(false) else onToggleMemberTracking(member.id)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = GlowingEmerald),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(30.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Un-pause", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (!isMe && onDeleteMember != null) {
+                                IconButton(
+                                    onClick = { onDeleteMember(member) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Remove ${member.name}",
+                                        tint = ErrorRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -487,12 +610,44 @@ private fun ProfileTabContent(
     phone: String,
     onUpdate: (name: String, color: String, emoji: String, phone: String) -> Unit,
     ghostModeExpiryTime: Long,
-    onToggleGhostMode: (Boolean) -> Unit
+    onToggleGhostMode: (Boolean) -> Unit,
+    members: List<FamilyMember> = emptyList(),
+    myDeviceUUID: String = "",
+    onEditMember: (FamilyMember) -> Unit = {}
 ) {
-    var nameState by remember(name) { mutableStateOf(name) }
-    var phoneState by remember(phone) { mutableStateOf(phone) }
-    var selectedColor by remember(colorHex) { mutableStateOf(colorHex) }
-    var selectedEmoji by remember(emoji) { mutableStateOf(emoji) }
+    val meMember = members.firstOrNull { it.id == "me" || it.id == myDeviceUUID || it.id.endsWith("_$myDeviceUUID") }
+        ?: FamilyMember(
+            id = "me",
+            name = name.ifBlank { "Dad" },
+            avatarColorHex = colorHex.ifBlank { "#0061A4" },
+            x = 0.0,
+            y = 0.0,
+            batteryPercentage = 100,
+            isCharging = false,
+            speedMph = 0.0,
+            statusText = "Online",
+            isComingHome = false,
+            etaMinutes = 0,
+            avatarEmoji = emoji.ifBlank { "👨" },
+            phoneNumber = phone
+        )
+
+    val allSelectableMembers = if (members.isNotEmpty()) members else listOf(meMember)
+    var selectedMemberId by remember { mutableStateOf<String?>(null) }
+    val activeMember = allSelectableMembers.firstOrNull { it.id == selectedMemberId } ?: meMember
+
+    var nameState by remember(activeMember.id) { mutableStateOf(activeMember.name) }
+    var phoneState by remember(activeMember.id) { mutableStateOf(activeMember.phoneNumber) }
+    var selectedColor by remember(activeMember.id) { mutableStateOf(activeMember.avatarColorHex) }
+    var selectedEmoji by remember(activeMember.id) { mutableStateOf(activeMember.avatarEmoji) }
+    var saveSuccess by remember { mutableStateOf(false) }
+
+    LaunchedEffect(saveSuccess) {
+        if (saveSuccess) {
+            delay(2000L)
+            saveSuccess = false
+        }
+    }
 
     val emojis = listOf("👨", "👩", "👧", "👦", "👵", "👴", "🐱", "🐶")
     val colors = listOf("#0061A4", "#AA22FF", "#EC407A", "#2E7D32", "#FF9800", "#00B4D8")
@@ -511,7 +666,89 @@ private fun ProfileTabContent(
         timeLeftString = ""
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // ── Member Selector Chips (Dad, Isabel, Annette, etc.) ──
+        if (allSelectableMembers.size > 1) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
+                border = BorderStroke(1.dp, SlateBorder),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "SELECT PROFILE TO UPDATE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SecondarySlate,
+                        letterSpacing = 1.sp
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        allSelectableMembers.forEach { member ->
+                            val isSelected = (activeMember.id == member.id)
+                            val isMe = member.id == "me" || member.id == myDeviceUUID || member.id.endsWith("_$myDeviceUUID")
+                            val chipBorderColor = if (isSelected) RadarCyan else SlateBorder
+                            val chipBgColor = if (isSelected) RadarCyan.copy(alpha = 0.15f) else Color.Transparent
+
+                            Surface(
+                                onClick = {
+                                    selectedMemberId = member.id
+                                    nameState = member.name
+                                    phoneState = member.phoneNumber
+                                    selectedColor = member.avatarColorHex
+                                    selectedEmoji = member.avatarEmoji
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = chipBgColor,
+                                border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, chipBorderColor)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF1E293B)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
+                                            val b = remember(member.photoPath) {
+                                                try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
+                                            }
+                                            if (b != null) {
+                                                Image(
+                                                    bitmap = b.asImageBitmap(),
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 12.sp)
+                                            }
+                                        } else {
+                                            Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 12.sp)
+                                        }
+                                    }
+
+                                    Text(
+                                        text = member.name + if (isMe) " (You)" else "",
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) TextPrimary else SecondarySlate
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Active Member Details & Photo Editing Card ──
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
@@ -519,41 +756,153 @@ private fun ProfileTabContent(
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Device Identity", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                // Header with Avatar and "Change Photo" action
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        val parsedBorderColor = try {
+                            Color(android.graphics.Color.parseColor(selectedColor.ifBlank { "#0061A4" }))
+                        } catch (_: Exception) { RadarCyan }
 
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(parsedBorderColor.copy(alpha = 0.15f))
+                                .border(2.dp, parsedBorderColor, CircleShape)
+                                .clickable { onEditMember(activeMember) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (activeMember.photoPath.isNotBlank() && java.io.File(activeMember.photoPath).exists()) {
+                                val bitmap = remember(activeMember.photoPath) {
+                                    try { android.graphics.BitmapFactory.decodeFile(activeMember.photoPath) } catch (_: Exception) { null }
+                                }
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Profile Photo",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(selectedEmoji.ifBlank { "👤" }, fontSize = 26.sp)
+                                }
+                            } else {
+                                Text(selectedEmoji.ifBlank { "👤" }, fontSize = 26.sp)
+                            }
+                        }
+
+                        Column {
+                            Text(
+                                text = "Editing: ${activeMember.name}",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Tap photo or button to upload & crop",
+                                fontSize = 11.sp,
+                                color = SecondarySlate
+                            )
+                        }
+                    }
+
+                    // Direct "Change Photo" button
+                    Button(
+                        onClick = { onEditMember(activeMember) },
+                        colors = ButtonDefaults.buttonColors(containerColor = RadarCyan.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, RadarCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, tint = RadarCyan, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Photo & Crop", color = RadarCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Divider(color = SlateBorder.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+                // High-contrast, strong black Display Name TextField
                 OutlinedTextField(
                     value = nameState,
-                    onValueChange = {
-                        nameState = it
-                        onUpdate(nameState, selectedColor, selectedEmoji, phoneState)
+                    onValueChange = { nameState = it },
+                    label = {
+                        Text(
+                            text = "Display Name",
+                            color = Color(0xFF000000),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     },
-                    label = { Text("Display Name") },
                     singleLine = true,
+                    textStyle = TextStyle(
+                        color = Color(0xFF000000),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFF000000),
+                        unfocusedTextColor = Color(0xFF000000),
+                        focusedLabelColor = Color(0xFF000000),
+                        unfocusedLabelColor = Color(0xFF1E293B),
+                        focusedBorderColor = Color(0xFF000000),
+                        unfocusedBorderColor = Color(0xFF64748B),
+                        cursorColor = Color(0xFF000000),
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color(0xFFF8FAFC)
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
 
+                // High-contrast, strong black Phone Number TextField
                 OutlinedTextField(
                     value = phoneState,
-                    onValueChange = {
-                        phoneState = it
-                        onUpdate(nameState, selectedColor, selectedEmoji, phoneState)
+                    onValueChange = { phoneState = it },
+                    label = {
+                        Text(
+                            text = "Phone Number",
+                            color = Color(0xFF000000),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     },
-                    label = { Text("Phone Number") },
                     singleLine = true,
+                    textStyle = TextStyle(
+                        color = Color(0xFF000000),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFF000000),
+                        unfocusedTextColor = Color(0xFF000000),
+                        focusedLabelColor = Color(0xFF000000),
+                        unfocusedLabelColor = Color(0xFF1E293B),
+                        focusedBorderColor = Color(0xFF000000),
+                        unfocusedBorderColor = Color(0xFF64748B),
+                        cursorColor = Color(0xFF000000),
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color(0xFFF8FAFC)
+                    ),
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
 
+                // Avatar Icon Grid
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Avatar Icon", fontSize = 12.sp, color = SecondarySlate)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         emojis.forEach { e ->
                             Surface(
-                                onClick = {
-                                    selectedEmoji = e
-                                    onUpdate(nameState, selectedColor, selectedEmoji, phoneState)
-                                },
+                                onClick = { selectedEmoji = e },
                                 shape = CircleShape,
                                 color = if (selectedEmoji == e) RadarCyan.copy(alpha = 0.15f) else Color.Transparent,
                                 border = BorderStroke(1.dp, if (selectedEmoji == e) RadarCyan else Color.Transparent),
@@ -565,6 +914,7 @@ private fun ProfileTabContent(
                     }
                 }
 
+                // Map Accent Color
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Map Accent Color", fontSize = 12.sp, color = SecondarySlate)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -575,10 +925,7 @@ private fun ProfileTabContent(
                                     .size(32.dp)
                                     .clip(CircleShape)
                                     .background(colorVal)
-                                    .clickable {
-                                        selectedColor = c
-                                        onUpdate(nameState, selectedColor, selectedEmoji, phoneState)
-                                    }
+                                    .clickable { selectedColor = c }
                                     .border(2.dp, if (selectedColor == c) Color.Black else Color.Transparent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -589,9 +936,40 @@ private fun ProfileTabContent(
                         }
                     }
                 }
+
+                // Save Profile Button
+                Button(
+                    onClick = {
+                        val updated = activeMember.copy(
+                            name = nameState.trim(),
+                            phoneNumber = phoneState.trim(),
+                            avatarColorHex = selectedColor,
+                            avatarEmoji = selectedEmoji
+                        )
+                        onEditMember(updated)
+                        val isMe = activeMember.id == meMember.id || activeMember.id == "me" || activeMember.id == myDeviceUUID || activeMember.id.endsWith("_$myDeviceUUID")
+                        if (isMe) {
+                            onUpdate(nameState.trim(), selectedColor, selectedEmoji, phoneState.trim())
+                        }
+                        saveSuccess = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (saveSuccess) GlowingEmerald else RadarCyan),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                ) {
+                    Icon(if (saveSuccess) Icons.Default.Check else Icons.Default.Done, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (saveSuccess) "Saved Successfully!" else "Save ${activeMember.name}'s Profile",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp
+                    )
+                }
             }
         }
 
+        // ── Ghost Mode Card ──
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = if (isGhostMode) ActiveAmber.copy(alpha = 0.08f) else CosmicSlateCard),
