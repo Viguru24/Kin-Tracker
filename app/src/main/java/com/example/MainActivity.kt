@@ -346,8 +346,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         try {
-            textToSpeech?.stop()
-            textToSpeech?.shutdown()
+            com.example.data.VoiceAnnouncementManager.stop()
         } catch (e: Exception) {}
         super.onDestroy()
         try {
@@ -394,11 +393,7 @@ class MainActivity : ComponentActivity() {
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
         try {
-            textToSpeech = TextToSpeech(this) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    textToSpeech?.language = Locale.getDefault()
-                }
-            }
+            com.example.data.VoiceAnnouncementManager.initTts(applicationContext)
         } catch (e: Exception) {}
 
         lifecycleScope.launch {
@@ -513,61 +508,8 @@ fun MainScreen(
             val isArrivalAlert = message.contains("Arrival Notice") || message.contains("has arrived")
             val isProximityAlert = message.contains("Approaching Alert") || message.contains("getting close") || message.contains("close to your location") || message.contains("minutes away") || message.contains("close to Home") || message.contains("arrived Home")
 
-            if (isDepartureAlert || isArrivalAlert) {
-                com.example.data.AlertNotificationHelper.postAlertNotification(
-                    context,
-                    if (isDepartureAlert) "🚪 Departure Warning" else "📍 Arrival Notice",
-                    message.replace(Regex("^[🚪📍ℹ️]\\s*"), "")
-                )
-            }
-
-            if ((isProximityAlert || isDepartureAlert || isArrivalAlert) && isVoiceAnnouncementsEnabled) {
-                val now = System.currentTimeMillis()
-                val cleanSpeechText = message
-                    .replace(Regex("^[🚪📍ℹ️🚨🏠👋]\\s*"), "")
-                    .replace(Regex("^(Departure Warning|Arrival Notice|Approaching Alert):\\s*", RegexOption.IGNORE_CASE), "")
-                    .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
-                    .trim()
-
-                val rawPerson = cleanSpeechText.split(Regex("[\\s,]+")).firstOrNull()?.lowercase() ?: "general"
-                val personName = rawPerson.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-                val actionKey = when {
-                    cleanSpeechText.contains("left", ignoreCase = true) -> "left"
-                    cleanSpeechText.contains("arrived", ignoreCase = true) -> "arrived"
-                    cleanSpeechText.contains("home in", ignoreCase = true) || cleanSpeechText.contains("with you in", ignoreCase = true) -> "approaching"
-                    else -> "alert"
-                }
-                val spokenKey = "${rawPerson}_$actionKey"
-                val voicePrefs = context.getSharedPreferences("voice_announcement_prefs", Context.MODE_PRIVATE)
-                val lastSpoken = maxOf(
-                    MainActivity.globalSpokenTimestamps[spokenKey] ?: 0L,
-                    voicePrefs.getLong(spokenKey, 0L)
-                )
-
-                // Enforce 30-minute strict verbal cooldown per unique person for arrivals, 15 minutes for departures
-                val verbalCooldownMs = if (actionKey == "arrived") 30 * 60 * 1000L else 15 * 60 * 1000L
-                if (now - lastSpoken > verbalCooldownMs) {
-                    MainActivity.globalSpokenTimestamps[spokenKey] = now
-                    voicePrefs.edit().putLong(spokenKey, now).apply()
-
-                    val formattedSpeech = when {
-                        cleanSpeechText.contains("has arrived at home", ignoreCase = true) || cleanSpeechText.contains("has arrived home", ignoreCase = true) -> {
-                            "$personName has arrived home"
-                        }
-                        cleanSpeechText.contains("has left the house", ignoreCase = true) -> {
-                            "$personName has left the house"
-                        }
-                        else -> cleanSpeechText
-                    }
-
-                    try {
-                        val toneG = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 100)
-                        toneG.startTone(android.media.ToneGenerator.TONE_PROP_BEEP2, 350)
-                    } catch (e: Exception) {}
-                    try {
-                        textToSpeech?.speak(formattedSpeech, TextToSpeech.QUEUE_FLUSH, null, null)
-                    } catch (e: Exception) {}
-                }
+            if (isDepartureAlert || isArrivalAlert || isProximityAlert) {
+                com.example.data.VoiceAnnouncementManager.announceIfEnabled(context, message)
             }
             if (message.contains("SOS ALERT") || message.contains("SOS BEACON")) {
                 // Show full-screen SOS overlay for 5 seconds

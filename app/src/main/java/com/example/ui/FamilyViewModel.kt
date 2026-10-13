@@ -22,7 +22,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val activeGroupCreatorId = MutableStateFlow("")
     val activeGroupPinCode = MutableStateFlow("")
 
-    private val _uiEvents = MutableSharedFlow<String>()
+    private val _uiEvents = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val uiEvents: SharedFlow<String> = _uiEvents.asSharedFlow()
 
     val selectedMemberId = MutableStateFlow<String?>(null)

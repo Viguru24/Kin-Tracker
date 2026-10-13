@@ -240,6 +240,7 @@ object GeofenceMonitor {
                                     val alertMessage = "$cleanMemberName has arrived at $placeDisplayName!"
                                     AlertNotificationHelper.postAlertNotification(context, alertTitle, alertMessage)
                                     onUiEvent?.invoke("📍 Arrival Notice: $alertMessage")
+                                    VoiceAnnouncementManager.announceIfEnabled(context, "📍 Arrival Notice: $alertMessage")
                                 }
                             }
                         }
@@ -294,6 +295,7 @@ object GeofenceMonitor {
                                         val alertTitle = "🚪 Departure Warning"
                                         AlertNotificationHelper.postAlertNotification(context, alertTitle, warningMsg)
                                         onUiEvent?.invoke("🚪 Departure Warning: $warningMsg")
+                                        VoiceAnnouncementManager.announceIfEnabled(context, "🚪 Departure Warning: $warningMsg")
                                     }
                                 }
                             }
