@@ -112,16 +112,18 @@ object GeofenceMonitor {
         } else Double.MAX_VALUE
         val isMeOutsideHome = hasMyGps && distMeToHomeMeters > 200.0
 
-        // Deduplicate incoming member records to single canonical person entries (prioritizing at-home device to prevent ghost alerts)
+        // Deduplicate incoming member records to single canonical person entries (prioritizing primary carried phone over secondary tablet/iPad)
         val deduplicatedMembers = members
             .filter { it.x != 0.0 && it.y != 0.0 }
             .groupBy { IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
             .mapValues { (_, group) ->
-                val atHomeDevice = group.firstOrNull { m ->
-                    m.statusText.contains("At Home", ignoreCase = true) ||
-                    (homePlace != null && GeoUtils.distanceMeters(m.y, m.x, homePlace.latitude, homePlace.longitude) <= (if (homePlace.isHome) maxOf(homePlace.radiusMeters, 160.0) else homePlace.radiusMeters))
+                val primaryPhone = group.firstOrNull { m ->
+                    !m.name.contains("tab", ignoreCase = true) &&
+                    !m.name.contains("tablet", ignoreCase = true) &&
+                    !m.name.contains("ipad", ignoreCase = true) &&
+                    !m.id.contains("tab", ignoreCase = true)
                 }
-                atHomeDevice ?: group.maxByOrNull { it.lastActive } ?: group.first()
+                primaryPhone ?: group.maxByOrNull { it.lastActive } ?: group.first()
             }
             .values
 

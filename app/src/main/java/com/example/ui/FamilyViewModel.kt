@@ -119,8 +119,22 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 deduped.add(meMember)
             }
 
-            // 2. Add remaining members sorted: live device_ IDs first, then newest lastActive
-            for (m in filtered.sortedWith(compareByDescending<FamilyMember> { it.id.startsWith("device_") }.thenByDescending { it.lastActive })) {
+            // 2. Add remaining members sorted:
+            // First: live device_ IDs
+            // Second: primary carried phones over secondary tablets/iPads (non-tab over tab)
+            // Third: newest lastActive
+            val sortedList = filtered.sortedWith(
+                compareByDescending<FamilyMember> { it.id.startsWith("device_") }
+                    .thenByDescending { m ->
+                        val isSecondaryTab = m.name.contains("tab", ignoreCase = true) ||
+                                m.name.contains("tablet", ignoreCase = true) ||
+                                m.name.contains("ipad", ignoreCase = true) ||
+                                m.id.contains("tab", ignoreCase = true)
+                        !isSecondaryTab
+                    }
+                    .thenByDescending { it.lastActive }
+            )
+            for (m in sortedList) {
                 if (m.id == "me") continue
                 val key = com.example.data.IdentityUtils.getCanonicalPersonKey(m.name, m.id)
                 if (seenCanonicalKeys.contains(key)) continue

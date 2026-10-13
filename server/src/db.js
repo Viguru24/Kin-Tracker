@@ -166,8 +166,20 @@ const dbOperations = {
 
         rawMembers.forEach(m => {
             const personKey = getCanonicalPersonKey(m.name, m.id);
-            if (!membersByPerson[personKey] || Number(m.lastActive || 0) > Number(membersByPerson[personKey].lastActive || 0)) {
+            const isTab = (m.name || '').toLowerCase().includes('tab') || (m.name || '').toLowerCase().includes('tablet') || (m.name || '').toLowerCase().includes('ipad') || (m.id || '').toLowerCase().includes('tab');
+            const existing = membersByPerson[personKey];
+            if (!existing) {
                 membersByPerson[personKey] = m;
+            } else {
+                const existingIsTab = (existing.name || '').toLowerCase().includes('tab') || (existing.name || '').toLowerCase().includes('tablet') || (existing.name || '').toLowerCase().includes('ipad') || (existing.id || '').toLowerCase().includes('tab');
+                // Always prioritize primary phone over secondary tablet
+                if (existingIsTab && !isTab) {
+                    membersByPerson[personKey] = m;
+                } else if (!existingIsTab && isTab) {
+                    // Retain primary phone
+                } else if (Number(m.lastActive || 0) > Number(existing.lastActive || 0)) {
+                    membersByPerson[personKey] = m;
+                }
             }
         });
 
@@ -210,12 +222,18 @@ const dbOperations = {
             const personKey = getCanonicalPersonKey(member.name, member.id);
 
             // Remove any other older member record in this circle representing the same canonical person
+            // Protect primary phone from being deleted by secondary tablet
+            const isTab = (member.name || '').toLowerCase().includes('tab') || (member.name || '').toLowerCase().includes('tablet') || (member.name || '').toLowerCase().includes('ipad') || (member.id || '').toLowerCase().includes('tab');
             circle.memberIds = circle.memberIds.filter(id => {
                 if (id === member.id) return true;
                 const other = db.members[id];
                 if (!other) return false;
                 const otherPersonKey = getCanonicalPersonKey(other.name, other.id);
                 if (otherPersonKey === personKey) {
+                    const otherIsTab = (other.name || '').toLowerCase().includes('tab') || (other.name || '').toLowerCase().includes('tablet') || (other.name || '').toLowerCase().includes('ipad') || (other.id || '').toLowerCase().includes('tab');
+                    if (isTab && !otherIsTab) {
+                        return true; // Keep primary phone in circle
+                    }
                     delete db.members[id];
                     return false;
                 }
