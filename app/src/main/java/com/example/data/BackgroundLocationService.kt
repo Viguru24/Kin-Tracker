@@ -57,7 +57,8 @@ class BackgroundLocationService : Service() {
             } else 0.0
 
             val now = System.currentTimeMillis()
-            if (speedMph >= 0.6 || distM > 15.0) {
+            val isAccurate = !location.hasAccuracy() || location.accuracy <= 150f
+            if (isAccurate && (speedMph >= 1.0 || distM > 25.0)) {
                 lastMovementTime = now
                 lastObservedLat = location.latitude
                 lastObservedLng = location.longitude
@@ -142,7 +143,9 @@ class BackgroundLocationService : Service() {
                         val gps = if (hasFine) locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
                         val net = locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                         val best = if (gps != null && net != null) {
-                            if (gps.time > net.time) gps else net
+                            if (net.hasAccuracy() && net.accuracy > 150f && (System.currentTimeMillis() - gps.time) < 10 * 60 * 1000L) {
+                                gps
+                            } else if (gps.time > net.time) gps else net
                         } else gps ?: net
 
                     best?.let { loc ->

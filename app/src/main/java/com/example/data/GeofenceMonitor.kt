@@ -112,7 +112,20 @@ object GeofenceMonitor {
         } else Double.MAX_VALUE
         val isMeOutsideHome = hasMyGps && distMeToHomeMeters > 200.0
 
-        members.forEach { member ->
+        // Deduplicate incoming member records to single canonical person entries (prioritizing at-home device to prevent ghost alerts)
+        val deduplicatedMembers = members
+            .filter { it.x != 0.0 && it.y != 0.0 }
+            .groupBy { IdentityUtils.getCanonicalPersonKey(it.name, it.id) }
+            .mapValues { (_, group) ->
+                val atHomeDevice = group.firstOrNull { m ->
+                    m.statusText.contains("At Home", ignoreCase = true) ||
+                    (homePlace != null && GeoUtils.distanceMeters(m.y, m.x, homePlace.latitude, homePlace.longitude) <= (if (homePlace.isHome) maxOf(homePlace.radiusMeters, 160.0) else homePlace.radiusMeters))
+                }
+                atHomeDevice ?: group.maxByOrNull { it.lastActive } ?: group.first()
+            }
+            .values
+
+        deduplicatedMembers.forEach { member ->
             if (member.x == 0.0 && member.y == 0.0) return@forEach
 
             // Never notify the user about their own arrival/departure
@@ -151,8 +164,9 @@ object GeofenceMonitor {
 
             val cleanMemberName = member.name
                 .replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father)\\)", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("('s|s)?\\s*(iPhone|iPad|Tab|Tablet|Phone|Device)", RegexOption.IGNORE_CASE), "")
                 .trim()
-            val personKey = cleanMemberName.lowercase().split(Regex("[\\s,]+")).firstOrNull() ?: cleanMemberName.lowercase()
+            val personKey = IdentityUtils.getCanonicalPersonKey(member.name, member.id)
 
             allPlaces.forEach { place ->
                 val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
@@ -230,6 +244,12 @@ object GeofenceMonitor {
                 }
                 // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home)
                 else if (distMeters > (effectiveRadius + exitHysteresis)) {
+                    // Suppress false departure if member is explicitly reporting "At Home"
+                    if (place.isHome && member.statusText.contains("At Home", ignoreCase = true)) {
+                        statusEditor.putInt("outcount_$key", 0)
+                        return@forEach
+                    }
+
                     statusEditor.putInt("incount_$key", 0)
                     if (lastStatus == "inside") {
                         val newOutCount = outCount + 1

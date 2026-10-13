@@ -23,7 +23,7 @@ object AppConfig {
     // Geofencing and hysteresis values
     const val GEOFENCE_COOLDOWN_MS = 900000L // 15 minutes between duplicate alerts for same person/place
     const val EXIT_HYSTERESIS_METERS = 60.0 // 60m buffer beyond zone radius to confirm building departure and prevent false alarms
-    const val MIN_EXIT_SPEED_MPH = 1.2 // Movement threshold confirming intentional departure
+    const val MIN_EXIT_SPEED_MPH = 1.8 // Movement threshold confirming intentional departure (filters out indoor GPS drift)
     const val ARRIVAL_CONFIRMATION_CHECKS = 3 // Consecutive verified readings before triggering an arrival alert
     const val DEPARTURE_CONFIRMATION_CHECKS = 3 // Consecutive verified readings before triggering a departure warning
 }

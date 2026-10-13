@@ -51,13 +51,17 @@ object BackgroundSyncProcessor {
         val current = repository.getFamilyMembersOnce()
         val me = current.firstOrNull { it.id == "me" } ?: return
 
-        // Distance calculation
+        // Distance calculation with GPS accuracy margin
         val latDiff = location.latitude - homeLat
         val lngDiff = location.longitude - homeLng
         val xDistanceKm = lngDiff * 111.0 * Math.cos(Math.toRadians(homeLat))
         val yDistanceKm = latDiff * 111.0
         val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
-        val isAtHome = distanceTotalKm <= 0.12 // 120 meters realistic residential geofence
+        val distanceMeters = distanceTotalKm * 1000.0
+        val accuracyMeters = if (location.hasAccuracy()) location.accuracy.toDouble() else 20.0
+        val homeRadiusSetting = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
+        val effectiveHomeBoundary = maxOf(120.0, homeRadiusSetting)
+        val isAtHome = (distanceMeters - minOf(accuracyMeters * 0.5, 50.0)) <= effectiveHomeBoundary
 
         val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
 
@@ -377,9 +381,10 @@ object BackgroundSyncProcessor {
             val keysToRemove = updatedMembers.filter { entry ->
                 val entryId = entry.key
                 val isMyOldDeviceKey = entryId != myCloudId && entryId.endsWith("_" + dUuid)
+                val isOldMock = entryId.contains("abc123") || entryId.startsWith("mock_")
                 val isExplicitlyDeleted = entryId != myCloudId && !entryId.endsWith("_$dUuid") &&
                         (deletedMembersPrefs.getBoolean("deleted_$entryId", false) || deletedMembersPrefs.getBoolean("deleted_member_$entryId", false))
-                isMyOldDeviceKey || isExplicitlyDeleted
+                isMyOldDeviceKey || isExplicitlyDeleted || isOldMock
             }.keys
             for (k in keysToRemove) {
                 updatedMembers.remove(k)
@@ -440,6 +445,7 @@ object BackgroundSyncProcessor {
 
             payload?.members?.values?.forEach { cloudM ->
                 if (cloudM.id == myCloudId || (dUuid.length >= 4 && cloudM.id.endsWith("_$dUuid"))) return@forEach
+                if (cloudM.id.contains("abc123") || cloudM.id.startsWith("mock_")) return@forEach
 
                 val cleanCloudName = cloudM.name.lowercase().trim()
                 val cleanKey = cleanCloudName
