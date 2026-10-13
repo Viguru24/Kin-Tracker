@@ -1075,12 +1075,32 @@ fun RadarMap(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── 1. CIRCLE PULL-DOWN MENU (TOP LEFT) ──
-                Box(contentAlignment = Alignment.TopStart) {
+                // ── 1. LEFT: Dedicated Settings Gear Button ──
+                Surface(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable {
+                            showCircleSwitcher = false
+                            showToolsMenu = false
+                            onSettingsClick()
+                        }
+                        .testTag("settings_button"),
+                    color = Color(0xF2161A24),
+                    shape = CircleShape,
+                    border = BorderStroke(1.2.dp, Color(0xFF384358)),
+                    shadowElevation = 8.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("⚙️", fontSize = 16.sp)
+                    }
+                }
+
+                // ── 2. CENTRE: CIRCLE PULL-DOWN MENU ──
+                Box(contentAlignment = Alignment.TopCenter) {
                     val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
                         val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
                         active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
