@@ -18,6 +18,7 @@ object VoiceAnnouncementManager {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val spokenTimestamps = ConcurrentHashMap<String, Long>()
     private var pendingSpeechText: String? = null
+    private var pendingSpeechVolume: Int = 80
 
     // Minimum cooldown between verbal announcements for the exact same person and action (2 minutes)
     const val DEBOUNCE_COOLDOWN_MS = 2 * 60 * 1000L
@@ -69,8 +70,9 @@ object VoiceAnnouncementManager {
 
                         // If an announcement was queued during initialization, speak it now
                         pendingSpeechText?.let { pending ->
+                            val v = pendingSpeechVolume
                             pendingSpeechText = null
-                            speakInternal(pending)
+                            speakInternal(pending, v)
                         }
                     }
                 } else {
@@ -136,6 +138,11 @@ object VoiceAnnouncementManager {
             return
         }
 
+        val volume = AlertNotificationHelper.getNotificationVolume(context)
+        if (volume <= 0) {
+            return
+        }
+
         val formatted = formatSpeechText(rawMessage) ?: return
         val (spokenKey, formattedSpeech) = formatted
 
@@ -150,28 +157,39 @@ object VoiceAnnouncementManager {
 
         mainHandler.post {
             try {
-                val toneG = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+                val toneG = ToneGenerator(AudioManager.STREAM_NOTIFICATION, volume.coerceIn(1, 100))
                 toneG.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
+                mainHandler.postDelayed({
+                    try { toneG.release() } catch (_: Exception) {}
+                }, 350L)
             } catch (e: Exception) {}
 
             mainHandler.postDelayed({
-                speakInternal(formattedSpeech)
+                speakInternal(formattedSpeech, volume)
             }, 300L)
         }
     }
 
-    private fun speakInternal(text: String) {
+    private fun speakInternal(text: String, volume: Int = 80) {
         if (!isTtsReady || textToSpeech == null) {
             pendingSpeechText = text
+            pendingSpeechVolume = volume
             return
         }
 
+        val volFraction = (volume / 100f).coerceIn(0.05f, 1.0f)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "kin_tracker_tts_${System.currentTimeMillis()}")
+                val params = android.os.Bundle().apply {
+                    putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volFraction)
+                }
+                textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "kin_tracker_tts_${System.currentTimeMillis()}")
             } else {
                 @Suppress("DEPRECATION")
-                textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null)
+                val params = java.util.HashMap<String, String>().apply {
+                    put(TextToSpeech.Engine.KEY_PARAM_VOLUME, volFraction.toString())
+                }
+                textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params)
             }
         } catch (e: Exception) {
             // Safe fallback
@@ -187,5 +205,6 @@ object VoiceAnnouncementManager {
     fun clearHistory() {
         spokenTimestamps.clear()
         pendingSpeechText = null
+        pendingSpeechVolume = 80
     }
 }

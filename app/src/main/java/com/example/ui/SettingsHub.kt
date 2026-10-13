@@ -35,6 +35,8 @@ import com.example.data.FamilyMember
 import com.example.data.GroupPinMapping
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.testTag
+import kotlin.math.roundToInt
 
 enum class SettingsTab(val title: String, val emoji: String) {
     CIRCLE("Circle", "👥"),
@@ -82,6 +84,9 @@ fun SettingsHub(
     onToggleDepartureAlerts: (Boolean) -> Unit,
     isVoiceAnnouncementsEnabled: Boolean,
     onToggleVoiceAnnouncements: (Boolean) -> Unit,
+    notificationVolume: Int = 80,
+    onUpdateNotificationVolume: (Int) -> Unit = {},
+    onTestNotificationSound: () -> Unit = {},
     proximityAlertDistanceMeters: Int,
     onUpdateProximityAlertDistance: (Int) -> Unit,
     isLocationPaused: Boolean,
@@ -194,6 +199,9 @@ fun SettingsHub(
                     onToggleDepartureAlerts = onToggleDepartureAlerts,
                     isVoiceAnnouncementsEnabled = isVoiceAnnouncementsEnabled,
                     onToggleVoiceAnnouncements = onToggleVoiceAnnouncements,
+                    notificationVolume = notificationVolume,
+                    onUpdateNotificationVolume = onUpdateNotificationVolume,
+                    onTestNotificationSound = onTestNotificationSound,
                     proximityDistanceMeters = proximityAlertDistanceMeters,
                     onUpdateProximityDistance = onUpdateProximityAlertDistance,
                     members = members
@@ -1156,6 +1164,9 @@ private fun AlertsTabContent(
     onToggleDepartureAlerts: (Boolean) -> Unit,
     isVoiceAnnouncementsEnabled: Boolean,
     onToggleVoiceAnnouncements: (Boolean) -> Unit,
+    notificationVolume: Int,
+    onUpdateNotificationVolume: (Int) -> Unit,
+    onTestNotificationSound: () -> Unit,
     proximityDistanceMeters: Int,
     onUpdateProximityDistance: (Int) -> Unit,
     members: List<FamilyMember>
@@ -1202,6 +1213,156 @@ private fun AlertsTabContent(
                         onCheckedChange = onToggleVoiceAnnouncements,
                         colors = SwitchDefaults.colors(checkedTrackColor = RadarCyan)
                     )
+                }
+
+                HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
+
+                // ── NOTIFICATION VOLUME CONTROL ─────────────────────────────
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val volumeIcon = when {
+                                notificationVolume == 0 -> "🔇"
+                                notificationVolume <= 50 -> "🔉"
+                                else -> "🔊"
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (notificationVolume > 0) {
+                                        onUpdateNotificationVolume(0)
+                                    } else {
+                                        onUpdateNotificationVolume(80)
+                                    }
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Text(volumeIcon, fontSize = 20.sp)
+                            }
+                            Column {
+                                Text(
+                                    text = "Notification Alert Volume",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                Text(
+                                    text = "Arrivals, departures, chimes & voice volume",
+                                    fontSize = 11.sp,
+                                    color = SecondarySlate
+                                )
+                            }
+                        }
+
+                        // Badge showing current volume level
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = when {
+                                notificationVolume == 0 -> ActiveAmber.copy(alpha = 0.18f)
+                                notificationVolume >= 90 -> GlowingEmerald.copy(alpha = 0.18f)
+                                else -> RadarCyan.copy(alpha = 0.15f)
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    notificationVolume == 0 -> ActiveAmber.copy(alpha = 0.6f)
+                                    notificationVolume >= 90 -> GlowingEmerald.copy(alpha = 0.6f)
+                                    else -> RadarCyan.copy(alpha = 0.5f)
+                                }
+                            )
+                        ) {
+                            Text(
+                                text = when (notificationVolume) {
+                                    0 -> "MUTED"
+                                    100 -> "MAX 100%"
+                                    else -> "$notificationVolume%"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    notificationVolume == 0 -> ActiveAmber
+                                    notificationVolume >= 90 -> GlowingEmerald
+                                    else -> RadarCyan
+                                },
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Volume slider
+                    Slider(
+                        value = notificationVolume.toFloat(),
+                        onValueChange = { onUpdateNotificationVolume(it.roundToInt()) },
+                        valueRange = 0f..100f,
+                        steps = 19,
+                        colors = SliderDefaults.colors(
+                            thumbColor = if (notificationVolume == 0) ActiveAmber else RadarCyan,
+                            activeTrackColor = if (notificationVolume == 0) ActiveAmber else RadarCyan,
+                            inactiveTrackColor = SlateBorder
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("notification_volume_slider")
+                    )
+
+                    // Presets & Test Sound Button Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Quick Presets: Mute, 50%, 80%, 100%
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(0 to "Mute", 50 to "50%", 80 to "80%", 100 to "100%").forEach { (vol, label) ->
+                                val isSelected = notificationVolume == vol
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) RadarCyan.copy(alpha = 0.25f) else CosmicSlateCard.copy(alpha = 0.6f),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) RadarCyan else SlateBorder.copy(alpha = 0.6f)
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onUpdateNotificationVolume(vol) }
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) RadarCyan else SecondarySlate,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Test Sound Action Button
+                        Button(
+                            onClick = onTestNotificationSound,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (notificationVolume == 0) SlateBorder else Color(0xFF2E3A52),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .height(30.dp)
+                                .testTag("test_notification_sound_button")
+                        ) {
+                            Text("🔔 Test", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))

@@ -51,6 +51,8 @@ fun SettingsControls(
     onToggleDepartureAlerts: (Boolean) -> Unit = {},
     isVoiceAnnouncementsEnabled: Boolean = false,
     onToggleVoiceAnnouncements: (Boolean) -> Unit = {},
+    notificationVolume: Int = 80,
+    onUpdateNotificationVolume: (Int) -> Unit = {},
     proximityAlertDistanceMeters: Int = 400,
     onUpdateProximityAlertDistance: (Int) -> Unit = {},
     isLocationPaused: Boolean = false,
@@ -445,6 +447,43 @@ fun SettingsControls(
                         uncheckedTrackColor = SlateBorder
                     ),
                     modifier = Modifier.testTag("voice_announcements_switch")
+                )
+            }
+
+            // ── Notification Volume Slider ─────────────────────────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Notification Volume",
+                        color = TextPrimary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = if (notificationVolume == 0) "Muted" else "$notificationVolume%",
+                        color = RadarCyan,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = notificationVolume.toFloat(),
+                    onValueChange = { onUpdateNotificationVolume(it.toInt()) },
+                    valueRange = 0f..100f,
+                    steps = 19,
+                    colors = SliderDefaults.colors(
+                        thumbColor = RadarCyan,
+                        activeTrackColor = RadarCyan,
+                        inactiveTrackColor = SlateBorder
+                    )
                 )
             }
 

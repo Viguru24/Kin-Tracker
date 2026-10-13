@@ -465,6 +465,7 @@ fun MainScreen(
     val memberWeatherDetailed by viewModel.memberWeatherDetailed.collectAsStateWithLifecycle()
     val isCircleDigestReset by viewModel.isCircleDigestReset.collectAsStateWithLifecycle()
     val isVoiceAnnouncementsEnabled by viewModel.isVoiceAnnouncementsEnabled.collectAsStateWithLifecycle()
+    val notificationVolume by viewModel.notificationVolume.collectAsStateWithLifecycle()
     val proximityAlertDistanceMeters by viewModel.proximityAlertDistanceMeters.collectAsStateWithLifecycle()
     val activeRingingMembers by viewModel.activeRingingMembers.collectAsStateWithLifecycle()
 
@@ -912,6 +913,9 @@ fun MainScreen(
                             onToggleDepartureAlerts = { viewModel.toggleDepartureAlerts(it) },
                             isVoiceAnnouncementsEnabled = isVoiceAnnouncementsEnabled,
                             onToggleVoiceAnnouncements = { viewModel.toggleVoiceAnnouncements(it) },
+                            notificationVolume = notificationVolume,
+                            onUpdateNotificationVolume = { viewModel.updateNotificationVolume(it) },
+                            onTestNotificationSound = { viewModel.playNotificationPreview() },
                             proximityAlertDistanceMeters = proximityAlertDistanceMeters,
                             onUpdateProximityAlertDistance = { viewModel.updateProximityAlertDistance(it) },
                             isLocationPaused = isLocationPaused,

@@ -48,6 +48,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val hasCompletedOnboarding = MutableStateFlow(false)
     val isCircleDigestReset = MutableStateFlow(false)
     val isVoiceAnnouncementsEnabled = MutableStateFlow(false)
+    val notificationVolume = MutableStateFlow(80)
     val proximityAlertDistanceMeters = MutableStateFlow(400)
 
 
@@ -740,6 +741,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
               putBoolean("isWifeCloudSimulationEnabled", isWifeCloudSimulationEnabled.value); putBoolean("hasCompletedOnboarding", hasCompletedOnboarding.value)
               putBoolean("isCircleDigestReset", isCircleDigestReset.value)
               putBoolean("isVoiceAnnouncementsEnabled", isVoiceAnnouncementsEnabled.value)
+              putInt("notificationVolume", notificationVolume.value)
               putBoolean("isDepartureAlertsEnabled", isDepartureAlertsEnabled.value)
               putFloat("homeLat", homeLat.toFloat()); putFloat("homeLng", homeLng.toFloat()); putBoolean("isHomeCalibrated", isHomeCalibrated)
               putFloat("homeRadiusMeters", homeRadiusMeters.toFloat())
@@ -786,6 +788,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           hasCompletedOnboarding.value = prefs.getBoolean("hasCompletedOnboarding", false) || groupSyncToken.value.isNotBlank()
           isCircleDigestReset.value = prefs.getBoolean("isCircleDigestReset", false)
           isVoiceAnnouncementsEnabled.value = prefs.getBoolean("isVoiceAnnouncementsEnabled", false)
+          notificationVolume.value = com.example.data.AlertNotificationHelper.getNotificationVolume(getApplication())
           isDepartureAlertsEnabled.value = prefs.getBoolean("isDepartureAlertsEnabled", true)
           proximityAlertDistanceMeters.value = prefs.getInt("proximityAlertDistanceMeters", 400)
           homeLat = prefs.getFloat("homeLat", AppConfig.DEFAULT_HOME_LAT.toFloat()).toDouble()
@@ -797,6 +800,17 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           isWorkCalibrated = prefs.getBoolean("isWorkCalibrated", false)
           workRadiusMeters = prefs.getFloat("workRadiusMeters", AppConfig.DEFAULT_WORK_RADIUS_METERS.toFloat()).toDouble()
       }
+
+    fun updateNotificationVolume(volume: Int) {
+        val clamped = volume.coerceIn(0, 100)
+        notificationVolume.value = clamped
+        com.example.data.AlertNotificationHelper.setNotificationVolume(getApplication(), clamped)
+        savePreferences()
+    }
+
+    fun playNotificationPreview() {
+        com.example.data.AlertNotificationHelper.playNotificationPreview(getApplication(), notificationVolume.value)
+    }
 
     fun setWorkToCurrentLocation() {
         viewModelScope.launch {
