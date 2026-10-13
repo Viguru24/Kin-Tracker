@@ -345,209 +345,181 @@ private fun CircleTabContent(
             val isMemberPaused = member.isLocationPaused || (isMe && isLocationPaused) || member.statusText.contains("Paused", ignoreCase = true)
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onEditMember(member) },
                 colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
                 border = BorderStroke(1.dp, if (isMe) RadarCyan.copy(alpha = 0.5f) else SlateBorder),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Header Row: Avatar, Member Info, and Battery Indicator
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            val parsedColor = try {
-                                Color(android.graphics.Color.parseColor(member.avatarColorHex.ifBlank { "#0061A4" }))
-                            } catch (e: Exception) { RadarCyan }
+                    val parsedColor = try {
+                        Color(android.graphics.Color.parseColor(member.avatarColorHex.ifBlank { "#0061A4" }))
+                    } catch (e: Exception) { RadarCyan }
 
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(parsedColor.copy(alpha = 0.15f))
-                                    .border(1.5.dp, parsedColor, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
-                                    val bitmap = remember(member.photoPath) {
-                                        try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
-                                    }
-                                    if (bitmap != null) {
-                                        Image(
-                                            bitmap = bitmap.asImageBitmap(),
-                                            contentDescription = "Profile Photo",
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
-                                    }
+                    // Avatar with online/offline status dot
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(parsedColor.copy(alpha = 0.15f))
+                                .border(1.5.dp, parsedColor, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
+                                val bitmap = remember(member.photoPath) {
+                                    try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
+                                }
+                                if (bitmap != null) {
+                                    Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Profile Photo",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
                                 } else {
                                     Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
                                 }
+                            } else {
+                                Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 18.sp)
                             }
+                        }
 
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
+                        // Small status dot indicator
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (isOnline) GlowingEmerald else ActiveAmber)
+                                .border(1.5.dp, CosmicSlateCard, CircleShape)
+                        )
+                    }
+
+                    // Member Name and Single-Line Location/Status
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = member.name,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            if (isMe) {
+                                Surface(color = RadarCyan.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
                                     Text(
-                                        text = member.name,
-                                        fontSize = 14.sp,
+                                        "THIS PHONE",
+                                        fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        color = RadarCyan,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
-                                    if (isMe) {
-                                        Surface(color = RadarCyan.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
-                                            Text(
-                                                "THIS PHONE",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = RadarCyan,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                    if (isMemberPaused) {
-                                        Surface(color = ActiveAmber.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
-                                            Text(
-                                                "⏸️ PAUSED",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = ActiveAmber,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
                                 }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = if (isOnline) GlowingEmerald.copy(alpha = 0.12f) else ActiveAmber.copy(alpha = 0.12f)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(6.dp)
-                                                    .clip(CircleShape)
-                                                    .background(if (isOnline) GlowingEmerald else ActiveAmber)
-                                            )
-                                            Text(
-                                                text = if (isOnline) "Live now" else "Offline",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isOnline) GlowingEmerald else ActiveAmber
-                                            )
-                                        }
-                                    }
-
+                            }
+                            if (isMemberPaused) {
+                                Surface(color = ActiveAmber.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
                                     Text(
-                                        text = if (isMemberPaused) "Hidden from map" else member.statusText.ifBlank { "Live GPS" },
-                                        fontSize = 11.sp,
-                                        color = if (isMemberPaused) ActiveAmber else if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        "⏸️ PAUSED",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ActiveAmber,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
                             }
                         }
 
-                        Spacer(Modifier.width(8.dp))
+                        // Combined single-line location & status (guaranteed never to wrap letter-by-letter)
+                        val locationText = if (isMemberPaused) "Hidden from map" else member.statusText.ifBlank { "Live GPS" }
+                        val statusText = if (isOnline) "Live now" else "Offline"
+                        Text(
+                            text = "$locationText • $statusText",
+                            fontSize = 11.sp,
+                            color = if (isMemberPaused) ActiveAmber else if (member.statusText.contains("Home", ignoreCase = true)) GlowingEmerald else SecondarySlate,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
 
-                        // Dedicated Battery pill positioned cleanly without crowding text
+                    // Right Side: Battery Pill + Edit + Actions
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (member.batteryPercentage > 20) Color(0xFFF1F8E9) else Color(0xFFFFEBEE),
                             border = BorderStroke(1.dp, if (member.batteryPercentage > 20) Color(0xFF81C784) else Color(0xFFE57373))
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Text(if (member.isCharging) "⚡" else "🔋", fontSize = 11.sp)
+                                Text(if (member.isCharging) "⚡" else "🔋", fontSize = 10.sp)
                                 Text(
                                     "${member.batteryPercentage}%",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (member.batteryPercentage > 20) Color(0xFF2E7D32) else Color(0xFFC62828)
                                 )
                             }
                         }
-                    }
 
-                    // Bottom Actions Row: Edit Profile, Un-pause, Delete
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = { onEditMember(member) },
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.35f)),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = RadarCyan.copy(alpha = 0.04f)),
-                            modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp), tint = RadarCyan)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Edit Profile & Photo", fontSize = 11.sp, color = RadarCyan, fontWeight = FontWeight.Bold)
+                        if (isMemberPaused && onToggleMemberTracking != null) {
+                            IconButton(
+                                onClick = {
+                                    if (isMe) onToggleLocationPaused(false) else onToggleMemberTracking(member.id)
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "Unpause",
+                                    tint = GlowingEmerald,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        IconButton(
+                            onClick = { onEditMember(member) },
+                            modifier = Modifier.size(30.dp)
                         ) {
-                            if (isMemberPaused && onToggleMemberTracking != null) {
-                                Button(
-                                    onClick = {
-                                        if (isMe) onToggleLocationPaused(false) else onToggleMemberTracking(member.id)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GlowingEmerald),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(30.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("Un-pause", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Edit ${member.name}",
+                                tint = RadarCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
 
-                            if (!isMe && onDeleteMember != null) {
-                                IconButton(
-                                    onClick = { onDeleteMember(member) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Remove ${member.name}",
-                                        tint = ErrorRed,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
+                        if (!isMe && onDeleteMember != null) {
+                            IconButton(
+                                onClick = { onDeleteMember(member) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove ${member.name}",
+                                    tint = ErrorRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
                     }
@@ -1357,7 +1329,7 @@ private fun SystemTabContent(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "Kin Tracker v2.5 • Ra Smart Server Architecture",
+                    text = "Kin Tracker v2.6 • Ra Smart Server Architecture",
                     color = SecondarySlate.copy(alpha = 0.6f),
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace

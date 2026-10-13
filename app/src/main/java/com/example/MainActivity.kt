@@ -896,7 +896,7 @@ fun MainScreen(
                                 border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f))
                             ) {
                                 Text(
-                                    text = "v2.5",
+                                    text = "v2.6",
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
