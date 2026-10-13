@@ -1056,6 +1056,7 @@ fun RadarMap(
 
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
         var showCircleSwitcher by remember { mutableStateOf(false) }
+        var showToolsMenu by remember { mutableStateOf(false) }
         var showAddDeviceDialog by remember { mutableStateOf(false) }
         var addDeviceInitialTab by remember { mutableStateOf(0) }
 
@@ -1078,58 +1079,62 @@ fun RadarMap(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── LEFT: Settings Trigger Button ──
-                Surface(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clickable { onSettingsClick() }
-                        .testTag("settings_button"),
-                    color = Color.White,
-                    shape = CircleShape,
-                    border = BorderStroke(1.dp, SlateBorder),
-                    shadowElevation = 4.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("⚙️", fontSize = 14.sp)
-                    }
-                }
+                // ── 1. CIRCLE PULL-DOWN MENU (TOP LEFT) ──
+                Box(contentAlignment = Alignment.TopStart) {
+                    val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
+                        val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+                        active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
+                    } else if (groupPinMappings.isNotEmpty()) {
+                        groupPinMappings.first().groupName.ifBlank { "Family Circle" }
+                    } else "Family Circle"
 
-                // ── CENTRE: Circle Switcher Pill ──
-                Box(contentAlignment = Alignment.TopCenter) {
                     Surface(
                         modifier = Modifier
-                            .height(40.dp)
-                            .widthIn(min = 130.dp, max = 200.dp)
-                            .clickable { showCircleSwitcher = !showCircleSwitcher },
-                        color = Color(0xFF1E232F),
-                        shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.5.dp, Color(0xFF384358)),
+                            .height(38.dp)
+                            .clickable {
+                                showCircleSwitcher = !showCircleSwitcher
+                                if (showCircleSwitcher) showToolsMenu = false
+                            }
+                            .testTag("circle_switcher_pill"),
+                        color = Color(0xF2161A24),
+                        shape = RoundedCornerShape(19.dp),
+                        border = BorderStroke(1.2.dp, if (showCircleSwitcher) RadarCyan else Color(0xFF384358)),
                         shadowElevation = 8.dp
                     ) {
                         Row(
                             modifier = Modifier
-                                .padding(horizontal = 14.dp)
-                                .fillMaxSize(),
+                                .padding(horizontal = 12.dp)
+                                .fillMaxHeight(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(text = "👥", fontSize = 14.sp)
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(text = "👥", fontSize = 13.sp)
                             Text(
-                                text = if (activeGroupPinCode.isNotBlank()) {
-                                    val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
-                                    active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
-                                } else if (groupPinMappings.isNotEmpty()) {
-                                    groupPinMappings.first().groupName.ifBlank { "Family Circle" }
-                                } else "Family Circle",
+                                text = activeCircleName,
                                 color = Color.White,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(text = if (showCircleSwitcher) "▲" else "▼", color = Color(0xFF00E5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0x3300E5FF)
+                            ) {
+                                Text(
+                                    text = "${members.size}",
+                                    color = RadarCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(
+                                text = if (showCircleSwitcher) "▲" else "▼",
+                                color = RadarCyan,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
@@ -1341,179 +1346,280 @@ fun RadarMap(
                     }
                 }
 
-                // ── RIGHT GROUP: Map Theme, Digest & Offline Cache ──
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Map Theme Trigger Button
-                    Box {
+                // ── 2. TOOLS & VIEWS PULL-DOWN MENU (TOP RIGHT) ──
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Surface(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .clickable {
+                                showToolsMenu = !showToolsMenu
+                                if (showToolsMenu) showCircleSwitcher = false
+                            }
+                            .testTag("tools_menu_button"),
+                        color = Color(0xF2161A24),
+                        shape = RoundedCornerShape(19.dp),
+                        border = BorderStroke(1.2.dp, if (showToolsMenu) RadarCyan else Color(0xFF384358)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .fillMaxHeight(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = when (mapTypeMode) {
+                                    "hybrid" -> "🌙"
+                                    "radar" -> "🟢"
+                                    else -> "🗺️"
+                                },
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "Tools",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (showToolsMenu) "▲" else "▼",
+                                color = RadarCyan,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // Tools & View Pull-Down Menu Dropdown
+                    if (showToolsMenu) {
                         Surface(
                             modifier = Modifier
-                                .size(34.dp)
-                                .clickable { showMapStyleMenu = !showMapStyleMenu },
-                            color = Color.White,
-                            shape = CircleShape,
-                            border = BorderStroke(1.dp, SlateBorder),
-                            shadowElevation = 4.dp
+                                .padding(top = 44.dp)
+                                .widthIn(min = 250.dp, max = 290.dp)
+                                .zIndex(150f),
+                            color = Color(0xF8161A24),
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(1.5.dp, Color(0xFF384358)),
+                            shadowElevation = 20.dp
                         ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Text(
-                                    text = when (mapTypeMode) {
-                                        "hybrid" -> "🌙"
-                                        "radar" -> "🟢"
-                                        else -> "🗺️"
-                                    },
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-
-                        // Floating Map Theme Menu Dropdown
-                        if (showMapStyleMenu) {
-                            Surface(
-                                modifier = Modifier
-                                    .padding(top = 40.dp)
-                                    .widthIn(min = 180.dp, max = 220.dp)
-                                    .zIndex(150f),
-                                color = Color(0xF5121218),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)),
-                                shadowElevation = 20.dp
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                                    Text(
-                                        text = "MAP THEME",
-                                        color = RadarCyan,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                                    )
+                                Text(
+                                    text = "MAP THEME",
+                                    color = Color(0xFF78909C),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 2.dp)
+                                )
+
+                                // Map Theme Selector Chips
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     listOf(
-                                        Triple("streets", "🗺️ Real Map", "Standard crisp streets"),
-                                        Triple("hybrid", "🌙 Midnight Dark", "Dark contrast mode"),
-                                        Triple("radar", "🟢 Retro Sonar", "Tactical radar HUD")
-                                    ).forEach { (mode, label, desc) ->
+                                        Triple("streets", "🗺️ Streets", "Day"),
+                                        Triple("hybrid", "🌙 Dark", "Night"),
+                                        Triple("radar", "🟢 Radar", "Tactical")
+                                    ).forEach { (mode, label, _) ->
                                         val isSelected = mapTypeMode == mode
-                                        Row(
+                                        Surface(
                                             modifier = Modifier
-                                                .fillMaxWidth()
+                                                .weight(1f)
                                                 .clickable {
                                                     mapTypeMode = mode
                                                     prefs.edit().putString("mapTypeMode", mode).apply()
-                                                    showMapStyleMenu = false
-                                                }
-                                                .background(
-                                                    if (isSelected) RadarCyan.copy(alpha = 0.18f)
-                                                    else Color.Transparent
-                                                )
-                                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                                },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected) RadarCyan.copy(alpha = 0.2f) else Color(0xFF1E232F),
+                                            border = BorderStroke(1.dp, if (isSelected) RadarCyan else Color(0xFF2E3846))
                                         ) {
-                                            Column {
+                                            Text(
+                                                text = label,
+                                                color = if (isSelected) RadarCyan else Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                modifier = Modifier.padding(vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider(color = Color(0xFF2E3846), modifier = Modifier.padding(vertical = 2.dp))
+
+                                // 1. Circle Weekly Digest
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showToolsMenu = false
+                                            isDigestOpen = true
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E232F)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text("📊", fontSize = 15.sp)
+                                        Column {
+                                            Text("Weekly Circle Digest", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Travel & safety analytics", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+
+                                // 2. Add Safe Zone (Geofence)
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showToolsMenu = false
+                                            showAddZoneDialog = true
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E232F)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text("🛡️", fontSize = 15.sp)
+                                        Column {
+                                            Text("Add Safe Zone", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Create custom place alert", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+
+                                // 3. Shopping & Notes List
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showToolsMenu = false
+                                            onOpenShoppingList()
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E232F)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text("🛒", fontSize = 15.sp)
+                                        Column {
+                                            Text("Shared Shopping List", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("${shoppingItems.count { !it.isChecked }} active items", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+
+                                // 4. Offline Map Cache Status
+                                var showOfflineInfoDialog by remember { mutableStateOf(false) }
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showOfflineInfoDialog = true
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF1E232F)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text("💾", fontSize = 15.sp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Offline Map Storage", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Active (~25 MB cached)", color = Color(0xFF00FF87), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .background(Color(0xFF00FF87), CircleShape)
+                                        )
+                                    }
+                                }
+
+                                if (showOfflineInfoDialog) {
+                                    AlertDialog(
+                                        onDismissRequest = { showOfflineInfoDialog = false },
+                                        title = {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("🗺️", fontSize = 18.sp)
                                                 Text(
-                                                    text = label,
-                                                    color = if (isSelected) RadarCyan else Color.White,
-                                                    fontSize = 12.sp,
+                                                    text = "Offline Map Storage Active",
+                                                    color = TextPrimary,
+                                                    fontSize = 14.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
+                                            }
+                                        },
+                                        text = {
+                                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 Text(
-                                                    text = desc,
-                                                    color = Color(0xFFB0BEC5),
-                                                    fontSize = 9.sp
+                                                    text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
+                                                    color = TextSecondary,
+                                                    fontSize = 12.sp
+                                                )
+                                                Text(
+                                                    text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
+                                                    color = Color(0xFF00FF87),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
                                                 )
                                             }
+                                        },
+                                        confirmButton = {
+                                            TextButton(onClick = { showOfflineInfoDialog = false }) {
+                                                Text("OK", color = RadarCyan)
+                                            }
+                                        },
+                                        containerColor = CosmicSlateCard,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                }
+
+                                // 5. Circle Settings Hub
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            showToolsMenu = false
+                                            onSettingsClick()
+                                        },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = PrimaryCosmic.copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, PrimaryCosmic.copy(alpha = 0.4f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text("⚙️", fontSize = 15.sp)
+                                        Column {
+                                            Text("Circle Settings Hub", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Profile, places, alerts, ghost mode", color = RadarCyan, fontSize = 10.sp)
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-
-                    // Circle Digest trigger button
-                    Surface(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clickable { isDigestOpen = true }
-                            .testTag("weekly_digest_button"),
-                        color = Color.White,
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, SlateBorder),
-                        shadowElevation = 4.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("📊", fontSize = 14.sp)
-                        }
-                    }
-
-                    // OFFLINE MAP CACHE STATUS
-                    var showOfflineInfoDialog by remember { mutableStateOf(false) }
-                    Surface(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clickable { showOfflineInfoDialog = true }
-                            .testTag("offline_cache_badge"),
-                        color = Color(0xE81A2F1D),
-                        shape = CircleShape,
-                        border = BorderStroke(1.5.dp, Color(0xFF00C853).copy(alpha = 0.6f)),
-                        shadowElevation = 4.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(4.dp)
-                                        .background(Color(0xFF00FF87), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.height(1.dp))
-                                Text("✅", fontSize = 9.sp, lineHeight = 10.sp)
-                            }
-                        }
-                    }
-
-                    if (showOfflineInfoDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showOfflineInfoDialog = false },
-                            title = {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("🗺️", fontSize = 18.sp)
-                                    Text(
-                                        text = "Offline Map Storage Active",
-                                        color = TextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
-                            text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
-                                        color = TextSecondary,
-                                        fontSize = 12.sp
-                                    )
-                                    Text(
-                                        text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
-                                        color = Color(0xFF00FF87),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(onClick = { showOfflineInfoDialog = false }) {
-                                    Text("OK", color = RadarCyan)
-                                }
-                            },
-                            containerColor = CosmicSlateCard,
-                            shape = RoundedCornerShape(16.dp)
-                        )
                     }
                 }
             }
@@ -1761,26 +1867,6 @@ fun RadarMap(
                         tint = if (isCameraFollowingMe) Color.White else RadarCyan,
                         modifier = Modifier.size(20.dp)
                     )
-                }
-            }
-
-            // 2. ADD SAFE ZONE FAB
-            Surface(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clickable {
-                        showAddZoneDialog = true
-                    },
-                color = CosmicSlateCard,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Text("🛡️", fontSize = 18.sp)
                 }
             }
         }

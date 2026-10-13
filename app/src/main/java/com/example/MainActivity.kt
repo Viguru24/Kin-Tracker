@@ -496,7 +496,6 @@ fun MainScreen(
     val scrollState = rememberScrollState()
     val coroutineScope = rememberCoroutineScope()
     var isSettingsOpen by remember { mutableStateOf(false) }
-    var isFamilyListExpanded by remember { mutableStateOf(false) }
     var isFamilyPopupOpen by remember { mutableStateOf(false) }
     var isShoppingListPopupOpen by remember { mutableStateOf(false) }
     var isFeedbackOpen by remember { mutableStateOf(false) }
@@ -590,19 +589,12 @@ fun MainScreen(
 
 
 
-    val sheetHeight by animateDpAsState(
-        targetValue = if (isFamilyListExpanded) 520.dp else 105.dp,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
-    )
-
     // Handle system back gesture / back button to naturally close open panels
-    BackHandler(enabled = isSettingsOpen || isFamilyListExpanded || isFamilyPopupOpen) {
+    BackHandler(enabled = isSettingsOpen || isFamilyPopupOpen) {
         if (isSettingsOpen) {
             isSettingsOpen = false
         } else if (isFamilyPopupOpen) {
             isFamilyPopupOpen = false
-        } else if (isFamilyListExpanded) {
-            isFamilyListExpanded = false
         }
     }
 
@@ -621,7 +613,7 @@ fun MainScreen(
                 .zIndex(98f)
         )
 
-        // 1. Full Screen Radar Map occupying the background
+        // WhatsApp Action Helper
         val openWhatsApp = { member: FamilyMember ->
             val phone = member.phoneNumber
             if (phone.isBlank()) {
@@ -808,27 +800,6 @@ fun MainScreen(
                                 }
                             }
 
-                            // Add New Device button right in the family popup
-                            Surface(
-                                modifier = Modifier
-                                    .clickable {
-                                        isFamilyPopupOpen = false
-                                        showAddDeviceDialog = true
-                                    }
-                                    .padding(vertical = 2.dp),
-                                shape = RoundedCornerShape(20.dp),
-                                color = PrimaryCosmic,
-                                border = BorderStroke(1.dp, RadarCyan)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("👥", fontSize = 11.sp)
-                                    Text("Circles & Devices", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
                         }
                     }
 
@@ -842,18 +813,6 @@ fun MainScreen(
                     ) {
                         Text("👤", fontSize = 18.sp)
                     }
-                }
-
-                // 2. Shopping / Notes Quick Bubble
-                FloatingActionButton(
-                    onClick = { isShoppingListPopupOpen = !isShoppingListPopupOpen },
-                    containerColor = CosmicSlateCard,
-                    contentColor = RadarCyan,
-                    shape = CircleShape,
-                    modifier = Modifier.size(46.dp).border(1.dp, SlateBorder, CircleShape),
-                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                ) {
-                    Text("📝", fontSize = 18.sp)
                 }
             }
         }
