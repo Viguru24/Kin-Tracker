@@ -1216,6 +1216,8 @@ fun RadarMap(
                                                             color = Color(0xFF00E5FF),
                                                             fontSize = 10.sp,
                                                             fontWeight = FontWeight.Black,
+                                                            maxLines = 1,
+                                                            softWrap = false,
                                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                         )
                                                     }

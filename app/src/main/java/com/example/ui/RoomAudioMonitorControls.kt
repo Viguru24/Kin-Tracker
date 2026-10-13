@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -132,6 +133,8 @@ fun RoomAudioMonitorControls(
                             color = RadarCyan,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -193,7 +196,8 @@ fun RoomAudioMonitorControls(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f).padding(end = 8.dp)
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -208,12 +212,14 @@ fun RoomAudioMonitorControls(
                                             )
                                         }
 
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f, fill = false)) {
                                             Text(
                                                 text = memberFirstName,
                                                 color = Color(0xFF1E2430),
                                                 fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -226,7 +232,9 @@ fun RoomAudioMonitorControls(
                                                             text = "Live Audio Stream Active",
                                                             color = GlowingEmerald,
                                                             fontSize = 11.sp,
-                                                            fontWeight = FontWeight.SemiBold
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                     isTransmitting -> {
@@ -235,14 +243,18 @@ fun RoomAudioMonitorControls(
                                                             text = "Broadcasting Live" + if (!memberIp.isNullOrBlank()) " • $memberIp" else "",
                                                             color = GlowingEmerald,
                                                             fontSize = 11.sp,
-                                                            fontWeight = FontWeight.SemiBold
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                     else -> {
                                                         Text(
                                                             text = if (!memberIp.isNullOrBlank()) "Standby • IP: $memberIp" else "Standby (Tap to connect)",
                                                             color = Color(0xFF5A6275),
-                                                            fontSize = 11.sp
+                                                            fontSize = 11.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                 }

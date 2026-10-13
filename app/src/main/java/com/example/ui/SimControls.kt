@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -88,33 +89,48 @@ fun SettingsControls(
                         modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
                         Text(if (isLocationPaused) "⏸️" else "🛰️", fontSize = 22.sp)
-                        Column {
+                        Column(
+                            modifier = Modifier.weight(1f, fill = false),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Device Location Tracking",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                Surface(
+                                    color = if (isLocationPaused) ActiveAmber.copy(alpha = 0.15f) else Color(0xFF00E676).copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (isLocationPaused) "PAUSED" else "ACTIVE",
+                                        color = if (isLocationPaused) ActiveAmber else Color(0xFF00E676),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
                                 Text(
-                                    text = "Device Location Tracking",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = if (isLocationPaused) "PAUSED" else "ACTIVE",
-                                    color = if (isLocationPaused) ActiveAmber else Color(0xFF00E676),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
+                                    text = if (isLocationPaused)
+                                        "0% battery drain (Home mode)"
+                                    else
+                                        "Broadcasting live GPS to circle",
+                                    color = if (isLocationPaused) ActiveAmber else SecondarySlate,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            Text(
-                                text = if (isLocationPaused)
-                                    "GPS & background services stopped • 0% battery drain (Home mode)"
-                                else
-                                    "Broadcasting live GPS coordinates to family circle",
-                                color = if (isLocationPaused) ActiveAmber else SecondarySlate,
-                                fontSize = 10.sp
-                            )
                         }
                     }
                     Switch(

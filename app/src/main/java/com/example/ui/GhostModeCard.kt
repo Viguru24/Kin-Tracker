@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
@@ -68,7 +69,7 @@ fun GhostModeCard(
                 modifier = Modifier.weight(1f).padding(end = 8.dp)
             ) {
                 Text(if (isGhostMode) "👻" else "👁️", fontSize = 20.sp)
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -77,16 +78,27 @@ fun GhostModeCard(
                             text = "Ghost Mode (Privacy)",
                             color = TextPrimary,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         if (isGhostMode) {
-                            Text(
-                                text = "ACTIVE",
-                                color = ActiveAmber,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Surface(
+                                color = ActiveAmber.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "ACTIVE",
+                                    color = ActiveAmber,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                     Text(
@@ -94,7 +106,9 @@ fun GhostModeCard(
                             "Pauses live GPS broadcast • Remaining: $timeLeftString"
                         else "Freezes your location for 2 hours",
                         color = if (isGhostMode) ActiveAmber else SecondarySlate,
-                        fontSize = 10.sp
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

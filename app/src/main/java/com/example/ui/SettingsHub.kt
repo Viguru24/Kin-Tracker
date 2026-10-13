@@ -17,6 +17,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -133,7 +134,9 @@ fun SettingsHub(
                             text = tab.title,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else TextPrimary
+                            color = if (isSelected) Color.White else TextPrimary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -259,12 +262,12 @@ private fun CircleTabContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(GlowingEmerald))
-                            Text("Family Circle", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("Family Circle", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Text("Connected to Ra Server • Real-Time Sync", fontSize = 11.sp, color = SecondarySlate)
+                        Text("Connected to Ra Server • Real-Time Sync", fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
 
                     // PIN Code Badge with Copy
@@ -279,7 +282,7 @@ private fun CircleTabContent(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("PIN $pinCode", fontSize = 13.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace, color = RadarCyan)
+                            Text("PIN $pinCode", fontSize = 13.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace, color = RadarCyan, maxLines = 1, softWrap = false)
                             Icon(Icons.Default.Share, contentDescription = "Copy", modifier = Modifier.size(12.dp), tint = RadarCyan)
                         }
                     }
@@ -294,7 +297,7 @@ private fun CircleTabContent(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("+ Pair New Phone", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Pair New Phone", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
 
                     OutlinedButton(
@@ -303,7 +306,7 @@ private fun CircleTabContent(
                         border = BorderStroke(1.dp, SlateBorder),
                         modifier = Modifier.height(40.dp)
                     ) {
-                        Text("Switch Circle", fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+                        Text("Switch Circle", fontSize = 12.sp, color = TextPrimary, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -427,6 +430,8 @@ private fun CircleTabContent(
                                         fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = RadarCyan,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
@@ -438,6 +443,8 @@ private fun CircleTabContent(
                                         fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = ActiveAmber,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
@@ -736,7 +743,8 @@ private fun ProfileTabContent(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
                         val parsedBorderColor = try {
                             Color(android.graphics.Color.parseColor(selectedColor.ifBlank { "#0061A4" }))
@@ -770,17 +778,21 @@ private fun ProfileTabContent(
                             }
                         }
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Editing: ${activeMember.name}",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Tap photo or button to upload & crop",
                                 fontSize = 11.sp,
-                                color = SecondarySlate
+                                color = SecondarySlate,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -796,7 +808,7 @@ private fun ProfileTabContent(
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = null, tint = RadarCyan, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Photo & Crop", color = RadarCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Photo & Crop", color = RadarCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
 
@@ -957,12 +969,14 @@ private fun ProfileTabContent(
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("👻", fontSize = 16.sp)
-                            Text("Ghost Mode (Privacy)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                            Text("Ghost Mode (Privacy)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Text(
                             text = if (isGhostMode) "Active • $timeLeftString remaining" else "Temporarily hides your live location from circle",
                             fontSize = 11.sp,
-                            color = if (isGhostMode) ActiveAmber else SecondarySlate
+                            color = if (isGhostMode) ActiveAmber else SecondarySlate,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -1014,14 +1028,30 @@ private fun PlacesTabContent(
                         modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
                         Text("🏠", fontSize = 20.sp)
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("Home Base Zone", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text(
+                                    "Home Base Zone",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
                                 Surface(color = GlowingEmerald.copy(alpha = 0.12f), shape = RoundedCornerShape(4.dp)) {
-                                    Text("AUTO-SYNCED", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GlowingEmerald, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                    Text(
+                                        "AUTO-SYNCED",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = GlowingEmerald,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
                                 }
                             }
-                            Text(String.format(java.util.Locale.US, "GPS: %.4f, %.4f", homeLat, homeLng), fontSize = 11.sp, color = SecondarySlate)
+                            Text(String.format(java.util.Locale.US, "GPS: %.4f, %.4f", homeLat, homeLng), fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
 
@@ -1032,7 +1062,7 @@ private fun PlacesTabContent(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier.height(32.dp)
                     ) {
-                        Text("Recalibrate", fontSize = 11.sp, color = RadarCyan, fontWeight = FontWeight.Bold)
+                        Text("Recalibrate", fontSize = 11.sp, color = RadarCyan, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
 
@@ -1082,12 +1112,14 @@ private fun PlacesTabContent(
                         modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
                         Text("💼", fontSize = 18.sp)
-                        Column {
-                            Text("Work / School Zone", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                            Text("Work / School Zone", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
                                 text = if (isWorkCalibrated) String.format(java.util.Locale.US, "GPS: %.4f, %.4f", workLat, workLng) else "Optional • Not configured",
                                 fontSize = 11.sp,
-                                color = SecondarySlate
+                                color = SecondarySlate,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -1099,7 +1131,7 @@ private fun PlacesTabContent(
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 modifier = Modifier.height(30.dp)
-                            ) { Text("Clear", fontSize = 10.sp, color = ErrorRed) }
+                            ) { Text("Clear", fontSize = 10.sp, color = ErrorRed, maxLines = 1, softWrap = false) }
                         }
                         Button(
                             onClick = onCalibrateWork,
@@ -1107,7 +1139,7 @@ private fun PlacesTabContent(
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                             modifier = Modifier.height(30.dp)
-                        ) { Text(if (isWorkCalibrated) "Update" else "Set Work", fontSize = 10.sp) }
+                        ) { Text(if (isWorkCalibrated) "Update" else "Set Work", fontSize = 10.sp, maxLines = 1, softWrap = false) }
                     }
                 }
             }
@@ -1228,21 +1260,44 @@ private fun SystemTabContent(
                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                 ) {
                     Text(if (isLocationPaused) "⏸️" else "🛰️", fontSize = 22.sp)
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Background GPS Tracking", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Column(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "Background GPS Tracking",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (isLocationPaused) ActiveAmber.copy(alpha = 0.15f) else GlowingEmerald.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isLocationPaused) "PAUSED" else "ACTIVE",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (isLocationPaused) ActiveAmber else GlowingEmerald,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
                             Text(
-                                if (isLocationPaused) "PAUSED" else "ACTIVE",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isLocationPaused) ActiveAmber else GlowingEmerald
+                                text = if (isLocationPaused) "0% battery drain (Home mode)" else "Broadcasting live to circle",
+                                fontSize = 11.sp,
+                                color = SecondarySlate,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            text = if (isLocationPaused) "0% battery drain (Home mode)" else "Broadcasting live GPS to family circle",
-                            fontSize = 11.sp,
-                            color = SecondarySlate
-                        )
                     }
                 }
 
@@ -1266,16 +1321,28 @@ private fun SystemTabContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    ) {
                         Text("🖥️", fontSize = 18.sp)
-                        Column {
-                            Text("Ra Sync Server", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("api.cosmowhisper.com", fontSize = 11.sp, color = SecondarySlate)
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                            Text("Ra Sync Server", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("api.cosmowhisper.com", fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
 
                     Surface(color = GlowingEmerald.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
-                        Text("ONLINE • 200 OK", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GlowingEmerald, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                        Text(
+                            "ONLINE • 200 OK",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = GlowingEmerald,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
                     }
                 }
 
@@ -1298,9 +1365,9 @@ private fun SystemTabContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text("Activity History Logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("${activityLogs.size} recorded events", fontSize = 11.sp, color = SecondarySlate)
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Activity History Logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${activityLogs.size} recorded events", fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
                 OutlinedButton(
@@ -1309,7 +1376,7 @@ private fun SystemTabContent(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                     modifier = Modifier.height(32.dp)
                 ) {
-                    Text("Clear", fontSize = 11.sp, color = ErrorRed)
+                    Text("Clear", fontSize = 11.sp, color = ErrorRed, maxLines = 1, softWrap = false)
                 }
             }
         }

@@ -726,7 +726,7 @@ fun CloudSyncControls(
                                                         .background(GlowingEmerald.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
                                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                                 ) {
-                                                    Text("ACTIVE", color = GlowingEmerald, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                                    Text("ACTIVE", color = GlowingEmerald, fontSize = 7.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                                 }
                                             }
                                             IconButton(
