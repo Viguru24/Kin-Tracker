@@ -18,9 +18,9 @@ private val DarkColorScheme = darkColorScheme(
     background = CosmicBlack,
     surface = CosmicSlateCard,
     error = ErrorRed,
-    onPrimary = Color.Black,
+    onPrimary = Color.White,
     onSecondary = Color.White,
-    onTertiary = Color.Black,
+    onTertiary = Color.White,
     onBackground = Color(0xFF141D26),
     onSurface = Color(0xFF141D26)
 )

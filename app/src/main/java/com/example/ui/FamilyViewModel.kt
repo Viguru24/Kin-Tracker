@@ -1015,13 +1015,13 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             initialEditor.putBoolean("deleted_dad's other device", true)
             initialEditor.putBoolean("deleted_member_dad's other device", true)
         }
-        initialEditor.commit()
+        initialEditor.apply()
 
         val kPrefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
         kPrefs.edit()
             .remove("is_member_paused_$cleanId")
             .remove("is_member_paused_$memberId")
-            .commit()
+            .apply()
 
         viewModelScope.launch {
             val myCloudIdVal = "device_" + myDeviceName.value.lowercase().replace("\\s".toRegex(), "") + "_" + myDeviceUUID.value
@@ -1047,7 +1047,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 editor.putBoolean("deleted_${targetName.lowercase()}", true)
                 editor.putBoolean("deleted_member_${targetName.lowercase()}", true)
             }
-            editor.commit()
+            editor.apply()
 
             // 2. Delete the target record(s) from local database (NEVER delete 'me' or active device)
             for (m in allCurrent) {
@@ -1183,7 +1183,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         kPrefs.edit()
             .putBoolean("is_member_paused_$memberId", targetPaused)
             .putBoolean("is_member_paused_$cleanId", targetPaused)
-            .commit()
+            .apply()
 
         if (targetPaused && selectedMemberId.value == memberId) {
             selectedMemberId.value = null
@@ -1197,7 +1197,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         val targetName = localTarget?.name ?: memberId
         kPrefs.edit()
             .putBoolean("is_member_paused_$targetIdToPause", targetPaused)
-            .commit()
+            .apply()
 
         // Update local database immediately so the device is removed from / restored to the screen instantly
         localTarget?.let {

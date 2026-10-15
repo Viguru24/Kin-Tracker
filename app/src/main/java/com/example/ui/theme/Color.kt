@@ -8,6 +8,11 @@ val CosmicSlateCard = Color(0xFFFFFFFF)      // Cards background (Pure solid whi
 val SlateBorder = Color(0xFFE1E2E9)          // Thin delicate borders (#E1E2E9)
 val DividerGray = Color(0xFFF0F2F6)          // Soft dividers
 
+// Semantic aliases
+val PageBackground = CosmicBlack
+val CardBackground = CosmicSlateCard
+val CardBorder = SlateBorder
+
 // Accent & Status colors matching clean material design
 val RadarCyan = Color(0xFF0061A4)            // Primary active navy accent (#0061A4)
 val GlowingEmerald = Color(0xFF2E7D32)       // Good safe status / Arrived indicator
