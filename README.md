@@ -96,6 +96,20 @@ The compiled APK will be output to: `app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
+## 🚀 Sovereign Over-The-Air (OTA) Update Hub
+The Kin-Tracker backend server (`server/src/routes/updates.js`) hosts the central **Sovereign OTA Update Hub** for your entire Android application ecosystem:
+- **Kin-Tracker** (`kin-tracker`)
+- **COSMO Symphony Companion** (`cosmo-companion`)
+- **Jinshin Jyutsu Android** (`jinshin-jyutsu`)
+- **Cosmo Flow Personal Assistant** (`cosmo-flow`)
+- **Cosmo Compendium Cooking App** (`cosmo-compendium`)
+
+Check live system status anytime at [`https://api.cosmowhisper.com/updates/status`](https://api.cosmowhisper.com/updates/status).  
+To publish updates, use `.\publish-update.ps1` or double-click `PUBLISH_UPDATE.bat`.  
+See [OTA_UPDATE_GUIDE.md](OTA_UPDATE_GUIDE.md) for full endpoint specifications.
+
+---
+
 ## 🌟 The Ecosystem
 
 Discover other sovereign, high-performance tools by **[Viguru24](https://github.com/Viguru24)**:
