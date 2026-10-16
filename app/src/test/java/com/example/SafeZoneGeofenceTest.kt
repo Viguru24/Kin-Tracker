@@ -134,4 +134,32 @@ class SafeZoneGeofenceTest {
         assertEquals(51.3205711, pinnedPos2.latitude, 0.00001)
         assertEquals(-0.1292201, pinnedPos2.longitude, 0.00001)
     }
+
+    @Test
+    fun testOverlappingResidentialSafeZoneDoesNotOverrideWoodcoteHighSchool() {
+        // Residential safe zone right next to or overlapping the school campus (e.g. Julie Guest's house)
+        val julieGuestZone = SafeZone(
+            id = "zone_julie_guest",
+            name = "Julie Guest's house",
+            latitude = 51.3202450, // Right next to Eloise's classroom (less than 1 meter away)
+            longitude = -0.1284880,
+            radiusMeters = 100.0,
+            iconName = "home"
+        )
+
+        // Eloise at Woodcote High School (62m from school center, but 1m from Julie Guest's pin)
+        val matched = com.example.data.GeoUtils.matchSafeZone(
+            lat = 51.3202444,
+            lng = -0.1284886,
+            customZones = listOf(julieGuestZone),
+            currentStatusText = "Live GPS tracking (1.30 km away)"
+        )
+
+        assertNotNull("Must match a safe zone", matched)
+        assertEquals(
+            "School campus must take precedence over overlapping residential zone",
+            "Woodcote High School",
+            matched!!.name
+        )
+    }
 }

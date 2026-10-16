@@ -153,14 +153,36 @@ object GeoUtils {
     ): SafeZone? {
         if (lat == 0.0 && lng == 0.0) return null
         val zones = withDefaultSafeZones(customZones)
-        return zones.filter { zone ->
+        val matchingZones = zones.filter { zone ->
             val baseRadius = effectiveSafeZoneRadiusMeters(zone)
             val alreadyAtThisZone = previousZoneId == zone.id ||
                 previousZoneId == "zone:${zone.id}" ||
                 currentStatusText.contains("At ${zone.name}", ignoreCase = true)
             val limit = if (alreadyAtThisZone) baseRadius + exitBufferMeters else baseRadius + 15.0
             distanceMeters(lat, lng, zone.latitude, zone.longitude) <= limit
-        }.minByOrNull { zone ->
+        }
+
+        if (matchingZones.isEmpty()) return null
+
+        // Priority 1: If already locked into an active zone, retain it for stability
+        val existingActiveZone = matchingZones.firstOrNull { zone ->
+            previousZoneId == zone.id ||
+                previousZoneId == "zone:${zone.id}" ||
+                currentStatusText.contains("At ${zone.name}", ignoreCase = true)
+        }
+        if (existingActiveZone != null) return existingActiveZone
+
+        // Priority 2: School campus boundaries always take precedence over overlapping residential safe zones
+        val schoolZone = matchingZones.firstOrNull { zone ->
+            zone.iconName.equals("school", ignoreCase = true) ||
+                zone.name.contains("school", ignoreCase = true) ||
+                zone.name.contains("college", ignoreCase = true) ||
+                zone.name.contains("academy", ignoreCase = true)
+        }
+        if (schoolZone != null) return schoolZone
+
+        // Priority 3: Fall back to closest center pin
+        return matchingZones.minByOrNull { zone ->
             distanceMeters(lat, lng, zone.latitude, zone.longitude)
         }
     }

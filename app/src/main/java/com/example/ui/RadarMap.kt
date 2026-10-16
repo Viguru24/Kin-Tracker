@@ -247,7 +247,7 @@ fun computeClusterLayout(
     // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor
     for (cluster in clusters) {
         val isHomeCluster = cluster.any { homeClusterMembers.contains(it) }
-        val matchedZone = safeZones.firstOrNull { zone ->
+        val matchedZone = effectiveSafeZones.firstOrNull { zone ->
             safeZoneClusterMembers[zone.id]?.any { cluster.contains(it) } == true
         }
         val isWorkCluster = cluster.any { workClusterMembers.contains(it) }
