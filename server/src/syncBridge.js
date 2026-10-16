@@ -4,6 +4,18 @@ const db = require('./db');
 const SYNC_URL = 'https://api.cosmowhisper.com/sync/81e5632c_pin_group';
 const activeRingTimers = new Map();
 
+function distanceMeters(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
 /**
  * Fetch live data from production VPS into local database
  */
@@ -27,12 +39,41 @@ async function syncLiveProductionFamily() {
                             circle.lastUpdated = json.lastUpdated || Date.now();
                             db.saveCircle(circle);
 
+                            const safeZones = db.getCircleSafeZones ? db.getCircleSafeZones(circle.id) : [];
+
                             Object.values(json.members).forEach(m => {
                                 if (m && m.id) {
-                                    db.saveMember({
-                                        ...m,
-                                        circleId: circle.id
-                                    });
+                                    const normalized = { ...m, circleId: circle.id };
+                                    const lat = Number(normalized.y || 0);
+                                    const lng = Number(normalized.x || 0);
+                                    const speed = Number(normalized.speedMph || 0);
+                                    const isAlarmOrPaused = normalized.statusText === '🚨 ALARM' ||
+                                        normalized.isLocationPaused ||
+                                        String(normalized.statusText || '').toLowerCase().includes('paused');
+
+                                    if (!isAlarmOrPaused && lat !== 0 && lng !== 0 && speed < 3.5) {
+                                        const homeDist = (circle.homeLat && circle.homeLng)
+                                            ? distanceMeters(lat, lng, Number(circle.homeLat), Number(circle.homeLng))
+                                            : Infinity;
+                                        if (homeDist <= Math.max(Number(circle.homeRadiusMeters || 140), 150)) {
+                                            normalized.x = Number(circle.homeLng);
+                                            normalized.y = Number(circle.homeLat);
+                                            normalized.speedMph = 0;
+                                            normalized.statusText = 'At Home (Live GPS)';
+                                        } else {
+                                            const matchedZone = safeZones.find(z => {
+                                                const effRadius = Math.max(Number(z.radiusMeters || 150), 140) + 25;
+                                                return distanceMeters(lat, lng, Number(z.latitude), Number(z.longitude)) <= effRadius;
+                                            });
+                                            if (matchedZone) {
+                                                normalized.x = Number(matchedZone.longitude);
+                                                normalized.y = Number(matchedZone.latitude);
+                                                normalized.speedMph = 0;
+                                                normalized.statusText = `At ${matchedZone.name}`;
+                                            }
+                                        }
+                                    }
+                                    db.saveMember(normalized);
                                 }
                             });
                         }

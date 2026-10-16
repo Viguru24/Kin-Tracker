@@ -68,4 +68,100 @@ object GeoUtils {
         val digitsOnly = raw.replace(Regex("[^0-9+]"), "")
         return if (digitsOnly.startsWith("+")) digitsOnly else digitsOnly.replace("+", "")
     }
+
+    val DEFAULT_WOODCOTE_HIGH_SCHOOL = SafeZone(
+        id = "zone_woodcote_high_school",
+        name = "Woodcote High School",
+        latitude = 51.3205711,
+        longitude = -0.1292201,
+        radiusMeters = 180.0,
+        iconName = "school"
+    )
+
+    val DEFAULT_WOODCOTE_PRIMARY_SCHOOL = SafeZone(
+        id = "zone_woodcote_school",
+        name = "Woodcote Primary School",
+        latitude = 51.3279926,
+        longitude = -0.1405488,
+        radiusMeters = 140.0,
+        iconName = "school"
+    )
+
+    /**
+     * Computes a realistic effective radius for a SafeZone so large school campuses
+     * and indoor Wi-Fi/cellular triangulation drift do not cause boundary bounce.
+     */
+    fun effectiveSafeZoneRadiusMeters(zone: SafeZone): Double {
+        val isWoodcoteHigh = zone.id == "zone_woodcote_high_school" ||
+            (zone.name.contains("Woodcote", ignoreCase = true) && zone.name.contains("High", ignoreCase = true)) ||
+            zone.name.contains("Woodcoat", ignoreCase = true)
+        val isWoodcotePrimary = zone.id == "zone_woodcote_school" ||
+            (zone.name.contains("Woodcote", ignoreCase = true) && zone.name.contains("Primary", ignoreCase = true))
+        val isSchool = zone.iconName.equals("school", ignoreCase = true) ||
+            zone.name.contains("school", ignoreCase = true) ||
+            zone.name.contains("college", ignoreCase = true) ||
+            zone.name.contains("academy", ignoreCase = true)
+
+        return when {
+            isWoodcoteHigh -> maxOf(zone.radiusMeters, 180.0)
+            isWoodcotePrimary -> maxOf(zone.radiusMeters, 140.0)
+            isSchool -> maxOf(zone.radiusMeters, 150.0)
+            else -> maxOf(zone.radiusMeters, 100.0)
+        }
+    }
+
+    /**
+     * Merges user-configured SafeZones with the default Woodcote school zones and upgrades
+     * any legacy narrow school radii to their full campus effective radii.
+     */
+    fun withDefaultSafeZones(customZones: List<SafeZone>): List<SafeZone> {
+        val result = customZones.map { zone ->
+            zone.copy(radiusMeters = effectiveSafeZoneRadiusMeters(zone))
+        }.toMutableList()
+
+        val hasHighSchool = result.any {
+            it.id == "zone_woodcote_high_school" ||
+                (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("High", ignoreCase = true)) ||
+                it.name.contains("Woodcoat", ignoreCase = true)
+        }
+        if (!hasHighSchool) {
+            result.add(DEFAULT_WOODCOTE_HIGH_SCHOOL)
+        }
+
+        val hasPrimarySchool = result.any {
+            it.id == "zone_woodcote_school" ||
+                (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true))
+        }
+        if (!hasPrimarySchool) {
+            result.add(DEFAULT_WOODCOTE_PRIMARY_SCHOOL)
+        }
+
+        return result
+    }
+
+    /**
+     * Evaluates whether a coordinate is inside any SafeZone, applying exit hysteresis when
+     * the member's current status or previous barrier indicates they are already at that zone.
+     */
+    fun matchSafeZone(
+        lat: Double,
+        lng: Double,
+        customZones: List<SafeZone>,
+        currentStatusText: String = "",
+        previousZoneId: String? = null,
+        exitBufferMeters: Double = 60.0
+    ): SafeZone? {
+        if (lat == 0.0 && lng == 0.0) return null
+        val zones = withDefaultSafeZones(customZones)
+        return zones.filter { zone ->
+            val baseRadius = effectiveSafeZoneRadiusMeters(zone)
+            val alreadyAtThisZone = previousZoneId == zone.id ||
+                previousZoneId == "zone:${zone.id}" ||
+                currentStatusText.contains("At ${zone.name}", ignoreCase = true)
+            val limit = if (alreadyAtThisZone) baseRadius + exitBufferMeters else baseRadius + 15.0
+            distanceMeters(lat, lng, zone.latitude, zone.longitude) <= limit
+        }.minByOrNull { zone ->
+            distanceMeters(lat, lng, zone.latitude, zone.longitude)
+        }
+    }
 }

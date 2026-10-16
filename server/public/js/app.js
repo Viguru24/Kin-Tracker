@@ -584,22 +584,35 @@
     function computeClusterLayout(members, circle) {
         const homeLat = circle ? Number(circle.homeLat || 0) : 0;
         const homeLng = circle ? Number(circle.homeLng || 0) : 0;
-        const homeRadius = circle ? Number(circle.homeRadiusMeters || 140) : 140;
+        const homeRadius = Math.max(circle ? Number(circle.homeRadiusMeters || 140) : 140, 150);
         const workLat = circle ? Number(circle.workLat || 0) : 0;
         const workLng = circle ? Number(circle.workLng || 0) : 0;
         const workRadius = circle ? Number(circle.workRadiusMeters || 75) : 75;
         const isWorkCalibrated = Boolean(circle && circle.isWorkCalibrated);
 
+        const defaultSchoolZones = [
+            { id: 'zone_woodcote_high_school', name: 'Woodcote High School', latitude: 51.3205711, longitude: -0.1292201, radiusMeters: 180 },
+            { id: 'zone_woodcote_school', name: 'Woodcote Primary School', latitude: 51.3279926, longitude: -0.1405488, radiusMeters: 140 }
+        ];
+        const safeZones = [...((circle && circle.safeZones) || [])];
+        defaultSchoolZones.forEach(def => {
+            if (!safeZones.some(z => z.id === def.id || String(z.name || '').toLowerCase() === def.name.toLowerCase())) {
+                safeZones.push(def);
+            }
+        });
+
         const adjustedCoordinates = {};
         const activeMembers = (members || []).filter(m => Number(m.x) !== 0 && Number(m.y) !== 0);
 
         const homeClusterMembers = [];
+        const safeZoneClusterMembers = {};
         const workClusterMembers = [];
         const unassignedMembers = [];
 
-        function isMemberMoving(m) {
+        function isMemberMoving(m, lockedByStatus) {
             if (m.isComingHome) return true;
-            if (m.speedMph && Number(m.speedMph) >= 1.5) return true;
+            if (lockedByStatus && Number(m.speedMph || 0) < 4.0) return false;
+            if (m.speedMph && Number(m.speedMph) >= 3.5) return true;
             const s = (m.statusText || '').toLowerCase();
             return s.includes('walk') || s.includes('moving') || s.includes('driving') ||
                    s.includes('bike') || s.includes('transit') || s.includes('commute');
@@ -608,22 +621,33 @@
         activeMembers.forEach(m => {
             const lat = Number(m.y);
             const lng = Number(m.x);
-            const atHomeStatus = (m.statusText || '').toLowerCase().includes('home');
-            const atWorkStatus = (m.statusText || '').toLowerCase().includes('work');
+            const statusLower = (m.statusText || '').toLowerCase();
+            const atHomeStatus = statusLower.includes('at home');
+            const atWorkStatus = statusLower.includes('at work');
 
             const distToHome = (homeLat && homeLng) ? distanceMeters(lat, lng, homeLat, homeLng) : Infinity;
             const isHome = (homeLat && homeLng) && (distToHome <= homeRadius || atHomeStatus);
 
+            const matchedZone = !isHome ? safeZones.find(z => {
+                const effRadius = Math.max(Number(z.radiusMeters || 150), 140) + 25;
+                const atZoneStatus = statusLower.includes(`at ${String(z.name || '').toLowerCase()}`);
+                return distanceMeters(lat, lng, Number(z.latitude), Number(z.longitude)) <= effRadius || atZoneStatus;
+            }) : null;
+            const atZoneStatus = Boolean(matchedZone && statusLower.includes(`at ${String(matchedZone.name || '').toLowerCase()}`));
+
             const distToWork = (isWorkCalibrated && workLat && workLng) ? distanceMeters(lat, lng, workLat, workLng) : Infinity;
             const isWork = (isWorkCalibrated && workLat && workLng) && (distToWork <= workRadius || atWorkStatus);
 
-            if (isMemberMoving(m)) {
+            if (isMemberMoving(m, atHomeStatus || atZoneStatus || atWorkStatus)) {
                 adjustedCoordinates[m.id] = [lat, lng];
                 return;
             }
 
             if (isHome) {
                 homeClusterMembers.push(m);
+            } else if (matchedZone) {
+                if (!safeZoneClusterMembers[matchedZone.id]) safeZoneClusterMembers[matchedZone.id] = [];
+                safeZoneClusterMembers[matchedZone.id].push(m);
             } else if (isWork) {
                 workClusterMembers.push(m);
             } else {
@@ -631,12 +655,12 @@
             }
         });
 
-        function layoutCluster(clusterList, anchorLat, anchorLng, isHomeOrWork = false) {
+        function layoutCluster(clusterList, anchorLat, anchorLng, isBarrierZone = false) {
             if (clusterList.length === 0) return;
             if (clusterList.length === 1) {
-                if (isHomeOrWork) {
+                if (isBarrierZone) {
                     const spreadRadiusMeters = 14.0;
-                    const angle = -Math.PI / 2.0; // Place above center pin so both Home pin and avatar are visible
+                    const angle = -Math.PI / 2.0; // Place above center pin so both zone pin and avatar are visible
                     const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
                     const deltaLat = (spreadRadiusMeters * Math.sin(angle)) / 111139.0;
                     const deltaLng = (spreadRadiusMeters * Math.cos(angle)) / (111139.0 * cosLat);
@@ -670,6 +694,14 @@
         } else {
             homeClusterMembers.forEach(m => { adjustedCoordinates[m.id] = [Number(m.y), Number(m.x)]; });
         }
+
+        // Layout SafeZone (School) Clusters
+        safeZones.forEach(z => {
+            const list = safeZoneClusterMembers[z.id] || [];
+            if (list.length > 0) {
+                layoutCluster(list, Number(z.latitude), Number(z.longitude), true);
+            }
+        });
 
         // Layout Work Cluster
         if (isWorkCalibrated && workLat && workLng && workClusterMembers.length > 0) {

@@ -118,7 +118,7 @@ fun computeClusterLayout(
     workLng: Double,
     workRadiusMeters: Double,
     previousBarrierMembership: Map<String, String> = emptyMap(),
-    exitBufferMeters: Double = 45.0,
+    exitBufferMeters: Double = 60.0,
     barrierBreakoutSpeedMph: Double = 4.0
 ): ClusterLayoutResult {
     val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
@@ -126,6 +126,7 @@ fun computeClusterLayout(
     val clusters = mutableListOf<List<String>>()
     val barrierMembership = mutableMapOf<String, String>()
 
+    val effectiveSafeZones = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
     val activeMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
     val homeClusterMembers = mutableListOf<String>()
     val safeZoneClusterMembers = mutableMapOf<String, MutableList<String>>()
@@ -140,14 +141,21 @@ fun computeClusterLayout(
         val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
             com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
         } else Double.MAX_VALUE
-        val homeLimit = if (prevBarrier == "home") homeRadiusMeters + exitBufferMeters else homeRadiusMeters
+        val effectiveHomeRadius = maxOf(homeRadiusMeters, 140.0)
+        val homeLimit = if (prevBarrier == "home") effectiveHomeRadius + exitBufferMeters else effectiveHomeRadius
         val atHomeStatus = m.statusText.contains("At Home", ignoreCase = true)
         val isHome = (homeLat != 0.0 && homeLng != 0.0) && (distToHome <= homeLimit || atHomeStatus)
 
-        val matchedZone = safeZones.firstOrNull { zone ->
-            val limit = if (prevBarrier == "zone:${zone.id}") zone.radiusMeters + exitBufferMeters else zone.radiusMeters
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= limit
+        val matchedZone = effectiveSafeZones.filter { zone ->
+            val effRadius = com.example.data.GeoUtils.effectiveSafeZoneRadiusMeters(zone)
+            val atThisZoneStatus = m.statusText.contains("At ${zone.name}", ignoreCase = true)
+            val limit = if (prevBarrier == "zone:${zone.id}" || atThisZoneStatus) effRadius + exitBufferMeters else effRadius + 15.0
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= limit || atThisZoneStatus
+        }.minByOrNull { zone ->
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude)
         }
+        val atSafeZoneStatus = matchedZone != null && m.statusText.contains("At ${matchedZone.name}", ignoreCase = true)
+
         val workLimit = if (prevBarrier == "work") workRadiusMeters + exitBufferMeters else workRadiusMeters
         val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
             com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workLimit
@@ -156,7 +164,7 @@ fun computeClusterLayout(
 
         // Inside a barrier, ignore low GPS-noise speeds; only explicit travel or a real speed breaks the lock.
         val isActivelyMoving = if (inAnyBarrier) {
-            m.isComingHome || (!atHomeStatus && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
+            m.isComingHome || (!(atHomeStatus || atSafeZoneStatus) && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
         } else {
             m.isComingHome || m.speedMph >= 0.6 || statusIndicatesTravel(m) ||
                 classifyTransitMode(m.speedMph, m.statusText, m.id) != TransitMode.STATIONARY
@@ -188,8 +196,8 @@ fun computeClusterLayout(
         adjustedCoordinates[homeClusterMembers[0]] = GeoPoint(homeLat, homeLng)
     }
 
-    // B. Form Safe Zone Clusters
-    safeZones.forEach { zone ->
+    // B. Form Safe Zone Clusters (including default Woodcote school zones)
+    effectiveSafeZones.forEach { zone ->
         val zoneMembers = safeZoneClusterMembers[zone.id]
         if (zoneMembers != null) {
             if (zoneMembers.size > 1) {
@@ -485,19 +493,13 @@ fun RadarMap(
                     visualCoordinates[m.id] = initialGeo
                 } else {
                     if (isLocked) {
-                        // Locked static inside barrier — zero GPS jitter motion
+                        // Locked static inside barrier — zero GPS jitter motion, snap immediately to assigned barrier pin/slot
                         state.isMoving = false
                         state.speedMph = 0.0
                         state.targetGeo = assignedClusterPos
-                        val distToTarget = com.example.data.GeoUtils.distanceMeters(
-                            state.currentGeo.latitude, state.currentGeo.longitude,
-                            assignedClusterPos.latitude, assignedClusterPos.longitude
-                        )
-                        if (distToTarget < 2.0) {
-                            state.currentGeo = assignedClusterPos
-                            state.markerRef?.position = assignedClusterPos
-                        }
-                        visualCoordinates[m.id] = state.currentGeo
+                        state.currentGeo = assignedClusterPos
+                        state.markerRef?.position = assignedClusterPos
+                        visualCoordinates[m.id] = assignedClusterPos
                     } else {
                         // Truly moving outside barrier or actively walking/traveling
                         val distMovedM = com.example.data.GeoUtils.distanceMeters(
@@ -787,7 +789,7 @@ fun RadarMap(
                 val atHomeEmojis = atHomeMembers.map { if (it.avatarEmoji.isNotBlank()) it.avatarEmoji else it.name.first().toString() }.joinToString(" ")
 
                 // Draw custom Safe Zones geofences (excluding Home to keep map clean)
-                safeZones.filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }.forEach { zone ->
+                com.example.data.GeoUtils.withDefaultSafeZones(safeZones).filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }.forEach { zone ->
                     val zoneCircle = Polygon(mapView).apply {
                         points = Polygon.pointsAsCircle(GeoPoint(zone.latitude, zone.longitude), zone.radiusMeters)
                         fillPaint.color = android.graphics.Color.parseColor("#00E676") // Light green

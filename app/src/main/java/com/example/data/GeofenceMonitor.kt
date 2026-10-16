@@ -42,11 +42,13 @@ object GeofenceMonitor {
         val isWorkCalibrated = prefs.getBoolean("isWorkCalibrated", false)
         val workRadius = prefs.getFloat("workRadiusMeters", AppConfig.DEFAULT_WORK_RADIUS_METERS.toFloat()).toDouble()
 
-        val customZones: List<SafeZone> = try {
-            repository.getAllSafeZonesOnce()
-        } catch (_: Exception) {
-            emptyList()
-        }
+        val customZones: List<SafeZone> = GeoUtils.withDefaultSafeZones(
+            try {
+                repository.getAllSafeZonesOnce()
+            } catch (_: Exception) {
+                emptyList()
+            }
+        )
 
         val rawPlaces = mutableListOf<MonitoredPlace>()
         if (homeLat != 0.0 && homeLng != 0.0) {
@@ -181,10 +183,17 @@ object GeofenceMonitor {
                 val inCount = statusPrefs.getInt("incount_$key", 0)
                 val outCount = statusPrefs.getInt("outcount_$key", 0)
 
-                val effectiveRadius = if (place.isHome) maxOf(place.radiusMeters, 160.0) else place.radiusMeters
-                val exitHysteresis = if (place.isHome) 70.0 else AppConfig.EXIT_HYSTERESIS_METERS
+                val isSchoolOrSafeZone = !place.isHome && !place.isWork
+                val effectiveRadius = when {
+                    place.isHome -> maxOf(place.radiusMeters, 160.0)
+                    isSchoolOrSafeZone -> GeoUtils.effectiveSafeZoneRadiusMeters(
+                        SafeZone(place.id, place.name, place.latitude, place.longitude, place.radiusMeters, place.iconName)
+                    )
+                    else -> place.radiusMeters
+                }
+                val exitHysteresis = if (place.isHome || isSchoolOrSafeZone) 70.0 else AppConfig.EXIT_HYSTERESIS_METERS
 
-                // 1. INSIDE BOUNDARY CHECK: Within defined place radius (160m for Home)
+                // 1. INSIDE BOUNDARY CHECK: Within defined place radius (160m for Home, 180m for High School)
                 if (distMeters <= effectiveRadius) {
                     statusEditor.putInt("outcount_$key", 0)
                     val newInCount = inCount + 1
@@ -246,10 +255,11 @@ object GeofenceMonitor {
                         }
                     }
                 }
-                // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home)
+                // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home, 250m for High School)
                 else if (distMeters > (effectiveRadius + exitHysteresis)) {
-                    // Suppress false departure if member is explicitly reporting "At Home"
-                    if (place.isHome && member.statusText.contains("At Home", ignoreCase = true)) {
+                    // Suppress false departure if member is explicitly reporting "At Home" or "At <SafeZone>"
+                    if ((place.isHome && member.statusText.contains("At Home", ignoreCase = true)) ||
+                        (!place.isHome && member.statusText.contains("At ${place.name}", ignoreCase = true))) {
                         statusEditor.putInt("outcount_$key", 0)
                         return@forEach
                     }

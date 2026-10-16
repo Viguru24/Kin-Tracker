@@ -460,32 +460,28 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 savePreferences()
             }
 
-            // Ensure Woodcote High School & Woodcote Primary School are registered as safe zones
+            // Ensure Woodcote High School & Woodcote Primary School are registered as safe zones with full campus radii
             try {
                 val existingZones = repository.getAllSafeZonesOnce()
-                if (existingZones.none { it.id == "zone_woodcote_high_school" || (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("High", ignoreCase = true)) || it.name.contains("Woodcoat", ignoreCase = true) }) {
-                    repository.insertSafeZone(
-                        SafeZone(
-                            id = "zone_woodcote_high_school",
-                            name = "Woodcote High School",
-                            latitude = 51.3205711,
-                            longitude = -0.1292201,
-                            radiusMeters = 100.0,
-                            iconName = "school"
-                        )
-                    )
+                val highSchoolMatch = existingZones.firstOrNull {
+                    it.id == "zone_woodcote_high_school" ||
+                        (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("High", ignoreCase = true)) ||
+                        it.name.contains("Woodcoat", ignoreCase = true)
                 }
-                if (existingZones.none { it.id == "zone_woodcote_school" || (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true)) }) {
-                    repository.insertSafeZone(
-                        SafeZone(
-                            id = "zone_woodcote_school",
-                            name = "Woodcote Primary School",
-                            latitude = 51.3279926,
-                            longitude = -0.1405488,
-                            radiusMeters = 85.0,
-                            iconName = "school"
-                        )
-                    )
+                if (highSchoolMatch == null) {
+                    repository.insertSafeZone(com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL)
+                } else if (highSchoolMatch.radiusMeters < 180.0) {
+                    repository.insertSafeZone(highSchoolMatch.copy(radiusMeters = 180.0))
+                }
+
+                val primarySchoolMatch = existingZones.firstOrNull {
+                    it.id == "zone_woodcote_school" ||
+                        (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true))
+                }
+                if (primarySchoolMatch == null) {
+                    repository.insertSafeZone(com.example.data.GeoUtils.DEFAULT_WOODCOTE_PRIMARY_SCHOOL)
+                } else if (primarySchoolMatch.radiusMeters < 140.0) {
+                    repository.insertSafeZone(primarySchoolMatch.copy(radiusMeters = 140.0))
                 }
             } catch (_: Exception) {}
 
@@ -1334,10 +1330,29 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             val xDistKm = (lng - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat))
             val yDistKm = (lat - homeLat) * 111.0
             val distTotalKm = Math.hypot(xDistKm, yDistKm)
-            val isAtHome = distTotalKm <= 0.12 // 120 meters realistic residential geofence
+            val isAtHome = distTotalKm <= 0.15 // 150 meters residential geofence
 
-            val targetX = if (isAtHome) homeLng else lng
-            val targetY = if (isAtHome) homeLat else lat
+            val currentSpeedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
+            val matchedSafeZone = if (!isAtHome) {
+                com.example.data.GeoUtils.matchSafeZone(
+                    lat = lat,
+                    lng = lng,
+                    customZones = safeZones.value,
+                    currentStatusText = me.statusText
+                )
+            } else null
+            val isAtSafeZone = matchedSafeZone != null && !isAtHome && currentSpeedMph < 3.5
+
+            val targetX = when {
+                isAtHome -> homeLng
+                isAtSafeZone -> matchedSafeZone!!.longitude
+                else -> lng
+            }
+            val targetY = when {
+                isAtHome -> homeLat
+                isAtSafeZone -> matchedSafeZone!!.latitude
+                else -> lat
+            }
 
             val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
             val savedLocationSince = prefs.getLong("my_location_since", 0L)
@@ -1348,8 +1363,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 Math.hypot((targetX - anchorLng) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - anchorLat) * 111.0)
             } else 0.0
 
-            val currentSpeedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
-            val isMoving = if (isAtHome) false else (currentSpeedMph >= 1.2 || distFromAnchorKm > 0.15)
+            val isMoving = if (isAtHome || isAtSafeZone) false else (currentSpeedMph >= 1.2 || distFromAnchorKm > 0.15)
             val now = System.currentTimeMillis()
 
             val resolvedLocationSince = if (isMoving) {
@@ -1360,14 +1374,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     .apply()
                 0L
             } else {
-                if (isAtHome) {
-                    if (savedLocationSince > 0L) {
+                if (isAtHome || isAtSafeZone) {
+                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20) {
                         savedLocationSince
                     } else {
                         prefs.edit()
                             .putLong("my_location_since", now)
-                            .putFloat("anchor_lat", homeLat.toFloat())
-                            .putFloat("anchor_lng", homeLng.toFloat())
+                            .putFloat("anchor_lat", targetY.toFloat())
+                            .putFloat("anchor_lng", targetX.toFloat())
                             .apply()
                         now
                     }
@@ -1385,14 +1399,20 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
+            val resolvedStatusText = when {
+                isAtHome -> "At Home (Live GPS)"
+                isAtSafeZone -> "At ${matchedSafeZone!!.name}"
+                else -> "Live GPS tracking (${String.format(java.util.Locale.US, "%.2f", distTotalKm)} km away)"
+            }
+
             repository.updateMember(
                 me.copy(
                     x = targetX,
                     y = targetY,
                     batteryPercentage = batteryLevel,
                     isCharging = isCharging,
-                    speedMph = if (isAtHome) 0.0 else Math.round((speed * 2.23694f) * 10.0) / 10.0,
-                    statusText = if (isAtHome) "At Home (Live GPS)" else "Live GPS tracking (${String.format(java.util.Locale.US, "%.2f", distTotalKm)} km away)",
+                    speedMph = if (isAtHome || isAtSafeZone) 0.0 else currentSpeedMph,
+                    statusText = resolvedStatusText,
                     lastActive = System.currentTimeMillis(),
                     locationSince = resolvedLocationSince
                 )

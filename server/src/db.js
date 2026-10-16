@@ -286,7 +286,40 @@ const dbOperations = {
 
     // SAFE ZONES
     getCircleSafeZones(circleId) {
-        return Object.values(db.safeZones).filter(zone => zone.circleId === circleId);
+        if (!db.safeZones) db.safeZones = {};
+        const defaultZones = [
+            {
+                id: 'zone_woodcote_high_school',
+                circleId: circleId || 'circle_default_sovereign',
+                name: 'Woodcote High School',
+                latitude: 51.3205711,
+                longitude: -0.1292201,
+                radiusMeters: 180,
+                iconName: 'school'
+            },
+            {
+                id: 'zone_woodcote_school',
+                circleId: circleId || 'circle_default_sovereign',
+                name: 'Woodcote Primary School',
+                latitude: 51.3279926,
+                longitude: -0.1405488,
+                radiusMeters: 140,
+                iconName: 'school'
+            }
+        ];
+        let changed = false;
+        defaultZones.forEach(def => {
+            const existing = db.safeZones[def.id];
+            if (!existing) {
+                db.safeZones[def.id] = def;
+                changed = true;
+            } else if (Number(existing.radiusMeters || 0) < def.radiusMeters) {
+                existing.radiusMeters = def.radiusMeters;
+                changed = true;
+            }
+        });
+        if (changed) saveDb();
+        return Object.values(db.safeZones).filter(zone => !zone.circleId || zone.circleId === circleId);
     },
 
     saveSafeZone(zone) {

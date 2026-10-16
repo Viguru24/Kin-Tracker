@@ -64,31 +64,51 @@ object BackgroundSyncProcessor {
         val isAtHome = (distanceMeters - minOf(accuracyMeters * 0.5, 50.0)) <= effectiveHomeBoundary
 
         val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
+        val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
+        val matchedSelfZone = if (!isAtHome) {
+            GeoUtils.matchSafeZone(
+                lat = location.latitude,
+                lng = location.longitude,
+                customZones = customSafeZones,
+                currentStatusText = me.statusText
+            )
+        } else null
+        val isAtSafeZone = matchedSelfZone != null && !isAtHome && speedMph < 3.5
 
-        val status = if (isAtHome) {
-            "At Home (Live GPS)"
-        } else {
-            "Live GPS tracking (${String.format(Locale.US, "%.2f", distanceTotalKm)} km away)"
+        val status = when {
+            isAtHome -> "At Home (Live GPS)"
+            isAtSafeZone -> "At ${matchedSelfZone!!.name}"
+            else -> "Live GPS tracking (${String.format(Locale.US, "%.2f", distanceTotalKm)} km away)"
         }
 
-
+        val resolvedSelfX = when {
+            isAtHome -> homeLng
+            isAtSafeZone -> matchedSelfZone!!.longitude
+            else -> location.longitude
+        }
+        val resolvedSelfY = when {
+            isAtHome -> homeLat
+            isAtSafeZone -> matchedSelfZone!!.latitude
+            else -> location.latitude
+        }
+        val resolvedSelfSpeed = if (isAtHome || isAtSafeZone) 0.0 else speedMph
 
         val updatedMe = me.copy(
-            x = if (isAtHome) homeLng else location.longitude,
-            y = if (isAtHome) homeLat else location.latitude,
+            x = resolvedSelfX,
+            y = resolvedSelfY,
             batteryPercentage = batteryPct,
             isCharging = isCharging,
-            speedMph = if (isAtHome) 0.0 else speedMph,
+            speedMph = resolvedSelfSpeed,
             statusText = status
         )
         repository.updateMember(updatedMe)
         repository.recordBreadcrumbThrottled(
             memberId = "me",
-            latitude = if (isAtHome) homeLat else location.latitude,
-            longitude = if (isAtHome) homeLng else location.longitude,
-            speedMph = if (isAtHome) 0.0 else speedMph
+            latitude = resolvedSelfY,
+            longitude = resolvedSelfX,
+            speedMph = resolvedSelfSpeed
         )
-        if (!isAtHome) {
+        if (!isAtHome && !isAtSafeZone) {
             RailwayTransitDetector.checkRailwayCorridorAsync("me", location.latitude, location.longitude, speedMph)
         }
 
@@ -191,10 +211,29 @@ object BackgroundSyncProcessor {
             val xDist = (location.longitude - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat))
             val yDist = (location.latitude - prefsHomeLat) * 111.0
             val distTotal = Math.hypot(xDist, yDist)
-            val isAtHome = distTotal <= 0.12 // 120 meters realistic residential geofence
+            val isAtHome = distTotal <= 0.15 // 150 meters residential geofence
 
-            val targetX = if (isAtHome) prefsHomeLng else location.longitude
-            val targetY = if (isAtHome) prefsHomeLat else location.latitude
+            val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
+            val matchedSelfZone = if (!isAtHome) {
+                GeoUtils.matchSafeZone(
+                    lat = location.latitude,
+                    lng = location.longitude,
+                    customZones = customSafeZones,
+                    currentStatusText = status
+                )
+            } else null
+            val isAtSafeZone = matchedSelfZone != null && !isAtHome && speedMph < 3.5
+
+            val targetX = when {
+                isAtHome -> prefsHomeLng
+                isAtSafeZone -> matchedSelfZone!!.longitude
+                else -> location.longitude
+            }
+            val targetY = when {
+                isAtHome -> prefsHomeLat
+                isAtSafeZone -> matchedSelfZone!!.latitude
+                else -> location.latitude
+            }
 
             val savedLocationSince = prefs.getLong("my_location_since", 0L)
             val anchorLat = prefs.getFloat("anchor_lat", 0f).toDouble()
@@ -202,7 +241,7 @@ object BackgroundSyncProcessor {
             val distFromAnchorKm = if (anchorLat != 0.0 && anchorLng != 0.0) {
                 Math.hypot((targetX - anchorLng) * 111.0 * Math.cos(Math.toRadians(targetY)), (targetY - anchorLat) * 111.0)
             } else 0.0
-            val isMoving = if (isAtHome) false else (speedMph >= 1.2 || distFromAnchorKm > 0.15)
+            val isMoving = if (isAtHome || isAtSafeZone) false else (speedMph >= 1.2 || distFromAnchorKm > 0.15)
             val now = System.currentTimeMillis()
 
             val resolvedLocationSince = if (isMoving) {
@@ -213,14 +252,14 @@ object BackgroundSyncProcessor {
                     .apply()
                 0L
             } else {
-                if (isAtHome) {
-                    if (savedLocationSince > 0L) {
+                if (isAtHome || isAtSafeZone) {
+                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20) {
                         savedLocationSince
                     } else {
                         prefs.edit()
                             .putLong("my_location_since", now)
-                            .putFloat("anchor_lat", prefsHomeLat.toFloat())
-                            .putFloat("anchor_lng", prefsHomeLng.toFloat())
+                            .putFloat("anchor_lat", targetY.toFloat())
+                            .putFloat("anchor_lng", targetX.toFloat())
                             .apply()
                         now
                     }
@@ -250,7 +289,7 @@ object BackgroundSyncProcessor {
                 y = if (isGhostMode) 0.0 else targetY,
                 batteryPercentage = batteryPct,
                 isCharging = isCharging,
-                speedMph = if (isGhostMode || isAtHome || isLocPaused) 0.0 else speedMph,
+                speedMph = if (isGhostMode || isAtHome || isAtSafeZone || isLocPaused) 0.0 else speedMph,
                 statusText = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else status,
                 isComingHome = false,
                 etaMinutes = 0,
@@ -441,8 +480,6 @@ object BackgroundSyncProcessor {
             val meLocal = existingLocal.firstOrNull { it.id == "me" }
             if (meLocal != null) evaluatedMembers.add(meLocal)
 
-            val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
-
             payload?.members?.values?.forEach { cloudM ->
                 if (cloudM.id == myCloudId || (dUuid.length >= 4 && cloudM.id.endsWith("_$dUuid"))) return@forEach
                 if (cloudM.id.contains("abc123") || cloudM.id.startsWith("mock_")) return@forEach
@@ -477,34 +514,68 @@ object BackgroundSyncProcessor {
                 val effY = if (hasNewerLocal) matchingLocal!!.y else cloudM.y
                 val effLastActive = if (hasNewerLocal) matchingLocal!!.lastActive else cloudM.lastActive
 
-                val matchedSafeZone = customSafeZones.firstOrNull { zone ->
-                    effX != 0.0 && effY != 0.0 &&
-                    GeoUtils.distanceMeters(effY, effX, zone.latitude, zone.longitude) <= (zone.radiusMeters + 15.0)
+                val distToHomeKm = if (prefsHomeLat != 0.0 && prefsHomeLng != 0.0 && effX != 0.0 && effY != 0.0) {
+                    Math.hypot((effX - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat)), (effY - prefsHomeLat) * 111.0)
+                } else 999.0
+                val wasMemberAtHome = matchingLocal?.statusText?.contains("At Home", ignoreCase = true) == true
+                val homeLimitKm = if (wasMemberAtHome) 0.21 else 0.15
+                val isMemberAtHome = distToHomeKm <= homeLimitKm || cloudM.statusText.contains("At Home", ignoreCase = true)
+
+                val prevOrCurrentStatus = if (matchingLocal?.statusText?.startsWith("At ", ignoreCase = true) == true) {
+                    matchingLocal.statusText
+                } else {
+                    cloudM.statusText
                 }
+                val matchedSafeZone = GeoUtils.matchSafeZone(
+                    lat = effY,
+                    lng = effX,
+                    customZones = customSafeZones,
+                    currentStatusText = prevOrCurrentStatus
+                )
+                val isMemberAtSafeZone = matchedSafeZone != null && !isMemberAtHome
+                val isStationaryInBarrier = (isMemberAtHome || isMemberAtSafeZone) && cloudM.speedMph < 3.5
 
                 val finalStatus = when {
-                    isMemberLocPaused -> "⏸️ Paused (Hidden)"
-                    matchedSafeZone != null && cloudM.speedMph < 1.2 -> "At ${matchedSafeZone.name}"
+                    isMemberLocPaused -> "⏸️ Paused (Home Sleep)"
+                    isMemberAtHome && isStationaryInBarrier -> "At Home (Live GPS)"
+                    isMemberAtSafeZone && isStationaryInBarrier -> "At ${matchedSafeZone!!.name}"
                     else -> cloudM.statusText
+                }
+                val finalX = when {
+                    isMemberAtHome && isStationaryInBarrier -> prefsHomeLng
+                    isMemberAtSafeZone && isStationaryInBarrier -> matchedSafeZone!!.longitude
+                    else -> effX
+                }
+                val finalY = when {
+                    isMemberAtHome && isStationaryInBarrier -> prefsHomeLat
+                    isMemberAtSafeZone && isStationaryInBarrier -> matchedSafeZone!!.latitude
+                    else -> effY
+                }
+                val finalSpeedMph = if (isMemberLocPaused || isStationaryInBarrier) 0.0 else cloudM.speedMph
+                val finalLocationSince = when {
+                    isStationaryInBarrier && matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
+                    cloudM.locationSince > 0L -> cloudM.locationSince
+                    isStationaryInBarrier -> System.currentTimeMillis()
+                    else -> matchingLocal?.locationSince ?: cloudM.locationSince
                 }
 
                 val mappedMember = FamilyMember(
                     id = cloudM.id,
                     name = resolvedName,
                     avatarColorHex = cloudM.avatarColorHex,
-                    x = effX,
-                    y = effY,
+                    x = finalX,
+                    y = finalY,
                     batteryPercentage = cloudM.batteryPercentage,
                     isCharging = cloudM.isCharging,
-                    speedMph = if (isMemberLocPaused) 0.0 else cloudM.speedMph,
+                    speedMph = finalSpeedMph,
                     statusText = finalStatus,
-                    isComingHome = if (isMemberLocPaused) false else cloudM.isComingHome,
-                    etaMinutes = if (isMemberLocPaused) 0 else cloudM.etaMinutes,
-                    avatarEmoji = cloudM.avatarEmoji,
+                    isComingHome = if (isMemberLocPaused || isStationaryInBarrier) false else cloudM.isComingHome,
+                    etaMinutes = if (isMemberLocPaused || isStationaryInBarrier) 0 else cloudM.etaMinutes,
+                    avatarEmoji = com.example.data.IdentityUtils.sanitizeAvatarEmoji(cloudM.avatarEmoji, resolvedName, cloudM.id),
                     phoneNumber = matchingLocal?.phoneNumber ?: "",
                     photoPath = matchingLocal?.photoPath ?: "",
                     lastActive = effLastActive,
-                    locationSince = cloudM.locationSince,
+                    locationSince = finalLocationSince,
                     isLocationPaused = isMemberLocPaused
                 )
 
