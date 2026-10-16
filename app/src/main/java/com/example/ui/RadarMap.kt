@@ -1419,22 +1419,56 @@ fun RadarMap(
                     if (showToolsMenu) {
                         Surface(
                             modifier = Modifier
-                                .padding(top = 44.dp)
-                                .widthIn(min = 250.dp, max = 290.dp)
+                                .padding(top = 46.dp)
+                                .widthIn(min = 310.dp, max = 345.dp)
+                                .heightIn(max = 580.dp)
                                 .zIndex(150f),
-                            color = Color(0xF8161A24),
-                            shape = RoundedCornerShape(18.dp),
+                            color = Color(0xF8141822),
+                            shape = RoundedCornerShape(20.dp),
                             border = BorderStroke(1.5.dp, Color(0xFF384358)),
-                            shadowElevation = 20.dp
+                            shadowElevation = 24.dp
                         ) {
                             Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier
+                                    .padding(14.dp)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                // Header with Title and Close button
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text("🛠️", fontSize = 15.sp)
+                                        Text(
+                                            text = "Tools & Views",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Surface(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clickable { showToolsMenu = false },
+                                        shape = CircleShape,
+                                        color = Color(0xFF242A38)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("✕", color = Color(0xFF90A4AE), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
                                 Text(
                                     text = "MAP THEME",
                                     color = Color(0xFF78909C),
-                                    fontSize = 9.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(start = 2.dp)
                                 )
@@ -1442,7 +1476,7 @@ fun RadarMap(
                                 // Map Theme Selector Chips
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     listOf(
                                         Triple("streets", "🗺️ Streets", "Day"),
@@ -1457,17 +1491,17 @@ fun RadarMap(
                                                     mapTypeMode = mode
                                                     prefs.edit().putString("mapTypeMode", mode).apply()
                                                 },
-                                            shape = RoundedCornerShape(8.dp),
+                                            shape = RoundedCornerShape(10.dp),
                                             color = if (isSelected) RadarCyan.copy(alpha = 0.2f) else Color(0xFF1E232F),
                                             border = BorderStroke(1.dp, if (isSelected) RadarCyan else Color(0xFF2E3846))
                                         ) {
                                             Text(
                                                 text = label,
                                                 color = if (isSelected) RadarCyan else Color.White,
-                                                fontSize = 11.sp,
+                                                fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                                modifier = Modifier.padding(vertical = 6.dp)
+                                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp)
                                             )
                                         }
                                     }
@@ -1483,19 +1517,21 @@ fun RadarMap(
                                             showToolsMenu = false
                                             isDigestOpen = true
                                         },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF1E232F)
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1E232F),
+                                    border = BorderStroke(1.dp, Color(0xFF2A3444))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("📊", fontSize = 15.sp)
-                                        Column {
-                                            Text("Weekly Circle Digest", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            Text("Travel & safety analytics", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        Text("📊", fontSize = 18.sp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Weekly Circle Digest", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text("Travel & safety analytics", color = Color(0xFFA0B0BC), fontSize = 11.sp)
                                         }
+                                        Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -1507,19 +1543,21 @@ fun RadarMap(
                                             showToolsMenu = false
                                             showAddZoneDialog = true
                                         },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF1E232F)
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1E232F),
+                                    border = BorderStroke(1.dp, Color(0xFF2A3444))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("🛡️", fontSize = 15.sp)
-                                        Column {
-                                            Text("Add Safe Zone", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            Text("Create custom place alert", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        Text("🛡️", fontSize = 18.sp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Add Safe Zone", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text("Create custom place alert", color = Color(0xFFA0B0BC), fontSize = 11.sp)
                                         }
+                                        Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -1531,19 +1569,21 @@ fun RadarMap(
                                             showToolsMenu = false
                                             onOpenShoppingList()
                                         },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF1E232F)
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1E232F),
+                                    border = BorderStroke(1.dp, Color(0xFF2A3444))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("🛒", fontSize = 15.sp)
-                                        Column {
-                                            Text("Shared Shopping List", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            Text("${shoppingItems.count { !it.isChecked }} active items", color = Color(0xFF90A4AE), fontSize = 10.sp)
+                                        Text("🛒", fontSize = 18.sp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Shared Shopping List", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text("${shoppingItems.count { !it.isChecked }} active items", color = Color(0xFFA0B0BC), fontSize = 11.sp)
                                         }
+                                        Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -1555,22 +1595,23 @@ fun RadarMap(
                                         .clickable {
                                             showOfflineInfoDialog = true
                                         },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF1E232F)
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1E232F),
+                                    border = BorderStroke(1.dp, Color(0xFF2A3444))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("💾", fontSize = 15.sp)
+                                        Text("💾", fontSize = 18.sp)
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text("Offline Map Storage", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            Text("Active (~25 MB cached)", color = Color(0xFF00FF87), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Offline Map Storage", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text("Active (~25 MB cached)", color = Color(0xFF00FF87), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                         }
                                         Box(
                                             modifier = Modifier
-                                                .size(7.dp)
+                                                .size(8.dp)
                                                 .background(Color(0xFF00FF87), CircleShape)
                                         )
                                     }
@@ -1588,7 +1629,7 @@ fun RadarMap(
                                                 Text(
                                                     text = "Offline Map Storage Active",
                                                     color = TextPrimary,
-                                                    fontSize = 14.sp,
+                                                    fontSize = 15.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                             }
@@ -1598,12 +1639,12 @@ fun RadarMap(
                                                 Text(
                                                     text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
                                                     color = TextSecondary,
-                                                    fontSize = 12.sp
+                                                    fontSize = 13.sp
                                                 )
                                                 Text(
                                                     text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
                                                     color = Color(0xFF00FF87),
-                                                    fontSize = 11.sp,
+                                                    fontSize = 12.sp,
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }
@@ -1626,20 +1667,21 @@ fun RadarMap(
                                             showToolsMenu = false
                                             onSettingsClick()
                                         },
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     color = PrimaryCosmic.copy(alpha = 0.2f),
-                                    border = BorderStroke(1.dp, PrimaryCosmic.copy(alpha = 0.4f))
+                                    border = BorderStroke(1.2.dp, PrimaryCosmic.copy(alpha = 0.5f))
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Text("⚙️", fontSize = 15.sp)
-                                        Column {
-                                            Text("Circle Settings Hub", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            Text("Profile, places, alerts, ghost mode", color = RadarCyan, fontSize = 10.sp)
+                                        Text("⚙️", fontSize = 18.sp)
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Circle Settings Hub", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Text("Profile, places, alerts, ghost mode", color = RadarCyan, fontSize = 11.sp)
                                         }
+                                        Text("›", color = RadarCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
