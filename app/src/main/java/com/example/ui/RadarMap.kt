@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -383,6 +385,7 @@ fun RadarMap(
     var isFollowingSelectedMember by remember { mutableStateOf(true) }
     var mapZoomLevel by remember { mutableStateOf(15.5) }
     var isRouteTrailEnabled by remember { mutableStateOf(false) }
+    var isUserInteractingWithMap by remember { mutableStateOf(false) }
 
     var animTick by remember { mutableStateOf(0) }
     val hasMovingMembers = remember(members) {
@@ -534,6 +537,7 @@ fun RadarMap(
     val currentSelectedMemberId by rememberUpdatedState(selectedMemberId)
     val currentIsFollowingSelectedMember by rememberUpdatedState(isFollowingSelectedMember)
     val currentIsRouteTrailEnabled by rememberUpdatedState(isRouteTrailEnabled)
+    val currentIsUserInteractingWithMap by rememberUpdatedState(isUserInteractingWithMap)
 
     // High-frequency (60 FPS) continuous road interpolation & camera follow engine
     LaunchedEffect(isSettingsOpen) {
@@ -597,9 +601,11 @@ fun RadarMap(
                     selId.contains(mId, ignoreCase = true)
                 )
                 if (isThisMemberSelected && currentIsFollowingSelectedMember && !currentIsRouteTrailEnabled) {
-                    mapViewRef?.let { map ->
-                        map.controller.setCenter(state.currentGeo)
-                        anyMoved = true
+                    if (!currentIsUserInteractingWithMap) {
+                        mapViewRef?.let { map ->
+                            map.controller.setCenter(state.currentGeo)
+                            anyMoved = true
+                        }
                     }
                 }
             }
@@ -634,7 +640,7 @@ fun RadarMap(
                 mapViewRef?.let { map ->
                     val targetGeo = visualCoordinates[m.id] ?: GeoPoint(m.y, m.x)
                     map.controller.animateTo(targetGeo)
-                    if (map.zoomLevelDouble < 14.5) {
+                    if (map.zoomLevelDouble < 12.0) {
                         map.controller.setZoom(16.0)
                     }
                 }
@@ -700,8 +706,10 @@ fun RadarMap(
     val me = members.firstOrNull { it.id == "me" }
     LaunchedEffect(me?.y, me?.x, isCameraFollowingMe) {
         if (isCameraFollowingMe && me != null && me.y != 0.0 && me.x != 0.0) {
-            mapViewRef?.let { map ->
-                map.controller.animateTo(GeoPoint(me.y, me.x))
+            if (!isUserInteractingWithMap) {
+                mapViewRef?.let { map ->
+                    map.controller.animateTo(GeoPoint(me.y, me.x))
+                }
             }
         }
     }
@@ -709,10 +717,12 @@ fun RadarMap(
     // Keep camera panning to stay centered on the selected member when follow mode is active!
     LaunchedEffect(selectedMember?.y, selectedMember?.x, selectedMemberId, isFollowingSelectedMember) {
         if (isFollowingSelectedMember && selectedMember != null && selectedMember.x != 0.0 && selectedMember.y != 0.0 && !isRouteTrailEnabled) {
-            mapViewRef?.let { map ->
-                val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                map.controller.setCenter(targetGeo)
-                mapViewRef?.postInvalidate()
+            if (!isUserInteractingWithMap) {
+                mapViewRef?.let { map ->
+                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                    map.controller.setCenter(targetGeo)
+                    mapViewRef?.postInvalidate()
+                }
             }
         }
     }
@@ -734,25 +744,76 @@ fun RadarMap(
                     val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
                     var touchDownX = 0f
                     var touchDownY = 0f
-                    // Allow panning and swiping on the Map without triggering outer container scrolling
+                    var isMultiTouchGesture = false
+                    var hasZoomedInCurrentGesture = false
+                    var wasFollowingSelectedAtDown = false
+                    var wasFollowingMeAtDown = false
+
+                    // Allow panning and swiping on the Map without losing follow on pinch/zoom
                     setOnTouchListener { v, event ->
                         when (event.actionMasked) {
                             android.view.MotionEvent.ACTION_DOWN -> {
                                 touchDownX = event.x
                                 touchDownY = event.y
+                                isMultiTouchGesture = false
+                                hasZoomedInCurrentGesture = false
+                                wasFollowingSelectedAtDown = isFollowingSelectedMember
+                                wasFollowingMeAtDown = isCameraFollowingMe
+                                isUserInteractingWithMap = true
                                 v.parent?.requestDisallowInterceptTouchEvent(true)
                             }
+                            android.view.MotionEvent.ACTION_POINTER_DOWN -> {
+                                // Multi-finger touch: pinch-to-zoom in progress!
+                                isMultiTouchGesture = true
+                                // Preserve follow state across pinch zooms
+                                if (wasFollowingSelectedAtDown) isFollowingSelectedMember = true
+                                if (wasFollowingMeAtDown) isCameraFollowingMe = true
+                            }
                             android.view.MotionEvent.ACTION_MOVE -> {
-                                val dx = Math.abs(event.x - touchDownX)
-                                val dy = Math.abs(event.y - touchDownY)
-                                if (dx > touchSlop * 2.5f || dy > touchSlop * 2.5f) {
-                                    // User is deliberately panning/scrolling the map: release camera lock!
-                                    isFollowingSelectedMember = false
-                                    isCameraFollowingMe = false
+                                if (event.pointerCount > 1) {
+                                    isMultiTouchGesture = true
                                 }
+                                if (!isMultiTouchGesture && !hasZoomedInCurrentGesture) {
+                                    val dx = Math.abs(event.x - touchDownX)
+                                    val dy = Math.abs(event.y - touchDownY)
+                                    if (dx > touchSlop * 3.5f || dy > touchSlop * 3.5f) {
+                                        // User is deliberately single-finger panning the map away: release camera lock!
+                                        isFollowingSelectedMember = false
+                                        isCameraFollowingMe = false
+                                    }
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_POINTER_UP -> {
+                                isMultiTouchGesture = true
                             }
                             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                                 v.parent?.requestDisallowInterceptTouchEvent(false)
+                                isUserInteractingWithMap = false
+
+                                if (isMultiTouchGesture || hasZoomedInCurrentGesture) {
+                                    // Pinch zoom or gesture zoom completed! Retain follow at the newly chosen zoom level!
+                                    if (wasFollowingSelectedAtDown) {
+                                        isFollowingSelectedMember = true
+                                    }
+                                    if (wasFollowingMeAtDown) {
+                                        isCameraFollowingMe = true
+                                    }
+
+                                    // Center camera directly on target at this newly zoomed level
+                                    val targetGeo = if (wasFollowingSelectedAtDown && selectedMember != null) {
+                                        visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                                    } else if (wasFollowingMeAtDown && me != null) {
+                                        GeoPoint(me.y, me.x)
+                                    } else null
+
+                                    if (targetGeo != null) {
+                                        controller.setCenter(targetGeo)
+                                        postInvalidate()
+                                    }
+                                }
+
+                                isMultiTouchGesture = false
+                                hasZoomedInCurrentGesture = false
                             }
                         }
                         false
@@ -767,6 +828,15 @@ fun RadarMap(
                         override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean = false
                         override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
                             mapZoomLevel = zoomLevelDouble
+                            hasZoomedInCurrentGesture = true
+                            if (!isUserInteractingWithMap) {
+                                if (isFollowingSelectedMember && selectedMember != null) {
+                                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                                    post { controller.setCenter(targetGeo) }
+                                } else if (isCameraFollowingMe && me != null) {
+                                    post { controller.setCenter(GeoPoint(me.y, me.x)) }
+                                }
+                            }
                             return true
                         }
                     })
@@ -987,7 +1057,7 @@ fun RadarMap(
                             mapViewRef?.let { map ->
                                 val targetGeo = visualCoordinates[member.id] ?: GeoPoint(member.y, member.x)
                                 map.controller.animateTo(targetGeo)
-                                if (map.zoomLevelDouble < 15.0) {
+                                if (map.zoomLevelDouble < 12.0) {
                                     map.controller.setZoom(16.0)
                                 }
                             }
@@ -1448,7 +1518,9 @@ fun RadarMap(
                                                 mapViewRef?.let { map ->
                                                     val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
                                                     map.controller.animateTo(targetGeo)
-                                                    map.controller.setZoom(16.0)
+                                                    if (map.zoomLevelDouble < 12.0) {
+                                                        map.controller.setZoom(16.0)
+                                                    }
                                                 }
                                             }
                                         },
@@ -1619,7 +1691,7 @@ fun RadarMap(
 
 
 
-        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Recenter GPS & Safe Zones)
+        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom controls & Recenter GPS)
         Column(
             modifier = Modifier
                 .padding(end = 16.dp, bottom = 24.dp)
@@ -1628,6 +1700,72 @@ fun RadarMap(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.End
         ) {
+            // ZOOM IN (+) FAB
+            Surface(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clickable {
+                        mapViewRef?.let { map ->
+                            map.controller.zoomIn()
+                            mapZoomLevel = map.zoomLevelDouble + 1.0
+                            val target = if (isFollowingSelectedMember && selectedMember != null) {
+                                visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                            } else if (isCameraFollowingMe && me != null) {
+                                GeoPoint(me.y, me.x)
+                            } else null
+                            if (target != null) {
+                                map.controller.setCenter(target)
+                            }
+                        }
+                    },
+                color = CosmicSlateCard,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Zoom In",
+                        tint = RadarCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // ZOOM OUT (-) FAB
+            Surface(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clickable {
+                        mapViewRef?.let { map ->
+                            map.controller.zoomOut()
+                            mapZoomLevel = (map.zoomLevelDouble - 1.0).coerceAtLeast(2.0)
+                            val target = if (isFollowingSelectedMember && selectedMember != null) {
+                                visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
+                            } else if (isCameraFollowingMe && me != null) {
+                                GeoPoint(me.y, me.x)
+                            } else null
+                            if (target != null) {
+                                map.controller.setCenter(target)
+                            }
+                        }
+                    },
+                color = CosmicSlateCard,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, SlateBorder),
+                shadowElevation = 6.dp
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Zoom Out",
+                        tint = RadarCyan,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
             // 1. WHERE AM I NOW (FIND ME ON MAP) FAB
             Surface(
                 modifier = Modifier
@@ -1637,9 +1775,14 @@ fun RadarMap(
                         if (meLoc != null && meLoc.y != 0.0 && meLoc.x != 0.0) {
                             onSelectMember("me") // Focus selection
                             isCameraFollowingMe = !isCameraFollowingMe // Toggle follow mode
+                            if (isCameraFollowingMe) {
+                                isFollowingSelectedMember = true
+                            }
                             mapViewRef?.let {
                                 it.controller.animateTo(GeoPoint(meLoc.y, meLoc.x))
-                                it.controller.setZoom(15.5)
+                                if (it.zoomLevelDouble < 12.0) {
+                                    it.controller.setZoom(15.5)
+                                }
                             }
                         }
                     },
