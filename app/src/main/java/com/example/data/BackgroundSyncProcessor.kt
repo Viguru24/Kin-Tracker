@@ -70,7 +70,8 @@ object BackgroundSyncProcessor {
                 lat = location.latitude,
                 lng = location.longitude,
                 customZones = customSafeZones,
-                currentStatusText = me.statusText
+                currentStatusText = me.statusText,
+                speedMph = speedMph
             )
         } else null
         val isAtSafeZone = matchedSelfZone != null && !isAtHome && speedMph < 3.5
@@ -219,7 +220,8 @@ object BackgroundSyncProcessor {
                     lat = location.latitude,
                     lng = location.longitude,
                     customZones = customSafeZones,
-                    currentStatusText = status
+                    currentStatusText = status,
+                    speedMph = speedMph
                 )
             } else null
             val isAtSafeZone = matchedSelfZone != null && !isAtHome && speedMph < 3.5
@@ -530,7 +532,8 @@ object BackgroundSyncProcessor {
                     lat = effY,
                     lng = effX,
                     customZones = customSafeZones,
-                    currentStatusText = prevOrCurrentStatus
+                    currentStatusText = prevOrCurrentStatus,
+                    speedMph = cloudM.speedMph
                 )
                 val isMemberAtSafeZone = matchedSafeZone != null && !isMemberAtHome
                 val isStationaryInBarrier = (isMemberAtHome || isMemberAtSafeZone) && cloudM.speedMph < 3.5

@@ -626,7 +626,8 @@ class CloudSyncManager(
                     lat = targetMemberY,
                     lng = targetMemberX,
                     customZones = customSafeZones,
-                    currentStatusText = prevOrCurrentStatus
+                    currentStatusText = prevOrCurrentStatus,
+                    speedMph = cloudM.speedMph
                 )
                 val isMemberAtSafeZone = matchedSafeZone != null && !isMemberAtHome
                 val isStationaryInBarrier = (isMemberAtHome || isMemberAtSafeZone) && cloudM.speedMph < 3.5
@@ -634,7 +635,8 @@ class CloudSyncManager(
                 // Compute speed and movement:
                 // When stationary inside Home or a SafeZone, matchingLocal.x/y is snapped to the zone pin while
                 // cloudM.x/y may be raw classroom GPS (e.g. 62m away). Never treat that pin-to-classroom offset as movement!
-                val movedDistanceKm = if (isStationaryInBarrier) {
+                val wasInBarrier = wasMemberAtHome || (matchingLocal?.statusText?.startsWith("At ", ignoreCase = true) == true)
+                val movedDistanceKm = if (isStationaryInBarrier || (wasInBarrier && cloudM.speedMph < 1.0)) {
                     0.0
                 } else if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && targetMemberX != 0.0 && targetMemberY != 0.0) {
                     Math.hypot((matchingLocal.x - targetMemberX) * 111.0 * Math.cos(Math.toRadians(targetMemberY)), (matchingLocal.y - targetMemberY) * 111.0)
@@ -645,7 +647,7 @@ class CloudSyncManager(
                 } else 0.0
 
                 // When remote GPS reports 0.0 speed, derive speed only when moving significantly outside a barrier
-                val derivedSpeedMph = if (!isStationaryInBarrier && timeDeltaSec in 1.0..300.0 && movedDistanceKm > 0.025) {
+                val derivedSpeedMph = if (!isStationaryInBarrier && !wasInBarrier && timeDeltaSec in 1.0..300.0 && movedDistanceKm > 0.025) {
                     (movedDistanceKm / timeDeltaSec) * 3600.0 * 0.621371
                 } else 0.0
 

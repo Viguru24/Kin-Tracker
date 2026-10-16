@@ -60,34 +60,35 @@ class SafeZoneGeofenceTest {
     }
 
     @Test
-    fun testEloiseClassroomAndIndoorDriftStaysLockedInWoodcoteHighSchool() {
-        // Eloise's real classroom telemetry at Woodcote High School (62.4m from center pin)
-        val eloiseClassroom = com.example.data.FamilyMember(
+    fun testEloiseInOfficeDrawerAtOasisAcademyByronStaysLockedAcrossCellTowerJitter() {
+        // Eloise's actual office drawer telemetry at Oasis Academy Byron (53m from center pin)
+        val eloiseDrawer = com.example.data.FamilyMember(
             id = "device_eloise_a9e3d7",
             name = "Eloise",
-            avatarColorHex = "#E91E63",
-            x = -0.1284886,
-            y = 51.3202444,
-            batteryPercentage = 51,
+            avatarColorHex = "#FF4081",
+            x = -0.1288279,
+            y = 51.3146758,
+            batteryPercentage = 63,
             speedMph = 0.0,
-            statusText = "Live GPS tracking (1.30 km away)"
+            statusText = "Live GPS tracking (1.86 km away)"
         )
 
         val matched = com.example.data.GeoUtils.matchSafeZone(
-            lat = eloiseClassroom.y,
-            lng = eloiseClassroom.x,
+            lat = eloiseDrawer.y,
+            lng = eloiseDrawer.x,
             customZones = emptyList(),
-            currentStatusText = eloiseClassroom.statusText
+            currentStatusText = eloiseDrawer.statusText,
+            speedMph = 0.0
         )
-        assertNotNull("Eloise's classroom must match Woodcote High School safe zone", matched)
-        assertEquals("Woodcote High School", matched!!.name)
+        assertNotNull("Eloise's office drawer position must match Oasis Academy Byron safe zone", matched)
+        assertEquals("Oasis Academy Byron", matched!!.name)
 
-        // First layout pass: Eloise must be locked to Woodcote High School center pin
+        // First layout pass: Eloise must be locked to Oasis Academy Byron center pin
         val layout1 = com.example.ui.computeClusterLayout(
-            members = listOf(eloiseClassroom),
+            members = listOf(eloiseDrawer),
             safeZones = emptyList(),
-            homeLat = 51.3316345,
-            homeLng = -0.1217125,
+            homeLat = 51.3300000,
+            homeLng = -0.1180000,
             homeRadiusMeters = 140.0,
             isWorkCalibrated = false,
             workLat = 0.0,
@@ -96,27 +97,37 @@ class SafeZoneGeofenceTest {
         )
 
         assertEquals(
-            "zone:zone_woodcote_high_school",
+            "zone:zone_oasis_academy_byron",
             layout1.barrierMembership["device_eloise_a9e3d7"]
         )
         val pinnedPos1 = layout1.adjustedCoordinates["device_eloise_a9e3d7"]!!
-        assertEquals(51.3205711, pinnedPos1.latitude, 0.00001)
-        assertEquals(-0.1292201, pinnedPos1.longitude, 0.00001)
+        assertEquals(51.3141000, pinnedPos1.latitude, 0.00001)
+        assertEquals(-0.1288000, pinnedPos1.longitude, 0.00001)
 
-        // Second layout pass: simulate indoor Wi-Fi/cell drift 210m away from school pin while locked
-        val driftedLat = 51.3205711 + (210.0 / 111139.0)
-        val eloiseDrifted = eloiseClassroom.copy(
-            y = driftedLat,
-            x = -0.1292201,
-            statusText = "At Woodcote High School",
-            speedMph = 2.2 // Indoor GPS jitter speed
+        // Second layout pass: simulate cell tower jitter to Rutherwick Rise / perimeter gate (180m away) while phone sits stationary in drawer
+        val eloiseDrifted = eloiseDrawer.copy(
+            y = 51.3156571,
+            x = -0.1299272,
+            statusText = "At Oasis Academy Byron",
+            speedMph = 0.0 // Stationary in drawer
         )
+
+        val matchedDrifted = com.example.data.GeoUtils.matchSafeZone(
+            lat = eloiseDrifted.y,
+            lng = eloiseDrifted.x,
+            customZones = emptyList(),
+            currentStatusText = eloiseDrifted.statusText,
+            previousZoneId = "zone_oasis_academy_byron",
+            speedMph = 0.0
+        )
+        assertNotNull("Eloise must remain matched to Oasis Academy Byron across cell tower jitter", matchedDrifted)
+        assertEquals("Oasis Academy Byron", matchedDrifted!!.name)
 
         val layout2 = com.example.ui.computeClusterLayout(
             members = listOf(eloiseDrifted),
             safeZones = emptyList(),
-            homeLat = 51.3316345,
-            homeLng = -0.1217125,
+            homeLat = 51.3300000,
+            homeLng = -0.1180000,
             homeRadiusMeters = 140.0,
             isWorkCalibrated = false,
             workLat = 0.0,
@@ -126,39 +137,64 @@ class SafeZoneGeofenceTest {
         )
 
         assertEquals(
-            "Eloise must remain locked inside Woodcote High School barrier across indoor drift",
-            "zone:zone_woodcote_high_school",
+            "Eloise must remain locked inside Oasis Academy Byron barrier across indoor drawer drift",
+            "zone:zone_oasis_academy_byron",
             layout2.barrierMembership["device_eloise_a9e3d7"]
         )
         val pinnedPos2 = layout2.adjustedCoordinates["device_eloise_a9e3d7"]!!
-        assertEquals(51.3205711, pinnedPos2.latitude, 0.00001)
-        assertEquals(-0.1292201, pinnedPos2.longitude, 0.00001)
+        assertEquals(51.3141000, pinnedPos2.latitude, 0.00001)
+        assertEquals(-0.1288000, pinnedPos2.longitude, 0.00001)
     }
 
     @Test
-    fun testOverlappingResidentialSafeZoneDoesNotOverrideWoodcoteHighSchool() {
-        // Residential safe zone right next to or overlapping the school campus (e.g. Julie Guest's house)
-        val julieGuestZone = SafeZone(
-            id = "zone_julie_guest",
-            name = "Julie Guest's house",
-            latitude = 51.3202450, // Right next to Eloise's classroom (less than 1 meter away)
-            longitude = -0.1284880,
+    fun testRealWoodcoteHighSchoolCampusMatching() {
+        val studentAtHighSchool = com.example.data.FamilyMember(
+            id = "device_isabel_4ec9dd",
+            name = "Isabel",
+            avatarColorHex = "#42A5F5",
+            x = -0.1420000,
+            y = 51.3302000,
+            batteryPercentage = 80,
+            speedMph = 0.0,
+            statusText = "Live GPS tracking (2.1 km away)"
+        )
+
+        val matched = com.example.data.GeoUtils.matchSafeZone(
+            lat = studentAtHighSchool.y,
+            lng = studentAtHighSchool.x,
+            customZones = emptyList(),
+            currentStatusText = studentAtHighSchool.statusText,
+            speedMph = 0.0
+        )
+        assertNotNull("Student on campus must match Woodcote High School safe zone", matched)
+        assertEquals("Woodcote High School", matched!!.name)
+    }
+
+    @Test
+    fun testOverlappingResidentialSafeZoneDoesNotOverrideSchool() {
+        // Residential safe zone right next to or overlapping the school campus
+        val residentialZone = SafeZone(
+            id = "zone_residential_neighbor",
+            name = "Neighbor House",
+            latitude = 51.3142000, // Right next to school
+            longitude = -0.1287000,
             radiusMeters = 100.0,
             iconName = "home"
         )
 
-        // Eloise at Woodcote High School (62m from school center, but 1m from Julie Guest's pin)
+        // Eloise at school campus
         val matched = com.example.data.GeoUtils.matchSafeZone(
-            lat = 51.3202444,
-            lng = -0.1284886,
-            customZones = listOf(julieGuestZone),
-            currentStatusText = "Live GPS tracking (1.30 km away)"
+            lat = 51.3146758,
+            lng = -0.1288279,
+            customZones = listOf(residentialZone),
+            currentStatusText = "Live GPS tracking (1.86 km away)",
+            speedMph = 0.0
         )
 
         assertNotNull("Must match a safe zone", matched)
         assertEquals(
             "School campus must take precedence over overlapping residential zone",
-            "Woodcote High School",
+            "Oasis Academy Byron",
             matched!!.name
         )
     }

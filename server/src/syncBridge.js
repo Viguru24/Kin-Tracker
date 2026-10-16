@@ -62,7 +62,12 @@ async function syncLiveProductionFamily() {
                                             normalized.statusText = 'At Home (Live GPS)';
                                         } else {
                                             const matchedZone = safeZones.find(z => {
-                                                const effRadius = Math.max(Number(z.radiusMeters || 150), 140) + 25;
+                                                const isSchool = (z.iconName || '').toLowerCase() === 'school' ||
+                                                    (z.name || '').toLowerCase().includes('school') ||
+                                                    (z.name || '').toLowerCase().includes('byron') ||
+                                                    (z.name || '').toLowerCase().includes('academy');
+                                                const buffer = (speed < 1.5 && isSchool) ? 150 : 30;
+                                                const effRadius = Math.max(Number(z.radiusMeters || 180), 160) + buffer;
                                                 return distanceMeters(lat, lng, Number(z.latitude), Number(z.longitude)) <= effRadius;
                                             });
                                             if (matchedZone) {

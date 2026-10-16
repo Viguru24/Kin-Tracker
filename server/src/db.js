@@ -289,12 +289,21 @@ const dbOperations = {
         if (!db.safeZones) db.safeZones = {};
         const defaultZones = [
             {
+                id: 'zone_oasis_academy_byron',
+                circleId: circleId || 'circle_default_sovereign',
+                name: 'Oasis Academy Byron',
+                latitude: 51.3141000,
+                longitude: -0.1288000,
+                radiusMeters: 240,
+                iconName: 'school'
+            },
+            {
                 id: 'zone_woodcote_high_school',
                 circleId: circleId || 'circle_default_sovereign',
                 name: 'Woodcote High School',
-                latitude: 51.3205711,
-                longitude: -0.1292201,
-                radiusMeters: 180,
+                latitude: 51.3301600,
+                longitude: -0.1422829,
+                radiusMeters: 220,
                 iconName: 'school'
             },
             {
@@ -303,7 +312,7 @@ const dbOperations = {
                 name: 'Woodcote Primary School',
                 latitude: 51.3279926,
                 longitude: -0.1405488,
-                radiusMeters: 140,
+                radiusMeters: 160,
                 iconName: 'school'
             }
         ];
@@ -313,9 +322,17 @@ const dbOperations = {
             if (!existing) {
                 db.safeZones[def.id] = def;
                 changed = true;
-            } else if (Number(existing.radiusMeters || 0) < def.radiusMeters) {
-                existing.radiusMeters = def.radiusMeters;
-                changed = true;
+            } else {
+                if (Number(existing.radiusMeters || 0) < def.radiusMeters) {
+                    existing.radiusMeters = def.radiusMeters;
+                    changed = true;
+                }
+                // Auto-fix legacy Byron Ave coordinate for Woodcote High
+                if (def.id === 'zone_woodcote_high_school' && Math.abs(Number(existing.latitude || 0) - 51.3205711) < 0.001) {
+                    existing.latitude = def.latitude;
+                    existing.longitude = def.longitude;
+                    changed = true;
+                }
             }
         });
         if (changed) saveDb();

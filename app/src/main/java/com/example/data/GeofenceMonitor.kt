@@ -255,11 +255,20 @@ object GeofenceMonitor {
                         }
                     }
                 }
-                // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer (230m for Home, 250m for High School)
+                // 2. OUTSIDE / DEPARTURE BOUNDARY CHECK: Beyond radius + buffer
                 else if (distMeters > (effectiveRadius + exitHysteresis)) {
                     // Suppress false departure if member is explicitly reporting "At Home" or "At <SafeZone>"
                     if ((place.isHome && member.statusText.contains("At Home", ignoreCase = true)) ||
                         (!place.isHome && member.statusText.contains("At ${place.name}", ignoreCase = true))) {
+                        statusEditor.putInt("outcount_$key", 0)
+                        return@forEach
+                    }
+
+                    // Extra protection for school office drawers: if stationary (speed < 1.8 mph) and within cell tower jitter range,
+                    // suppress departure
+                    val isSchool = !place.isHome && !place.isWork
+                    val isStationaryInDrawer = member.speedMph < AppConfig.MIN_EXIT_SPEED_MPH
+                    if (isSchool && isStationaryInDrawer && distMeters <= (effectiveRadius + 200.0)) {
                         statusEditor.putInt("outcount_$key", 0)
                         return@forEach
                     }
@@ -269,8 +278,14 @@ object GeofenceMonitor {
                         val newOutCount = outCount + 1
                         statusEditor.putInt("outcount_$key", newOutCount)
 
-                        val isConfirmedDeparture = newOutCount >= AppConfig.DEPARTURE_CONFIRMATION_CHECKS &&
-                                (member.speedMph >= AppConfig.MIN_EXIT_SPEED_MPH || distMeters > (effectiveRadius + 100.0))
+                        val isConfirmedDeparture = if (isStationaryInDrawer) {
+                            // When stationary (phone in office drawer), require sustained distance far outside campus (> effectiveRadius + 250m)
+                            // AND require at least 6 consecutive confirmation checks (30+ seconds)
+                            newOutCount >= (AppConfig.DEPARTURE_CONFIRMATION_CHECKS * 2) && distMeters > (effectiveRadius + 250.0)
+                        } else {
+                            newOutCount >= AppConfig.DEPARTURE_CONFIRMATION_CHECKS &&
+                                (member.speedMph >= AppConfig.MIN_EXIT_SPEED_MPH || distMeters > (effectiveRadius + 120.0))
+                        }
 
                         if (isConfirmedDeparture) {
                             statusEditor.putString("status_$key", "outside")
