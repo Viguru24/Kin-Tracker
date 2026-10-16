@@ -81,28 +81,21 @@ Write-Host ""
 
 Write-Host "[*] Uploading to VPS ($UploadUrl)..." -ForegroundColor Yellow
 
-$FormParameters = @{
-    apk          = Get-Item $ApkPath
-    versionCode  = "$VersionCode"
-    versionName  = "$VersionName"
-    releaseNotes = "$ReleaseNotes"
-}
-
-$Headers = @{
-    "x-admin-key" = $AdminKey
-}
-
 try {
-    $ServerResponse = Invoke-RestMethod -Uri $UploadUrl -Method Post -Form $FormParameters -Headers $Headers
-    Write-Host ""
-    Write-Host "[OK] OTA DEPLOYMENT SUCCESSFUL!" -ForegroundColor Green
-    Write-Host "     Message: $($ServerResponse.message)" -ForegroundColor Cyan
-    Write-Host "     VPS has replaced the old APK with the new one." -ForegroundColor Green
-    Write-Host "     Family phones will automatically prompt to update on next launch." -ForegroundColor White
-    Write-Host ""
+    $curlOut = & curl.exe -s -S -X POST -H "x-admin-key: $AdminKey" -F "apk=@$ApkPath" -F "versionCode=$VersionCode" -F "versionName=$VersionName" -F "releaseNotes=$ReleaseNotes" $UploadUrl
+    $ServerResponse = $curlOut | ConvertFrom-Json
+    if ($ServerResponse.success) {
+        Write-Host ""
+        Write-Host "[OK] OTA DEPLOYMENT SUCCESSFUL!" -ForegroundColor Green
+        Write-Host "     Message: $($ServerResponse.message)" -ForegroundColor Cyan
+        Write-Host "     VPS has replaced the old APK with the new one." -ForegroundColor Green
+        Write-Host "     Family phones will automatically prompt to update on next launch." -ForegroundColor White
+        Write-Host ""
+    } else {
+        Write-Error "[!] Upload rejected by server: $curlOut"
+    }
 } catch {
     Write-Warning ""
-    Write-Warning "Note: If api.cosmowhisper.com has not yet restarted with the new /updates route,"
-    Write-Warning "deploy the server update or run against local/staging host."
+    Write-Warning "Note: Verify that api.cosmowhisper.com /updates endpoint is active."
     Write-Error "[!] Server deployment upload failed: $_"
 }
