@@ -478,6 +478,8 @@ fun MainScreen(
     val myDevicePhone by viewModel.myDevicePhone.collectAsStateWithLifecycle()
     val cloudStatusText by viewModel.cloudStatusText.collectAsStateWithLifecycle()
     val ghostModeExpiryTime by viewModel.ghostModeExpiryTime.collectAsStateWithLifecycle()
+    val availableUpdate by viewModel.availableUpdate.collectAsStateWithLifecycle()
+    val updateDownloadProgress by viewModel.updateDownloadProgress.collectAsStateWithLifecycle()
 
     val isUserSignedIn by viewModel.isUserSignedIn.collectAsStateWithLifecycle()
     val groupPinMappings by viewModel.groupPinMappings.collectAsStateWithLifecycle()
@@ -795,6 +797,72 @@ fun MainScreen(
             )
         }
 
+        // 5. OTA APP UPDATE AVAILABLE DIALOG
+        availableUpdate?.let { update ->
+            AlertDialog(
+                onDismissRequest = { if (updateDownloadProgress == null) viewModel.dismissUpdateDialog() },
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🚀", fontSize = 20.sp)
+                        Text("Kin-Tracker Update v${update.versionName}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = update.releaseNotes,
+                            color = TextSecondary,
+                            fontSize = 14.sp
+                        )
+
+                        if (updateDownloadProgress != null) {
+                            val progress = updateDownloadProgress!!
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                LinearProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                                    color = RadarCyan,
+                                    trackColor = Color.White.copy(alpha = 0.1f)
+                                )
+                                Text(
+                                    text = "Downloading... ${(progress * 100).toInt()}%",
+                                    color = RadarCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.startOtaUpdateDownload(update) },
+                        enabled = updateDownloadProgress == null,
+                        colors = ButtonDefaults.buttonColors(containerColor = RadarCyan)
+                    ) {
+                        Text(
+                            text = if (updateDownloadProgress != null) "Downloading..." else "Update Now",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                dismissButton = {
+                    if (updateDownloadProgress == null) {
+                        TextButton(onClick = { viewModel.dismissUpdateDialog() }) {
+                            Text("Later", color = TextSecondary)
+                        }
+                    }
+                },
+                containerColor = CosmicSlateCard,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+
         // 3. SETTINGS & SIMULATION FULLSCREEN SLIDE OVERLAY SHEET
         AnimatedVisibility(
             visible = isSettingsOpen,
@@ -836,10 +904,11 @@ fun MainScreen(
                             Surface(
                                 color = RadarCyan.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f))
+                                border = BorderStroke(1.dp, RadarCyan.copy(alpha = 0.4f)),
+                                modifier = Modifier.clickable { viewModel.checkForAppUpdatesManually() }
                             ) {
                                 Text(
-                                    text = "v2.6",
+                                    text = "v2.6 • Check Update",
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,

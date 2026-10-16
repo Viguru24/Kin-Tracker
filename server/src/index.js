@@ -87,6 +87,7 @@ app.get('/api/info', (req, res) => {
 // Main API Routes
 app.use('/api/circles', circleRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/updates', require('./routes/updates'));
 
 // Legacy Backward-Compatibility Sync Endpoints (for old client versions if any)
 app.get('/sync/:token', (req, res) => {

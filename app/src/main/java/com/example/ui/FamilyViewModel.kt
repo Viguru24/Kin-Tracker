@@ -51,7 +51,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val notificationVolume = MutableStateFlow(80)
     val proximityAlertDistanceMeters = MutableStateFlow(400)
 
-
+    val updateManager = com.example.data.AppUpdateManager(application)
+    val availableUpdate = MutableStateFlow<com.example.data.UpdateInfo?>(null)
+    val updateDownloadProgress = MutableStateFlow<Float?>(null)
 
     val isMySosAlertActive = MutableStateFlow(false)
     val myActiveReaction = MutableStateFlow<String?>(null)
@@ -635,7 +637,52 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     if (isWifeCloudSimulationEnabled.value) startWifeCloudSimulationLoop()
                 }
             }
+
+            // Check for OTA app update in background
+            viewModelScope.launch {
+                try {
+                    val update = updateManager.checkForUpdates()
+                    if (update != null) {
+                        availableUpdate.value = update
+                    }
+                } catch (_: Exception) {}
+            }
         }
+    }
+
+    fun checkForAppUpdatesManually() {
+        viewModelScope.launch {
+            try {
+                _uiEvents.emit("Checking for updates...")
+                val update = updateManager.checkForUpdates()
+                if (update != null) {
+                    availableUpdate.value = update
+                    _uiEvents.emit("Update available: v${update.versionName}")
+                } else {
+                    _uiEvents.emit("You are on the latest version (v${updateManager.currentVersionName})")
+                }
+            } catch (_: Exception) {
+                _uiEvents.emit("Could not reach update server")
+            }
+        }
+    }
+
+    fun startOtaUpdateDownload(update: com.example.data.UpdateInfo) {
+        viewModelScope.launch {
+            updateDownloadProgress.value = 0.01f
+            val success = updateManager.downloadAndInstallUpdate(update.apkUrl) { progress ->
+                updateDownloadProgress.value = progress
+            }
+            updateDownloadProgress.value = null
+            if (!success) {
+                _uiEvents.emit("Failed to download update. Please try again.")
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        availableUpdate.value = null
+        updateDownloadProgress.value = null
     }
 
     fun triggerUIFeedback(message: String) { viewModelScope.launch { _uiEvents.emit(message) } }
