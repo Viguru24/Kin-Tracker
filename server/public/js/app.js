@@ -685,20 +685,20 @@
             }
 
             const count = clusterList.length;
-            // Screen-space scaling: 48px radius ensures 96px separation between 2 faces (~54px width)
-            const radiusPx = count === 2 ? 48.0 : count === 3 ? 54.0 : count === 4 ? 58.0 : Math.max(58.0, 36.0 / Math.sin(Math.PI / count));
+            // Screen-space scaling: 40px radius ensures ~56.6px separation between 2 faces (~54px width)
+            // They bounce/kiss edges right above the place with an angled spoke line to the place
+            const radiusPx = count === 2 ? 40.0 : count === 3 ? 44.0 : count === 4 ? 48.0 : Math.max(48.0, 30.0 / Math.sin(Math.PI / count));
             const spreadRadiusMeters = radiusPx * mPerPx;
 
-            // For 2 members, separate strictly horizontally (West / East) so faces flank the home/zone icon
-            const startAngle = count === 2 ? Math.PI : count === 4 ? -3.0 * Math.PI / 4.0 : -Math.PI / 2.0;
-            const angleStep = (2.0 * Math.PI) / count;
             const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
 
             clusterList.sort((a, b) => String(a.id).localeCompare(String(b.id)));
 
             for (let idx = 0; idx < count; idx++) {
                 const m = clusterList[idx];
-                const angle = startAngle + (idx * angleStep);
+                const angle = count === 2
+                    ? (idx === 0 ? (3.0 * Math.PI / 4.0) : (Math.PI / 4.0))
+                    : ((Math.PI / 2.0) + (idx * 2.0 * Math.PI / count));
                 const deltaLat = (spreadRadiusMeters * Math.sin(angle)) / 111139.0;
                 const deltaLng = (spreadRadiusMeters * Math.cos(angle)) / (111139.0 * cosLat);
                 adjustedCoordinates[m.id] = [anchorLat + deltaLat, anchorLng + deltaLng];
@@ -761,7 +761,7 @@
         }
 
         // Universal screen-space deconfliction pass: guarantee NO TWO faces overlap
-        const minMarkerSeparationPx = 64.0;
+        const minMarkerSeparationPx = 54.0;
         const activeIds = activeMembers.map(m => m.id);
         for (let iter = 0; iter < 2; iter++) {
             for (let i = 0; i < activeIds.length; i++) {

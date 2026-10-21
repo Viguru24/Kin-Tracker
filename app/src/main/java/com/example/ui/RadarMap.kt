@@ -118,6 +118,23 @@ fun metersPerPixelAtZoom(latitude: Double, zoom: Double): Double {
     return (156543.03392 * cosLat) / Math.pow(2.0, zoom.coerceIn(2.0, 21.0))
 }
 
+/**
+ * Boosts saturation and brightness of member avatar colors so leader spoke lines
+ * remain brilliantly vivid and crystal clear across both dark canvas and street map tiles.
+ */
+fun getVibrantSpokeColor(hexColor: String): Int {
+    return try {
+        val parsed = android.graphics.Color.parseColor(hexColor)
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(parsed, hsv)
+        hsv[1] = maxOf(hsv[1], 0.70f)
+        hsv[2] = maxOf(hsv[2], 0.92f)
+        android.graphics.Color.HSVToColor(hsv)
+    } catch (_: Exception) {
+        android.graphics.Color.parseColor("#00E5FF")
+    }
+}
+
 fun computeClusterLayout(
     members: List<FamilyMember>,
     safeZones: List<SafeZone>,
@@ -292,31 +309,41 @@ fun computeClusterLayout(
             }
         }
 
-        // Screen-space radius: 48dp radius ensures 96dp separation between 2 faces (bubbles are ~54dp)
+        // Screen-space radius: 40dp radius at 135 deg / 45 deg angles ensures ~56.6dp separation
+        // With 54dp face bubbles, this leaves an intimate ~2dp gap so faces bounce off each other without overlapping!
         val radiusDp = when (cluster.size) {
-            2 -> 48.0
-            3 -> 54.0
-            4 -> 58.0
-            else -> maxOf(58.0, 36.0 / kotlin.math.sin(Math.PI / cluster.size))
+            2 -> 40.0
+            3 -> 44.0
+            4 -> 48.0
+            else -> maxOf(48.0, 30.0 / kotlin.math.sin(Math.PI / cluster.size))
         }
         val radiusPx = radiusDp * density
         val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
         val spreadRadiusMeters = radiusPx * metersPerPx
 
-        // For 2 members, separate strictly horizontally (West / East) so faces flank the home/zone icon without vertical clipping
-        val startAngle = when (cluster.size) {
-            2 -> Math.PI
-            3 -> -Math.PI / 2.0
-            4 -> -3.0 * Math.PI / 4.0
-            else -> -Math.PI / 2.0
-        }
-
-        val angleStep = (2.0 * Math.PI) / cluster.size
         val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude)).coerceAtLeast(0.01)
 
         for (idx in cluster.indices) {
             val mId = cluster[idx]
-            val angle = startAngle + (idx * angleStep)
+            // For 2 members: Idx 0 is angled North-West (135° = 3π/4), Idx 1 is angled North-East (45° = π/4)
+            // Both faces sit side by side bouncing off each other right above the place pin,
+            // creating beautiful angled spoke lines down to the place icon!
+            val angle = when (cluster.size) {
+                2 -> if (idx == 0) (3.0 * Math.PI / 4.0) else (Math.PI / 4.0)
+                3 -> when (idx) {
+                    0 -> Math.PI / 2.0 // North
+                    1 -> -Math.PI / 6.0 // South-East
+                    else -> 7.0 * Math.PI / 6.0 // South-West
+                }
+                4 -> when (idx) {
+                    0 -> 3.0 * Math.PI / 4.0 // North-West
+                    1 -> Math.PI / 4.0 // North-East
+                    2 -> -Math.PI / 4.0 // South-East
+                    else -> -3.0 * Math.PI / 4.0 // South-West
+                }
+                else -> (Math.PI / 2.0) + (idx * 2.0 * Math.PI / cluster.size)
+            }
+
             val deltaLat = (spreadRadiusMeters * kotlin.math.sin(angle)) / 111139.0
             val deltaLng = (spreadRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
 
@@ -327,8 +354,8 @@ fun computeClusterLayout(
     }
 
     // Universal screen-space deconfliction pass: guarantees that NO TWO active members'
-    // face bubbles ever collide or overlap on screen, regardless of zoom level or motion state.
-    val minMarkerSeparationPx = 64.0 * density // Minimum 64dp center-to-center separation
+    // face bubbles ever collide or overlap on screen, maintaining the intimate "bouncing" proximity.
+    val minMarkerSeparationPx = 54.0 * density // Minimum 54dp center-to-center separation
     val activeIds = activeMembers.map { it.id }
     repeat(2) {
         for (i in 0 until activeIds.size) {
@@ -992,7 +1019,7 @@ fun RadarMap(
                 val clusters = layoutResult.clusters
                 // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
 
-                // Draw Life360 elegant dashed leader lines from cluster anchor to each fanned-out avatar
+                // Draw bold high-contrast angled spoke lines from place anchor to each bouncing face
                 for (cluster in clusters) {
                     if (cluster.size > 1) {
                         for (mId in cluster) {
@@ -1000,18 +1027,27 @@ fun RadarMap(
                             val target = adjustedCoordinates[mId]
                             val member = members.firstOrNull { it.id == mId }
                             if (anchor != null && target != null && member != null) {
-                                val memberColor = try {
-                                    android.graphics.Color.parseColor(member.avatarColorHex)
-                                } catch (_: Exception) { android.graphics.Color.DKGRAY }
+                                val vibrantColor = getVibrantSpokeColor(member.avatarColorHex)
 
-                                val leaderLine = Polyline(mapView).apply {
+                                // 1. Thick solid white halo for bold contrast against dark/light tiles
+                                val haloLine = Polyline(mapView).apply {
                                     setPoints(listOf(anchor, target))
-                                    outlinePaint.color = memberColor
-                                    outlinePaint.strokeWidth = 2.2f * density
-                                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(6f * density, 4f * density), 0f)
-                                    outlinePaint.alpha = 160
+                                    outlinePaint.color = android.graphics.Color.WHITE
+                                    outlinePaint.strokeWidth = 5.2f * density
+                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                    outlinePaint.alpha = 245
                                 }
-                                mapView.overlays.add(leaderLine)
+                                mapView.overlays.add(haloLine)
+
+                                // 2. Crisp, solid vibrant spoke in member's signature color
+                                val coreLine = Polyline(mapView).apply {
+                                    setPoints(listOf(anchor, target))
+                                    outlinePaint.color = vibrantColor
+                                    outlinePaint.strokeWidth = 3.2f * density
+                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                                    outlinePaint.alpha = 255
+                                }
+                                mapView.overlays.add(coreLine)
                             }
                         }
                     }

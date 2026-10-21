@@ -254,18 +254,22 @@ class SafeZoneGeofenceTest {
             val screenDp = screenPixels / density
 
             assertTrue(
-                "At zoom $zoom, screen separation ($screenDp dp) must be at least 64dp to prevent face overlapping (bubble width is ~54dp)",
-                screenDp >= 64.0
+                "At zoom $zoom, screen separation ($screenDp dp) must be at least 54dp so bubbles bounce off each other without overlapping",
+                screenDp >= 54.0
             )
 
-            // Verify they flank Home horizontally (one West, one East)
+            // Verify they sit above Home (North) and flank horizontally (Eloise West, Dad East) creating angled spokes
             val dadIsWest = posDad.longitude < -0.1180000
             val eloiseIsEast = posEloise.longitude > -0.1180000
             val dadIsEast = posDad.longitude > -0.1180000
             val eloiseIsWest = posEloise.longitude < -0.1180000
             assertTrue(
-                "Faces must flank the home icon horizontally without vertical clipping at zoom $zoom",
+                "Faces must flank the home icon horizontally at zoom $zoom",
                 (dadIsWest && eloiseIsEast) || (dadIsEast && eloiseIsWest)
+            )
+            assertTrue(
+                "Faces must sit above the place anchor (North) creating an angled line at zoom $zoom",
+                posDad.latitude > 51.3300000 && posEloise.latitude > 51.3300000
             )
         }
     }
@@ -323,8 +327,8 @@ class SafeZoneGeofenceTest {
         val screenDp = (distMeters / metersPerPx) / density
 
         assertTrue(
-            "Moving co-located members must be separated by at least 60dp on screen (was $screenDp dp)",
-            screenDp >= 60.0
+            "Moving co-located members must be separated by at least 54dp on screen so they bounce off each other without overlapping (was $screenDp dp)",
+            screenDp >= 54.0
         )
     }
 }
