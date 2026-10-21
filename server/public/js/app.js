@@ -279,6 +279,11 @@
             }
             exitMapCalibrateMode();
         });
+
+        // Dynamic zoom re-layout ensures face bubbles NEVER overlap on web dashboard at any zoom level
+        state.map.on('zoomend', () => {
+            updateMapMarkers(state.members);
+        });
     }
 
     function exitMapCalibrateMode() {
@@ -655,12 +660,20 @@
             }
         });
 
+        function metersPerPixelAtZoom(lat, zoom) {
+            const cosLat = Math.max(0.01, Math.cos(lat * Math.PI / 180.0));
+            return (156543.03392 * cosLat) / Math.pow(2.0, Math.min(21.0, Math.max(2.0, zoom)));
+        }
+
         function layoutCluster(clusterList, anchorLat, anchorLng, isBarrierZone = false) {
             if (clusterList.length === 0) return;
+            const currentZoom = state.map ? state.map.getZoom() : 15;
+            const mPerPx = metersPerPixelAtZoom(anchorLat, currentZoom);
+
             if (clusterList.length === 1) {
                 if (isBarrierZone) {
-                    const spreadRadiusMeters = 14.0;
-                    const angle = -Math.PI / 2.0; // Place above center pin so both zone pin and avatar are visible
+                    const spreadRadiusMeters = 38.0 * mPerPx; // 38px above center pin
+                    const angle = -Math.PI / 2.0; // Place above center pin
                     const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
                     const deltaLat = (spreadRadiusMeters * Math.sin(angle)) / 111139.0;
                     const deltaLng = (spreadRadiusMeters * Math.cos(angle)) / (111139.0 * cosLat);
@@ -672,8 +685,12 @@
             }
 
             const count = clusterList.length;
-            const spreadRadiusMeters = count === 2 ? 18.0 : count === 3 ? 22.0 : count === 4 ? 26.0 : Math.max(28.0, count * 7.5);
-            const startAngle = count === 2 ? -Math.PI / 2.0 : count === 4 ? -Math.PI / 4.0 : -Math.PI / 2.0;
+            // Screen-space scaling: 48px radius ensures 96px separation between 2 faces (~54px width)
+            const radiusPx = count === 2 ? 48.0 : count === 3 ? 54.0 : count === 4 ? 58.0 : Math.max(58.0, 36.0 / Math.sin(Math.PI / count));
+            const spreadRadiusMeters = radiusPx * mPerPx;
+
+            // For 2 members, separate strictly horizontally (West / East) so faces flank the home/zone icon
+            const startAngle = count === 2 ? Math.PI : count === 4 ? -3.0 * Math.PI / 4.0 : -Math.PI / 2.0;
             const angleStep = (2.0 * Math.PI) / count;
             const cosLat = Math.cos(anchorLat * Math.PI / 180.0);
 
@@ -710,7 +727,12 @@
             workClusterMembers.forEach(m => { adjustedCoordinates[m.id] = [Number(m.y), Number(m.x)]; });
         }
 
-        // Ad-hoc clusters for unassigned members within 40m
+        // Ad-hoc clusters for unassigned members
+        const currentZoom = state.map ? state.map.getZoom() : 15;
+        const avgLat = activeMembers.length > 0 ? Number(activeMembers[0].y) : 51.33;
+        const mPerPx = metersPerPixelAtZoom(avgLat, currentZoom);
+        const clusterThresholdMeters = Math.max(40.0, 60.0 * mPerPx);
+
         const visited = new Set();
         for (let i = 0; i < unassignedMembers.length; i++) {
             const m1 = unassignedMembers[i];
@@ -723,7 +745,7 @@
                 const m2 = unassignedMembers[j];
                 if (visited.has(m2.id)) continue;
                 const distM = distanceMeters(Number(m1.y), Number(m1.x), Number(m2.y), Number(m2.x));
-                if (distM < 40.0) {
+                if (distM < clusterThresholdMeters) {
                     cluster.push(m2);
                     visited.add(m2.id);
                 }
@@ -735,6 +757,45 @@
                 layoutCluster(cluster, sumLat / cluster.length, sumLng / cluster.length, false);
             } else {
                 adjustedCoordinates[m1.id] = [Number(m1.y), Number(m1.x)];
+            }
+        }
+
+        // Universal screen-space deconfliction pass: guarantee NO TWO faces overlap
+        const minMarkerSeparationPx = 64.0;
+        const activeIds = activeMembers.map(m => m.id);
+        for (let iter = 0; iter < 2; iter++) {
+            for (let i = 0; i < activeIds.length; i++) {
+                const idA = activeIds[i];
+                const posA = adjustedCoordinates[idA];
+                if (!posA) continue;
+                for (let j = i + 1; j < activeIds.length; j++) {
+                    const idB = activeIds[j];
+                    const posB = adjustedCoordinates[idB];
+                    if (!posB) continue;
+
+                    const midLat = (posA[0] + posB[0]) / 2.0;
+                    const scaleMPerPx = metersPerPixelAtZoom(midLat, currentZoom);
+                    const minSeparationMeters = minMarkerSeparationPx * scaleMPerPx;
+                    const distM = distanceMeters(posA[0], posA[1], posB[0], posB[1]);
+
+                    if (distM < minSeparationMeters) {
+                        const neededShiftM = (minSeparationMeters - distM) / 2.0 + 1.0;
+                        const cosLat = Math.max(0.01, Math.cos(midLat * Math.PI / 180.0));
+                        if (distM < 0.1) {
+                            const shiftLng = neededShiftM / (111139.0 * cosLat);
+                            adjustedCoordinates[idA] = [posA[0], posA[1] - shiftLng];
+                            adjustedCoordinates[idB] = [posB[0], posB[1] + shiftLng];
+                        } else {
+                            const dLat = posB[0] - posA[0];
+                            const dLng = (posB[1] - posA[1]) * cosLat;
+                            const angle = Math.atan2(dLat, dLng);
+                            const shiftLat = (neededShiftM * Math.sin(angle)) / 111139.0;
+                            const shiftLng = (neededShiftM * Math.cos(angle)) / (111139.0 * cosLat);
+                            adjustedCoordinates[idA] = [posA[0] - shiftLat, posA[1] - shiftLng];
+                            adjustedCoordinates[idB] = [posB[0] + shiftLat, posB[1] + shiftLng];
+                        }
+                    }
+                }
             }
         }
 

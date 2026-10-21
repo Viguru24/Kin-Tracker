@@ -109,6 +109,15 @@ private fun statusIndicatesTravel(m: FamilyMember): Boolean {
         s.contains("commute", ignoreCase = true)
 }
 
+/**
+ * Calculates ground resolution (meters per screen pixel) at a given latitude and map zoom level.
+ * Used for dynamic, zoom-adaptive marker deconfliction so faces NEVER overlap at ANY zoom level.
+ */
+fun metersPerPixelAtZoom(latitude: Double, zoom: Double): Double {
+    val cosLat = kotlin.math.cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
+    return (156543.03392 * cosLat) / Math.pow(2.0, zoom.coerceIn(2.0, 21.0))
+}
+
 fun computeClusterLayout(
     members: List<FamilyMember>,
     safeZones: List<SafeZone>,
@@ -121,7 +130,9 @@ fun computeClusterLayout(
     workRadiusMeters: Double,
     previousBarrierMembership: Map<String, String> = emptyMap(),
     exitBufferMeters: Double = 60.0,
-    barrierBreakoutSpeedMph: Double = 4.0
+    barrierBreakoutSpeedMph: Double = 4.0,
+    zoomLevel: Double = 15.5,
+    density: Float = 3.0f
 ): ClusterLayoutResult {
     val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
     val clusterAnchorPoints = mutableMapOf<String, GeoPoint>()
@@ -217,8 +228,12 @@ fun computeClusterLayout(
         adjustedCoordinates[workClusterMembers[0]] = GeoPoint(workLat, workLng)
     }
 
-    // D. Form Ad-Hoc Co-Located Clusters for members outside zones (within 40m)
+    // D. Form Ad-Hoc Co-Located Clusters for members outside zones
     val visited = mutableSetOf<String>()
+    val collisionThresholdPx = 60.0 * density
+    val avgLatForAdhoc = if (unassignedMembers.isNotEmpty()) unassignedMembers[0].y else (if (homeLat != 0.0) homeLat else 51.33)
+    val clusterThresholdMeters = maxOf(40.0, collisionThresholdPx * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
+
     for (i in unassignedMembers.indices) {
         val m1 = unassignedMembers[i]
         if (visited.contains(m1.id)) continue
@@ -231,14 +246,19 @@ fun computeClusterLayout(
             if (visited.contains(m2.id)) continue
 
             val distM = com.example.data.GeoUtils.distanceMeters(m1.y, m1.x, m2.y, m2.x)
-            if (distM < 40.0) {
+            if (distM < clusterThresholdMeters) {
                 currentCluster.add(m2.id)
                 visited.add(m2.id)
             }
         }
 
         if (currentCluster.size > 1) {
-            clusters.add(currentCluster.sorted())
+            val sortedCluster = currentCluster.sorted()
+            clusters.add(sortedCluster)
+            val clusterKey = "adhoc:${sortedCluster.first()}"
+            sortedCluster.forEach { mId ->
+                barrierMembership[mId] = clusterKey
+            }
         } else {
             val mId = currentCluster[0]
             val member = activeMembers.first { it.id == mId }
@@ -246,7 +266,9 @@ fun computeClusterLayout(
         }
     }
 
-    // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor
+    // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor.
+    // Screen-space scaling: radius is specified in DP and scaled by metersPerPixelAtZoom
+    // so faces NEVER overlap no matter how much you zoom in or zoom out!
     for (cluster in clusters) {
         val isHomeCluster = cluster.any { homeClusterMembers.contains(it) }
         val matchedZone = effectiveSafeZones.firstOrNull { zone ->
@@ -270,22 +292,27 @@ fun computeClusterLayout(
             }
         }
 
-        val spreadRadiusMeters = when (cluster.size) {
-            2 -> 16.0
-            3 -> 20.0
-            4 -> 24.0
-            else -> maxOf(24.0, (cluster.size * 7.5))
+        // Screen-space radius: 48dp radius ensures 96dp separation between 2 faces (bubbles are ~54dp)
+        val radiusDp = when (cluster.size) {
+            2 -> 48.0
+            3 -> 54.0
+            4 -> 58.0
+            else -> maxOf(58.0, 36.0 / kotlin.math.sin(Math.PI / cluster.size))
         }
+        val radiusPx = radiusDp * density
+        val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
+        val spreadRadiusMeters = radiusPx * metersPerPx
 
+        // For 2 members, separate strictly horizontally (West / East) so faces flank the home/zone icon without vertical clipping
         val startAngle = when (cluster.size) {
-            2 -> -Math.PI / 2.0
+            2 -> Math.PI
             3 -> -Math.PI / 2.0
-            4 -> -Math.PI / 4.0
+            4 -> -3.0 * Math.PI / 4.0
             else -> -Math.PI / 2.0
         }
 
         val angleStep = (2.0 * Math.PI) / cluster.size
-        val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude))
+        val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude)).coerceAtLeast(0.01)
 
         for (idx in cluster.indices) {
             val mId = cluster[idx]
@@ -296,6 +323,48 @@ fun computeClusterLayout(
             val orbitGeo = GeoPoint(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
             adjustedCoordinates[mId] = orbitGeo
             clusterAnchorPoints[mId] = anchorGeo
+        }
+    }
+
+    // Universal screen-space deconfliction pass: guarantees that NO TWO active members'
+    // face bubbles ever collide or overlap on screen, regardless of zoom level or motion state.
+    val minMarkerSeparationPx = 64.0 * density // Minimum 64dp center-to-center separation
+    val activeIds = activeMembers.map { it.id }
+    repeat(2) {
+        for (i in 0 until activeIds.size) {
+            val idA = activeIds[i]
+            val posA = adjustedCoordinates[idA] ?: continue
+            for (j in i + 1 until activeIds.size) {
+                val idB = activeIds[j]
+                val posB = adjustedCoordinates[idB] ?: continue
+
+                val avgLat = (posA.latitude + posB.latitude) / 2.0
+                val metersPerPx = metersPerPixelAtZoom(avgLat, zoomLevel)
+                val minSeparationMeters = minMarkerSeparationPx * metersPerPx
+                val distM = com.example.data.GeoUtils.distanceMeters(posA.latitude, posA.longitude, posB.latitude, posB.longitude)
+
+                if (distM < minSeparationMeters) {
+                    val neededShiftM = (minSeparationMeters - distM) / 2.0 + 1.0
+                    val cosLat = kotlin.math.cos(Math.toRadians(avgLat)).coerceAtLeast(0.01)
+
+                    if (distM < 0.1) {
+                        // Exactly co-located (e.g. sharing car or identical GPS): spread horizontally (West/East)
+                        val shiftLng = neededShiftM / (111139.0 * cosLat)
+                        adjustedCoordinates[idA] = GeoPoint(posA.latitude, posA.longitude - shiftLng)
+                        adjustedCoordinates[idB] = GeoPoint(posB.latitude, posB.longitude + shiftLng)
+                    } else {
+                        // Push apart along their existing separation axis
+                        val dLat = posB.latitude - posA.latitude
+                        val dLng = (posB.longitude - posA.longitude) * cosLat
+                        val angle = kotlin.math.atan2(dLat, dLng)
+                        val shiftLat = (neededShiftM * kotlin.math.sin(angle)) / 111139.0
+                        val shiftLng = (neededShiftM * kotlin.math.cos(angle)) / (111139.0 * cosLat)
+
+                        adjustedCoordinates[idA] = GeoPoint(posA.latitude - shiftLat, posA.longitude - shiftLng)
+                        adjustedCoordinates[idB] = GeoPoint(posB.latitude + shiftLat, posB.longitude + shiftLng)
+                    }
+                }
+            }
         }
     }
 
@@ -426,10 +495,12 @@ fun RadarMap(
             !(it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true))
         }
     }
+    val density = context.resources.displayMetrics.density
     // Single shared layout used by BOTH the motion engine and the marker renderer so they never disagree
     val sharedClusterLayout = remember(
         activeLayoutMembers, safeZones, homeLat, homeLng, homeRadiusMeters,
-        isWorkCalibrated, workLat, workLng, workRadiusMeters
+        isWorkCalibrated, workLat, workLng, workRadiusMeters,
+        mapZoomLevel, density
     ) {
         computeClusterLayout(
             members = activeLayoutMembers,
@@ -441,7 +512,9 @@ fun RadarMap(
             workLat = workLat,
             workLng = workLng,
             workRadiusMeters = workRadiusMeters,
-            previousBarrierMembership = stickyBarrierMembership.toMap()
+            previousBarrierMembership = stickyBarrierMembership.toMap(),
+            zoomLevel = mapZoomLevel,
+            density = density
         ).also {
             stickyBarrierMembership.clear()
             stickyBarrierMembership.putAll(it.barrierMembership)
@@ -484,7 +557,7 @@ fun RadarMap(
                 val assignedClusterPos = adjustedCoordinates[m.id] ?: GeoPoint(m.y, m.x)
 
                 if (state == null) {
-                    val initialGeo = if (isLocked) assignedClusterPos else GeoPoint(m.y, m.x)
+                    val initialGeo = assignedClusterPos
                     memberVisualStates[m.id] = MemberVisualState(
                         currentGeo = initialGeo,
                         targetGeo = initialGeo,
@@ -496,7 +569,7 @@ fun RadarMap(
                     visualCoordinates[m.id] = initialGeo
                 } else {
                     if (isLocked) {
-                        // Locked static inside barrier — zero GPS jitter motion, snap immediately to assigned barrier pin/slot
+                        // Locked static inside barrier or cluster — snap immediately to assigned deconflicted slot
                         state.isMoving = false
                         state.speedMph = 0.0
                         state.targetGeo = assignedClusterPos
@@ -517,7 +590,7 @@ fun RadarMap(
                             val cosLat = kotlin.math.cos(Math.toRadians(m.y))
                             val rawBearing = Math.toDegrees(kotlin.math.atan2(dLng * cosLat, dLat))
                             state.bearingDeg = (rawBearing + 360.0) % 360.0
-                            state.targetGeo = GeoPoint(m.y, m.x)
+                            state.targetGeo = assignedClusterPos
                             val elapsedSec = ((now - state.lastTargetUpdateTime) / 1000.0).coerceAtLeast(0.5)
                             state.lastTargetUpdateTime = now
                             state.speedMph = if (m.speedMph >= 0.5) m.speedMph else (distMovedM / elapsedSec) * 2.23694
@@ -526,6 +599,10 @@ fun RadarMap(
                             state.isMoving = isReportedMoving
                             if (!isReportedMoving) {
                                 state.speedMph = 0.0
+                                state.targetGeo = assignedClusterPos
+                                state.currentGeo = assignedClusterPos
+                                state.markerRef?.position = assignedClusterPos
+                                visualCoordinates[m.id] = assignedClusterPos
                             }
                         }
                     }
@@ -957,8 +1034,22 @@ fun RadarMap(
                 sortedMembers.forEach { member ->
 
                     val visualGeo = memberVisualStates[member.id]?.currentGeo
-                    // Always draw at the animated position (motion loop owns it) so redraws never teleport faces
-                    val displayGeo = visualGeo ?: adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
+                    val isDeconflicted = layoutResult.barrierMembership.containsKey(member.id) ||
+                        layoutResult.clusters.any { it.contains(member.id) }
+                    // For deconflicted members, immediately use zoom-adapted coordinate to eliminate zoom lag
+                    val displayGeo = if (isDeconflicted) {
+                        adjustedCoordinates[member.id] ?: visualGeo ?: GeoPoint(member.y, member.x)
+                    } else {
+                        visualGeo ?: adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
+                    }
+                    if (isDeconflicted) {
+                        visualCoordinates[member.id] = displayGeo
+                        memberVisualStates[member.id]?.let { vs ->
+                            vs.currentGeo = displayGeo
+                            vs.targetGeo = displayGeo
+                            vs.markerRef?.position = displayGeo
+                        }
+                    }
                     val trueGeo = visualGeo ?: GeoPoint(member.y, member.x)
                     val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
                     val isSelected = member.id == selectedMemberId ||

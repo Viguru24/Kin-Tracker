@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.FamilyRepository
+import com.example.data.FamilyMember
 import com.example.data.SafeZone
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -196,6 +197,134 @@ class SafeZoneGeofenceTest {
             "School campus must take precedence over overlapping residential zone",
             "Oasis Academy Byron",
             matched!!.name
+        )
+    }
+
+    @Test
+    fun testFacesNeverOverlapAcrossZoomLevels() {
+        val dadAtHome = FamilyMember(
+            id = "me",
+            name = "Louis (Dad)",
+            avatarColorHex = "#42A5F5",
+            y = 51.3300000,
+            x = -0.1180000,
+            statusText = "At Home",
+            speedMph = 0.0
+        )
+        val eloiseAtHome = FamilyMember(
+            id = "device_eloise_a9e3d7",
+            name = "Eloise",
+            avatarColorHex = "#EC407A",
+            y = 51.3300100,
+            x = -0.1180050,
+            statusText = "At Home",
+            speedMph = 0.0
+        )
+
+        val zoomLevels = listOf(11.0, 13.0, 15.5, 18.0, 20.0)
+        val density = 3.0f
+
+        for (zoom in zoomLevels) {
+            val layout = com.example.ui.computeClusterLayout(
+                members = listOf(dadAtHome, eloiseAtHome),
+                safeZones = emptyList(),
+                homeLat = 51.3300000,
+                homeLng = -0.1180000,
+                homeRadiusMeters = 140.0,
+                isWorkCalibrated = false,
+                workLat = 0.0,
+                workLng = 0.0,
+                workRadiusMeters = 75.0,
+                zoomLevel = zoom,
+                density = density
+            )
+
+            val posDad = layout.adjustedCoordinates["me"]
+            val posEloise = layout.adjustedCoordinates["device_eloise_a9e3d7"]
+
+            assertNotNull("Dad must have adjusted coordinate at zoom $zoom", posDad)
+            assertNotNull("Eloise must have adjusted coordinate at zoom $zoom", posEloise)
+
+            val distMeters = com.example.data.GeoUtils.distanceMeters(
+                posDad!!.latitude, posDad.longitude,
+                posEloise!!.latitude, posEloise.longitude
+            )
+            val metersPerPx = com.example.ui.metersPerPixelAtZoom((posDad.latitude + posEloise.latitude) / 2.0, zoom)
+            val screenPixels = distMeters / metersPerPx
+            val screenDp = screenPixels / density
+
+            assertTrue(
+                "At zoom $zoom, screen separation ($screenDp dp) must be at least 64dp to prevent face overlapping (bubble width is ~54dp)",
+                screenDp >= 64.0
+            )
+
+            // Verify they flank Home horizontally (one West, one East)
+            val dadIsWest = posDad.longitude < -0.1180000
+            val eloiseIsEast = posEloise.longitude > -0.1180000
+            val dadIsEast = posDad.longitude > -0.1180000
+            val eloiseIsWest = posEloise.longitude < -0.1180000
+            assertTrue(
+                "Faces must flank the home icon horizontally without vertical clipping at zoom $zoom",
+                (dadIsWest && eloiseIsEast) || (dadIsEast && eloiseIsWest)
+            )
+        }
+    }
+
+    @Test
+    fun testAdhocAndMovingFacesNeverOverlapWhenSharingLocation() {
+        // Dad and Eloise in the car or walking down the high street (sharing exact GPS coordinates)
+        val dadMoving = FamilyMember(
+            id = "me",
+            name = "Louis (Dad)",
+            avatarColorHex = "#42A5F5",
+            y = 51.3500000,
+            x = -0.1000000,
+            statusText = "Driving (24 mph)",
+            speedMph = 24.0
+        )
+        val eloiseMoving = FamilyMember(
+            id = "device_eloise_a9e3d7",
+            name = "Eloise",
+            avatarColorHex = "#EC407A",
+            y = 51.3500000, // Identical GPS location
+            x = -0.1000000,
+            statusText = "Driving (24 mph)",
+            speedMph = 24.0
+        )
+
+        val zoom = 15.0
+        val density = 3.0f
+
+        val layout = com.example.ui.computeClusterLayout(
+            members = listOf(dadMoving, eloiseMoving),
+            safeZones = emptyList(),
+            homeLat = 51.3300000,
+            homeLng = -0.1180000,
+            homeRadiusMeters = 140.0,
+            isWorkCalibrated = false,
+            workLat = 0.0,
+            workLng = 0.0,
+            workRadiusMeters = 75.0,
+            zoomLevel = zoom,
+            density = density
+        )
+
+        val posDad = layout.adjustedCoordinates["me"]
+        val posEloise = layout.adjustedCoordinates["device_eloise_a9e3d7"]
+
+        assertNotNull("Dad coordinate must exist", posDad)
+        assertNotNull("Eloise coordinate must exist", posEloise)
+
+        val distMeters = com.example.data.GeoUtils.distanceMeters(
+            posDad!!.latitude, posDad.longitude,
+            posEloise!!.latitude, posEloise.longitude
+        )
+        val metersPerPx = com.example.ui.metersPerPixelAtZoom(51.3500000, zoom)
+        val screenDp = (distMeters / metersPerPx) / density
+
+        assertTrue(
+            "Moving co-located members must be separated by at least 60dp on screen (was $screenDp dp)",
+            screenDp >= 60.0
         )
     }
 }
