@@ -307,12 +307,33 @@ object GeofenceMonitor {
                                         )
                                     )
                                 } else {
-                                    val warningMsg = "$cleanMemberName has left $placeDisplayName!"
+                                    val isRailway = RailwayTransitDetector.isMemberOnRailway(member.id)
+                                    val transitMode = classifyTransitMode(member.speedMph, member.statusText, member.id)
+                                    val destination = TripTransitEngine.determineHeadingDestination(
+                                        curLat = member.y,
+                                        curLng = member.x,
+                                        prevLat = place.latitude,
+                                        prevLng = place.longitude,
+                                        safeZones = customZones,
+                                        homeLat = homeLat,
+                                        homeLng = homeLng,
+                                        workLat = workLat,
+                                        workLng = workLng,
+                                        speedMph = member.speedMph,
+                                        isRailway = isRailway
+                                    )
+                                    val warningMsg = TripTransitEngine.formatDepartureMessage(
+                                        memberName = cleanMemberName,
+                                        originName = placeDisplayName,
+                                        transitMode = transitMode,
+                                        destinationName = destination,
+                                        speedMph = member.speedMph
+                                    )
                                     repository.insertLog(
                                         ActivityLog(
                                             memberId = member.id,
                                             memberName = member.name,
-                                            actionText = "left ${place.name} (departed building)",
+                                            actionText = warningMsg.removePrefix("$cleanMemberName ").trim(),
                                             iconName = "away"
                                         )
                                     )
@@ -336,6 +357,20 @@ object GeofenceMonitor {
                     statusEditor.putInt("outcount_$key", 0)
                 }
             }
+
+            // Also evaluate non-geofenced arbitrary journeys (e.g. departing station, hotel, friend's house)
+            TripTransitEngine.evaluateMemberJourney(
+                context = context,
+                repository = repository,
+                prefs = prefs,
+                member = member,
+                safeZones = customZones,
+                homeLat = homeLat,
+                homeLng = homeLng,
+                workLat = workLat,
+                workLng = workLng,
+                onUiEvent = onUiEvent
+            )
         }
         statusEditor.apply()
     }
