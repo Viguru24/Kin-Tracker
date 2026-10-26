@@ -555,9 +555,12 @@ object BackgroundSyncProcessor {
                     else -> effY
                 }
                 val finalSpeedMph = if (isMemberLocPaused || isStationaryInBarrier) 0.0 else cloudM.speedMph
-                val finalLocationSince = when {
+                val isMoving = if (isStationaryInBarrier) false else (finalSpeedMph >= 1.2)
+                val finalLocationSince = if (isMoving) {
+                    0L
+                } else when {
                     isStationaryInBarrier && matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
-                    cloudM.locationSince > 0L -> cloudM.locationSince
+                    cloudM.locationSince > 0L && cloudM.locationSince <= System.currentTimeMillis() -> cloudM.locationSince
                     isStationaryInBarrier -> System.currentTimeMillis()
                     else -> matchingLocal?.locationSince ?: cloudM.locationSince
                 }

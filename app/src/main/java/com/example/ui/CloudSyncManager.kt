@@ -387,6 +387,9 @@ class CloudSyncManager(
 
                     isExplicitlyDeleted || isOldMock || isStaleUnknown
                 }.keys
+                for (k in keysToRemove) {
+                    updatedMembers.remove(k)
+                }
                 // 4. PRESERVE NEWEST TIMESTAMPS FOR ALL OTHER MEMBERS:
                 // Ensure we never downgrade other members' locations with stale local/cloud data
                 val existingLocalBeforePut = repository.getFamilyMembersOnce()
@@ -463,6 +466,7 @@ class CloudSyncManager(
             val myCanonicalKey = com.example.data.IdentityUtils.getCanonicalPersonKey(myName, myDeviceUUID.value)
 
             for (cloudM in incomingCloudMembers) {
+                if (cloudM.id.contains("abc123") || cloudM.id.startsWith("mock_")) continue
                 // Do not ingest self device (already tracked locally with GPS as "me")
                 // AND REFUSE DUPLICATES: Never allow another duplicate of this phone to appear!
                 val cloudCanonKey = com.example.data.IdentityUtils.getCanonicalPersonKey(cloudM.name, cloudM.id)
@@ -665,34 +669,26 @@ class CloudSyncManager(
                     matchingLocal?.statusText?.contains("At ${matchedSafeZone.name}", ignoreCase = true) == true
                 val hasStatusTransitioned = (isMemberAtHome != wasMemberAtHome) ||
                     (isMemberAtSafeZone && !wasMemberAtThisSafeZone && matchingLocal != null && matchingLocal.locationSince == 0L)
-                val isRemoteSinceStaleHomeTimestamp = !isMemberAtHome && remoteSince > 0L && (System.currentTimeMillis() - remoteSince) > 6 * 3600 * 1000L
+
 
                 val locationSince = if (isMoving) {
                     0L // Moving/traveling: reset stationary timer
                 } else {
                     val now = System.currentTimeMillis()
                     when {
-                        // 1. If remote sent a stale Home timestamp while away at a shop/school, reject it and preserve/create away arrival
-                        isRemoteSinceStaleHomeTimestamp -> {
-                            if (matchingLocal != null && matchingLocal.locationSince > 0L && (now - matchingLocal.locationSince) < 6 * 3600 * 1000L && movedDistanceKm <= 0.08) {
-                                matchingLocal.locationSince
-                            } else {
-                                now - (48 * 60 * 1000L)
-                            }
-                        }
-                        // 2. If already locked at this SafeZone or Home with a valid local arrival timestamp, keep it stable
+                        // 1. If already locked at this SafeZone or Home with a valid local arrival timestamp, keep it stable
                         (wasMemberAtThisSafeZone || (isMemberAtHome && wasMemberAtHome)) && matchingLocal != null && matchingLocal.locationSince > 0L -> {
                             matchingLocal.locationSince
                         }
-                        // 3. If remote provided a valid arrival timestamp that is consistent with the current location:
+                        // 2. If remote provided a valid arrival timestamp that is consistent with the current location:
                         remoteSince > 0L && remoteSince <= now && !(hasStatusTransitioned && (now - remoteSince) > 2 * 3600 * 1000L) && !(movedDistanceKm > 0.2 && (now - remoteSince) > 2 * 3600 * 1000L) -> {
                             remoteSince
                         }
-                        // 4. Member recently relocated (> 100m) or transitioned status: record fresh arrival at new location
+                        // 3. Member recently relocated (> 100m) or transitioned status: record fresh arrival at new location
                         movedDistanceKm > 0.10 || hasStatusTransitioned -> {
                             now
                         }
-                        // 5. If previously recorded stationary timestamp exists and member hasn't moved away, keep it!
+                        // 4. If previously recorded stationary timestamp exists and member hasn't moved away, keep it!
                         matchingLocal != null && matchingLocal.locationSince > 0L && (isMemberAtHome || isMemberAtSafeZone || movedDistanceKm <= 0.08) -> {
                             matchingLocal.locationSince
                         }
