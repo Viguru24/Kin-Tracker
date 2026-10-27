@@ -38,6 +38,7 @@ fun WeatherHudOverlay(
 
         Surface(
             modifier = modifier
+                .widthIn(max = 360.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .border(BorderStroke(1.dp, RadarCyan.copy(alpha = 0.5f)), RoundedCornerShape(20.dp))
                 .clickable { isWeatherExpanded = !isWeatherExpanded },
@@ -49,14 +50,23 @@ fun WeatherHudOverlay(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                    Text(text = weather.emoji, fontSize = 14.sp)
-                    Text(text = "${weather.temp.toInt()}°C", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(text = weather.emoji, fontSize = 14.sp, maxLines = 1, softWrap = false)
+                    Text(text = "${weather.temp.toInt()}°C", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     if (weather.minTempNight != 0.0) {
-                        Text(text = "🌙 Min ${weather.minTempNight.toInt()}°C", color = Color(0xFF64B5F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(text = "🌙 Min ${weather.minTempNight.toInt()}°C", color = Color(0xFF64B5F6), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
-                    Text(text = "•", color = RadarCyan, fontSize = 10.sp)
-                    Text(text = weather.description, color = Color(0xFFCFD8DC), fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                    Text(text = if (isWeatherExpanded) "▲" else "▼", color = RadarCyan, fontSize = 8.sp)
+                    Text(text = "•", color = RadarCyan, fontSize = 10.sp, maxLines = 1, softWrap = false)
+                    Text(
+                        text = weather.description,
+                        color = Color(0xFFCFD8DC),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(text = if (isWeatherExpanded) "▲" else "▼", color = RadarCyan, fontSize = 8.sp, maxLines = 1, softWrap = false)
                 }
             }
 

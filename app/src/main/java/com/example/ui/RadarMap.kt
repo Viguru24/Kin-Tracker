@@ -1467,8 +1467,13 @@ fun RadarMap(
                     }
                 }
 
-                // ── 2. CENTRE: CIRCLE PULL-DOWN MENU ──
-                Box(contentAlignment = Alignment.TopCenter) {
+                // ── 2. CENTRE: CIRCLE PULL-DOWN MENU PILL (Flexible weight so it never squishes Left or Right buttons) ──
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
                         val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
                         active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
@@ -1496,14 +1501,16 @@ fun RadarMap(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(text = "👥", fontSize = 13.sp)
+                            Text(text = "👥", fontSize = 13.sp, maxLines = 1, softWrap = false)
                             Text(
                                 text = activeCircleName,
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             Surface(
                                 shape = CircleShape,
@@ -1514,6 +1521,8 @@ fun RadarMap(
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -1521,225 +1530,20 @@ fun RadarMap(
                                 text = if (showCircleSwitcher) "▲" else "▼",
                                 color = RadarCyan,
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
-                        }
-                    }
-
-                    // Dropdown list of circles + Add Device action
-                    if (showCircleSwitcher) {
-                        Surface(
-                            modifier = Modifier
-                                .padding(top = 42.dp)
-                                .widthIn(min = 280.dp, max = 320.dp)
-                                .zIndex(150f),
-                            color = Color(0xFF1E232F),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.5.dp, Color(0xFF384358)),
-                            shadowElevation = 24.dp
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                if (groupPinMappings.isNotEmpty()) {
-                                    groupPinMappings.forEach { circle ->
-                                        val isActive = circle.pinCode == activeGroupPinCode
-                                        Surface(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    onSwitchCircle(circle.pinCode)
-                                                    showCircleSwitcher = false
-                                                },
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = if (isActive) Color(0xFF2A3447) else Color(0xFF161922),
-                                            border = BorderStroke(1.dp, if (isActive) Color(0xFF00E5FF) else Color(0xFF2B3342))
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = circle.groupName.ifBlank { "Family Circle" },
-                                                        color = Color.White,
-                                                        fontSize = 15.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = "PIN: ${circle.pinCode}",
-                                                        color = Color(0xFFB0BEC5),
-                                                        fontSize = 13.sp,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                }
-                                                if (isActive) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = Color(0xFF00E5FF).copy(alpha = 0.15f)
-                                                    ) {
-                                                        Text(
-                                                            text = "ACTIVE",
-                                                            color = Color(0xFF00E5FF),
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Black,
-                                                            maxLines = 1,
-                                                            softWrap = false,
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    HorizontalDivider(color = Color(0xFF323B4D), modifier = Modifier.padding(vertical = 2.dp))
-                                }
-
-                                // 👥 Join a Circle
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showCircleSwitcher = false
-                                            addDeviceInitialTab = 0
-                                            showAddDeviceDialog = true
-                                        },
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = Color(0xFF161922),
-                                    border = BorderStroke(1.dp, Color(0xFF2D3545))
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("👥", fontSize = 16.sp)
-                                        }
-                                        Column {
-                                            Text(
-                                                text = "Join a Circle",
-                                                color = Color.White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = "Enter 4-digit PIN or 6-char code",
-                                                color = Color(0xFF90A4AE),
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // ➕ Invite to This Circle
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showCircleSwitcher = false
-                                            addDeviceInitialTab = 1
-                                            showAddDeviceDialog = true
-                                        },
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = Color(0xFF161922),
-                                    border = BorderStroke(1.dp, Color(0xFF2D3545))
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF00E676).copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("➕", fontSize = 16.sp)
-                                        }
-                                        Column {
-                                            Text(
-                                                text = "Invite to This Circle",
-                                                color = Color.White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = "Share PIN ${activeGroupPinCode.ifBlank { "4666" }}",
-                                                color = Color(0xFF00E676),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // 🗑️ Delete from Circle
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            showCircleSwitcher = false
-                                            addDeviceInitialTab = 2
-                                            showAddDeviceDialog = true
-                                        },
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = Color(0xFF161922),
-                                    border = BorderStroke(1.dp, Color(0xFF2D3545))
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFFF5252).copy(alpha = 0.15f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text("🗑️", fontSize = 16.sp)
-                                        }
-                                        Column {
-                                            Text(
-                                                text = "Delete from Circle",
-                                                color = Color(0xFFFF5252),
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Text(
-                                                text = "Remove devices or members",
-                                                color = Color(0xFF90A4AE),
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
 
-                // ── 2. TOOLS & VIEWS BUTTON (TOP RIGHT) ──
+                // ── 3. TOOLS & VIEWS BUTTON (TOP RIGHT — Fixed non-wrapping width on all phones) ──
                 Surface(
                     modifier = Modifier
                         .height(38.dp)
+                        .requiredWidthIn(min = 84.dp)
+                        .wrapContentWidth(unbounded = false)
                         .clickable {
                             showToolsMenu = !showToolsMenu
                             if (showToolsMenu) showCircleSwitcher = false
@@ -1753,7 +1557,8 @@ fun RadarMap(
                     Row(
                         modifier = Modifier
                             .padding(horizontal = 12.dp)
-                            .fillMaxHeight(),
+                            .fillMaxHeight()
+                            .wrapContentWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -1763,19 +1568,25 @@ fun RadarMap(
                                 "radar" -> "🟢"
                                 else -> "🗺️"
                             },
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = "Tools",
                             color = Color.White,
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Text(
                             text = if (showToolsMenu) "▲" else "▼",
                             color = RadarCyan,
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -2031,12 +1842,14 @@ fun RadarMap(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    Text("🛤️", fontSize = 12.sp)
+                                    Text("🛤️", fontSize = 12.sp, maxLines = 1, softWrap = false)
                                     Text(
                                         text = if (isRouteTrailEnabled) "Trail: ON" else "Trail: OFF",
                                         color = Color.White,
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -2074,6 +1887,8 @@ fun RadarMap(
                                                 color = if (isSelectedFilter) RadarCyan else TextSecondary,
                                                 fontSize = 10.sp,
                                                 fontWeight = if (isSelectedFilter) FontWeight.Bold else FontWeight.Medium,
+                                                maxLines = 1,
+                                                softWrap = false,
                                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                             )
                                         }
@@ -2138,6 +1953,7 @@ fun RadarMap(
         // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom controls & Recenter GPS)
         Column(
             modifier = Modifier
+                .navigationBarsPadding()
                 .padding(end = 16.dp, bottom = 24.dp)
                 .align(Alignment.BottomEnd)
                 .zIndex(75f),
@@ -2450,7 +2266,247 @@ fun RadarMap(
         )
     }
 
-    // Full-screen floating Tools & Views Overlay (Cleanly separated from top Row, unconstrained 345dp width)
+    // Full-screen floating Circle Switcher Overlay (Cleanly separated from top Row so it never squishes header pills on any phone)
+    if (showCircleSwitcher) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable { showCircleSwitcher = false }
+                .zIndex(200f)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(top = 54.dp, start = 12.dp, end = 12.dp)
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth(0.92f)
+                    .widthIn(max = 340.dp)
+                    .heightIn(max = 520.dp)
+                    .clickable(enabled = false) {}, // absorb clicks inside card
+                color = Color(0xFF1E232F),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.5.dp, Color(0xFF384358)),
+                shadowElevation = 24.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(14.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (groupPinMappings.isNotEmpty()) {
+                        groupPinMappings.forEach { circle ->
+                            val isActive = circle.pinCode == activeGroupPinCode
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onSwitchCircle(circle.pinCode)
+                                        showCircleSwitcher = false
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isActive) Color(0xFF2A3447) else Color(0xFF161922),
+                                border = BorderStroke(1.dp, if (isActive) Color(0xFF00E5FF) else Color(0xFF2B3342))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = circle.groupName.ifBlank { "Family Circle" },
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "PIN: ${circle.pinCode}",
+                                            color = Color(0xFFB0BEC5),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    if (isActive) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFF00E5FF).copy(alpha = 0.15f)
+                                        ) {
+                                            Text(
+                                                text = "ACTIVE",
+                                                color = Color(0xFF00E5FF),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = Color(0xFF323B4D), modifier = Modifier.padding(vertical = 2.dp))
+                    }
+
+                    // 👥 Join a Circle
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showCircleSwitcher = false
+                                addDeviceInitialTab = 0
+                                showAddDeviceDialog = true
+                            },
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF161922),
+                        border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("👥", fontSize = 16.sp)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Join a Circle",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Enter 4-digit PIN or 6-char code",
+                                    color = Color(0xFF90A4AE),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // ➕ Invite to This Circle
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showCircleSwitcher = false
+                                addDeviceInitialTab = 1
+                                showAddDeviceDialog = true
+                            },
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF161922),
+                        border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00E676).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("➕", fontSize = 16.sp)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Invite to This Circle",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Share PIN ${activeGroupPinCode.ifBlank { "4666" }}",
+                                    color = Color(0xFF00E676),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // 🗑️ Delete from Circle
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showCircleSwitcher = false
+                                addDeviceInitialTab = 2
+                                showAddDeviceDialog = true
+                            },
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF161922),
+                        border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF5252).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🗑️", fontSize = 16.sp)
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Delete from Circle",
+                                    color = Color(0xFFFF5252),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Remove devices or members",
+                                    color = Color(0xFF90A4AE),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Full-screen floating Tools & Views Overlay (Cleanly separated from top Row, responsive up to 345dp width)
     if (showToolsMenu) {
         Box(
             modifier = Modifier
@@ -2461,9 +2517,10 @@ fun RadarMap(
             Surface(
                 modifier = Modifier
                     .statusBarsPadding()
-                    .padding(top = 54.dp, end = 12.dp)
+                    .padding(top = 54.dp, start = 12.dp, end = 12.dp)
                     .align(Alignment.TopEnd)
-                    .widthIn(min = 310.dp, max = 345.dp)
+                    .fillMaxWidth(0.92f)
+                    .widthIn(max = 345.dp)
                     .heightIn(max = 580.dp)
                     .clickable(enabled = false) {}, // absorb clicks inside card
                 color = Color(0xF8141822),
@@ -2492,7 +2549,9 @@ fun RadarMap(
                                 text = "Tools & Views",
                                 color = Color.White,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         Surface(
@@ -2543,6 +2602,9 @@ fun RadarMap(
                                     color = if (isSelected) RadarCyan else Color.White,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                     modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp)
                                 )

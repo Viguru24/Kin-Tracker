@@ -61,7 +61,8 @@ fun MapContextMenu(
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -78,13 +79,33 @@ fun MapContextMenu(
                     ) {
                         Text(member.avatarEmoji.ifEmpty { "👤" }, fontSize = 16.sp)
                     }
-                    Column {
-                        Text(text = member.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = member.name,
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                         val isMemberPaused = member.isLocationPaused || member.statusText.contains("Paused", ignoreCase = true)
                         if (isMemberPaused) {
-                            Text(text = "⏸️ Tracking Paused (Home Sleep)", color = Color(0xFFFFB300), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "⏸️ Tracking Paused (Home Sleep)",
+                                color = Color(0xFFFFB300),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
                         } else {
-                            Text(text = member.statusText, color = TextSecondary, fontSize = 11.sp)
+                            Text(
+                                text = member.statusText,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
@@ -251,7 +272,15 @@ fun MapContextMenu(
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            Text(text = reactionText, color = TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = reactionText,
+                                color = TextPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }

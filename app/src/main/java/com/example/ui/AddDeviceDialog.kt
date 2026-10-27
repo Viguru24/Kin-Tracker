@@ -147,14 +147,17 @@ fun AddDeviceDialog(
                                     selectedTab = 0
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "👥 Join",
                                 color = if (selectedTab == 0) Color.White else Color(0xFF90A4AE),
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
 
@@ -168,14 +171,17 @@ fun AddDeviceDialog(
                                     selectedTab = 1
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "➕ Invite",
                                 color = if (selectedTab == 1) Color.White else Color(0xFF90A4AE),
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
 
@@ -189,14 +195,17 @@ fun AddDeviceDialog(
                                     selectedTab = 2
                                     showCreateCircleView = false
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "🗑️ Remove",
                                 color = if (selectedTab == 2) Color(0xFFFF5252) else Color(0xFF90A4AE),
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -205,7 +214,9 @@ fun AddDeviceDialog(
                 // TAB 0 CONTENT: JOIN EXISTING CIRCLE
                 if (selectedTab == 0 && !showCreateCircleView) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Surface(
@@ -396,7 +407,9 @@ fun AddDeviceDialog(
                 // TAB 1 CONTENT: INVITE TO THIS CIRCLE
                 if (selectedTab == 1) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {

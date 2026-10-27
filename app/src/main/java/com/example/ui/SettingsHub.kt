@@ -1324,7 +1324,10 @@ private fun AlertsTabContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Quick Presets: Mute, 50%, 80%, 100%
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp)
+                        ) {
                             listOf(0 to "Mute", 50 to "50%", 80 to "80%", 100 to "100%").forEach { (vol, label) ->
                                 val isSelected = notificationVolume == vol
                                 Surface(
@@ -1343,6 +1346,8 @@ private fun AlertsTabContent(
                                         fontSize = 10.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isSelected) RadarCyan else SecondarySlate,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
@@ -1362,7 +1367,7 @@ private fun AlertsTabContent(
                                 .height(30.dp)
                                 .testTag("test_notification_sound_button")
                         ) {
-                            Text("🔔 Test", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("🔔 Test", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                         }
                     }
                 }

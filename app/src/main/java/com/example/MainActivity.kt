@@ -696,12 +696,15 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("🚨", fontSize = 16.sp)
+                    Text("🚨", fontSize = 16.sp, maxLines = 1, softWrap = false)
                     Text(
                         text = "Ringing $ringingNames loudly...",
                         color = Color.White,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Button(
                         onClick = {
@@ -714,7 +717,14 @@ fun MainScreen(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
-                        Text("🔕 Stop Ringing", color = Color(0xFFD32F2F), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "🔕 Stop Ringing",
+                            color = Color(0xFFD32F2F),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
                 }
             }
@@ -724,6 +734,7 @@ fun MainScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
+                .navigationBarsPadding()
                 .padding(start = 16.dp, bottom = 24.dp)
                 .zIndex(75f),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -918,7 +929,9 @@ fun MainScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(top = 12.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -932,13 +945,16 @@ fun MainScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.weight(1f).padding(end = 8.dp)
                         ) {
-                            Text("⚙️", fontSize = 18.sp)
+                            Text("⚙️", fontSize = 18.sp, maxLines = 1, softWrap = false)
                             Text(
                                 text = "Circle Settings",
                                 color = TextPrimary,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             Surface(
                                 color = RadarCyan.copy(alpha = 0.15f),
@@ -951,6 +967,8 @@ fun MainScreen(
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -971,7 +989,9 @@ fun MainScreen(
                                 text = "◀  Map",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = Color.White,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -1124,6 +1144,7 @@ fun SubFamilyBubble(
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
+            .widthIn(max = 260.dp)
             .clickable(onClick = onClick)
             .background(if (isSelected) PrimaryCosmic else CosmicSlateCard, CircleShape)
             .border(1.5.dp, if (isSelected) RadarCyan else SlateBorder, CircleShape)
@@ -1145,7 +1166,10 @@ fun SubFamilyBubble(
             text = labelText,
             color = TextPrimary,
             fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }

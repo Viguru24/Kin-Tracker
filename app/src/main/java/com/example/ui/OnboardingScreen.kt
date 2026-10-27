@@ -152,7 +152,7 @@ fun OnboardingScreen(
                         )
                     )
 
-                    // Emoji picker — who are you?
+                    // Emoji picker — who are you? (2 rows of 6 so it fits comfortably on every phone width)
                     Text(
                         "Choose your icon",
                         color = SecondarySlate,
@@ -161,28 +161,35 @@ fun OnboardingScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     val emojiOptions = listOf("👨","👩","👦","👧","👴","👵","👨‍💻","👩‍💻","🧑","🧒","👶","🐱")
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        emojiOptions.forEach { emo ->
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (myEmoji == emo) Color(0xFF7C3AED).copy(alpha = 0.3f)
-                                        else Color.White.copy(alpha = 0.05f)
-                                    )
-                                    .border(
-                                        if (myEmoji == emo) 2.dp else 1.dp,
-                                        if (myEmoji == emo) Color(0xFF7C3AED) else SlateBorder,
-                                        CircleShape
-                                    )
-                                    .clickable { myEmoji = emo },
-                                contentAlignment = Alignment.Center
+                        emojiOptions.chunked(6).forEach { rowEmojis ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(emo, fontSize = 18.sp)
+                                rowEmojis.forEach { emo ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (myEmoji == emo) Color(0xFF7C3AED).copy(alpha = 0.3f)
+                                                else Color.White.copy(alpha = 0.05f)
+                                            )
+                                            .border(
+                                                if (myEmoji == emo) 2.dp else 1.dp,
+                                                if (myEmoji == emo) Color(0xFF7C3AED) else SlateBorder,
+                                                CircleShape
+                                            )
+                                            .clickable { myEmoji = emo },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(emo, fontSize = 18.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -255,7 +262,10 @@ fun OnboardingScreen(
                 1 -> Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(32.dp),
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 32.dp)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
@@ -417,7 +427,10 @@ fun OnboardingScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 24.dp, vertical = 32.dp)
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
@@ -538,7 +551,10 @@ fun OnboardingScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 24.dp, vertical = 32.dp)
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(20.dp)
                     ) {
