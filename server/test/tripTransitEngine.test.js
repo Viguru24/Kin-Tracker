@@ -6,7 +6,9 @@ const {
     resolveOriginName,
     determineDestination,
     classifyTransitMode,
-    enrichMemberState
+    enrichMemberState,
+    processTripLifecycle,
+    loadCompletedTrips
 } = require('../src/tripTransitEngine');
 
 describe('Server TripTransitEngine', () => {
@@ -115,5 +117,61 @@ describe('Server TripTransitEngine', () => {
         assert.strictEqual(result.transitMode, 'TRAIN');
         assert.ok(result.statusText.includes('On a train heading towards London') || result.statusText.includes('On a train heading towards Home'));
         assert.ok(result.statusText.includes('88 mph'));
+    });
+
+    it('should create departure alert event and record completed trip upon arrival', () => {
+        const memberId = 'device_test_trip_lifecycle';
+        const startState = {
+            id: memberId,
+            name: 'Isabel',
+            x: -0.1250,
+            y: 51.3298,
+            speedMph: 25.0,
+            transitMode: 'DRIVING',
+            statusText: 'In a car heading towards Home'
+        };
+        const prevAtSchool = {
+            id: memberId,
+            name: 'Isabel',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            lastStationaryPlace: 'Woodcote High School',
+            speedMph: 0.0,
+            transitMode: 'STATIONARY'
+        };
+
+        // 1. Departure evaluation
+        const step1 = processTripLifecycle('test_token', memberId, startState, prevAtSchool, home, [woodcoteSchool]);
+        assert.ok(step1.alertEvent, 'Departure alert event should be created on trip start');
+        assert.strictEqual(step1.alertEvent.type, 'DEPARTURE');
+        assert.ok(step1.alertEvent.message.includes('Isabel has left Woodcote High School'));
+
+        // 2. Midway movement (append breadcrumbs)
+        const midState = {
+            ...startState,
+            x: -0.1210,
+            y: 51.3295,
+            speedMph: 30.0
+        };
+        const step2 = processTripLifecycle('test_token', memberId, midState, startState, home, [woodcoteSchool]);
+        assert.strictEqual(step2.alertEvent, null, 'Cooldown prevents duplicate departure alerts');
+
+        // 3. Arrival at Home
+        const arrivalState = {
+            id: memberId,
+            name: 'Isabel',
+            x: home.lng,
+            y: home.lat,
+            speedMph: 0.0,
+            transitMode: 'STATIONARY',
+            statusText: 'At Home (Live GPS)'
+        };
+        const step3 = processTripLifecycle('test_token', memberId, arrivalState, midState, home, [woodcoteSchool]);
+        assert.ok(step3.completedTrip, 'Completed trip should be saved upon arrival at Home');
+        assert.strictEqual(step3.completedTrip.destination, 'Home');
+        assert.ok(step3.completedTrip.totalDistanceKm > 0.2);
+        assert.ok(step3.alertEvent, 'Arrival alert event should be emitted');
+        assert.strictEqual(step3.alertEvent.type, 'ARRIVAL');
+        assert.ok(step3.alertEvent.message.includes('arrived at Home'));
     });
 });

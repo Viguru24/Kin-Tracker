@@ -235,20 +235,36 @@
             minZoom: 2
         }).setView([51.329480, -0.119095], 14);
 
-        // Native Dark Radar Map via Esri World Dark Gray Base (No API key, 100% reliable)
-        // Set maxNativeZoom: 16 and maxZoom: 21 so Leaflet seamlessly overzooms tiles up to level 21
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-            maxNativeZoom: 16,
-            maxZoom: 21,
-            attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
-        }).addTo(state.map);
+        // Map style switch: CARTO Voyager (default) or the classic Esri dark map.
+        // Switch back with ?map=classic in the URL (remembered), or ?map=carto to return.
+        const mapParam = new URLSearchParams(location.search).get('map');
+        if (mapParam === 'classic' || mapParam === 'carto') localStorage.setItem('kinMapStyle', mapParam);
+        const mapStyle = localStorage.getItem('kinMapStyle') || 'carto';
 
-        // Dark Gray Reference Overlay (Labels, Streets, Borders)
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-            maxNativeZoom: 16,
-            maxZoom: 21,
-            opacity: 0.9
-        }).addTo(state.map);
+        if (mapStyle === 'classic') {
+            // Native Dark Radar Map via Esri World Dark Gray Base (No API key, 100% reliable)
+            // Set maxNativeZoom: 16 and maxZoom: 21 so Leaflet seamlessly overzooms tiles up to level 21
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                maxNativeZoom: 16,
+                maxZoom: 21,
+                attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+            }).addTo(state.map);
+
+            // Dark Gray Reference Overlay (Labels, Streets, Borders)
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+                maxNativeZoom: 16,
+                maxZoom: 21,
+                opacity: 0.9
+            }).addTo(state.map);
+        } else {
+            // CARTO Voyager: clean Google-Maps-like basemap, free, no API key
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxNativeZoom: 20,
+                maxZoom: 21,
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+            }).addTo(state.map);
+        }
 
         // Map Click Calibration Handler
         state.map.on('click', (e) => {

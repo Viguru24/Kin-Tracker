@@ -77,6 +77,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import java.io.FileOutputStream
 
+/**
+ * Map tile provider switch. Set to false to instantly fall back to the classic OpenStreetMap (Mapnik) tiles.
+ */
+private const val USE_CARTO_TILES = true
+
+/** CARTO Voyager: clean, Google-Maps-like free basemap (no API key). */
+private val cartoVoyagerTileSource = XYTileSource(
+    "CartoVoyager", 0, 20, 256, ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://d.basemaps.cartocdn.com/rastertiles/voyager/"
+    ),
+    "© OpenStreetMap contributors © CARTO"
+)
+
+private val kinBaseTileSource
+    get() = if (USE_CARTO_TILES) cartoVoyagerTileSource else TileSourceFactory.MAPNIK
+
 
 
 data class MemberVisualState(
@@ -841,7 +861,7 @@ fun RadarMap(
             factory = { ctx ->
                 MapView(ctx).apply {
                     clipToOutline = true
-                    setTileSource(TileSourceFactory.MAPNIK)
+                    setTileSource(kinBaseTileSource)
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
 
@@ -1209,15 +1229,15 @@ fun RadarMap(
                 // Apply OpenStreetMap customizable styling options using tile sources and matrices
                 when (mapTypeMode) {
                     "streets" -> {
-                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
-                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
+                            mapView.setTileSource(kinBaseTileSource)
                         }
                         // Standard crisp full-color streets
                         mapView.overlayManager.tilesOverlay.setColorFilter(null)
                     }
                     "hybrid" -> {
-                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
-                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
+                            mapView.setTileSource(kinBaseTileSource)
                         }
                         // Cyberpunk Midnight Dark matrix filter
                         val matrix = floatArrayOf(
@@ -1229,8 +1249,8 @@ fun RadarMap(
                         mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
                     }
                     "radar" -> {
-                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
-                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
+                            mapView.setTileSource(kinBaseTileSource)
                         }
                         // High-tech Retro Sonar green matrix filter
                         val matrix = floatArrayOf(
@@ -1242,8 +1262,8 @@ fun RadarMap(
                         mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
                     }
                     else -> {
-                        if (mapView.tileProvider.tileSource.name() != TileSourceFactory.MAPNIK.name()) {
-                            mapView.setTileSource(TileSourceFactory.MAPNIK)
+                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
+                            mapView.setTileSource(kinBaseTileSource)
                         }
                         mapView.overlayManager.tilesOverlay.setColorFilter(null)
                     }

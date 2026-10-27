@@ -271,6 +271,181 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
     return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TRIP HISTORY & LIFECYCLE TRACKER (Server-Side Life360 Style)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const fs = require('fs');
+const path = require('path');
+
+const TRIPS_DIR = path.join(__dirname, '../trips-data');
+if (!fs.existsSync(TRIPS_DIR)) {
+    try { fs.mkdirSync(TRIPS_DIR, { recursive: true }); } catch (_) {}
+}
+
+const activeTrips = new Map(); // memberId -> activeTrip
+const lastAlertTimestamp = new Map(); // `${memberId}_${type}` -> timestamp
+
+function getTripsFilePath(token) {
+    const safe = (token || 'default').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    return path.join(TRIPS_DIR, `${safe}.json`);
+}
+
+function loadCompletedTrips(token) {
+    const file = getTripsFilePath(token);
+    if (!fs.existsSync(file)) return [];
+    try {
+        const raw = fs.readFileSync(file, 'utf8');
+        return JSON.parse(raw);
+    } catch (_) {
+        return [];
+    }
+}
+
+function saveCompletedTrips(token, trips) {
+    const file = getTripsFilePath(token);
+    try {
+        // Keep the latest 60 completed trips per family circle
+        const trimmed = trips.slice(-60);
+        fs.writeFileSync(file, JSON.stringify(trimmed, null, 2), 'utf8');
+    } catch (e) {
+        console.error('[Trips] Failed saving trip history:', e.message);
+    }
+}
+
+/**
+ * Updates or finishes trip lifecycle when member telemetry updates.
+ * Returns { completedTrip, alertEvent } if triggered.
+ */
+function processTripLifecycle(token, memberId, out, stored, home, safeZones) {
+    const now = Date.now();
+    const speed = Number(out.speedMph) || 0.0;
+    const lat = Number(out.y) || 0.0;
+    const lng = Number(out.x) || 0.0;
+    const isMoving = (out.transitMode && out.transitMode !== 'STATIONARY') && speed >= 2.5;
+
+    let alertEvent = null;
+    let finishedTrip = null;
+
+    let activeTrip = activeTrips.get(memberId);
+
+    // 1. START A NEW TRIP
+    if (isMoving) {
+        if (!activeTrip) {
+            const origin = stored?.lastStationaryPlace || resolveOriginName(stored?.y || lat, stored?.x || lng, home, safeZones);
+            activeTrip = {
+                id: `trip_${now}_${memberId}`,
+                memberId: memberId,
+                memberName: out.name || 'Member',
+                transitMode: out.transitMode,
+                origin: origin,
+                destination: null,
+                startLat: lat,
+                startLng: lng,
+                startTime: now,
+                endTime: null,
+                breadcrumbs: [{ lat, lng, speedMph: speed, timestamp: now }],
+                topSpeedMph: speed,
+                totalDistanceKm: 0.0,
+                harshBrakingCount: 0,
+                rapidAccelerationCount: 0,
+                lastBreadcrumbTime: now
+            };
+            activeTrips.set(memberId, activeTrip);
+
+            // Generate Departure Alert Event if not alerted recently
+            const alertKey = `${memberId}_DEPARTURE`;
+            const lastAlert = lastAlertTimestamp.get(alertKey) || 0;
+            if (now - lastAlert > 15 * 60 * 1000) { // 15-minute cooldown
+                lastAlertTimestamp.set(alertKey, now);
+                const dest = determineDestination(lat, lng, stored?.y || lat, stored?.x || lng, home, safeZones, out.transitMode === 'TRAIN');
+                const modePhrase = out.transitMode === 'TRAIN' ? 'on a train' : (out.transitMode === 'DRIVING' ? 'in a car' : out.transitMode.toLowerCase());
+                const msg = dest 
+                    ? `${out.name} has left ${origin} and is ${modePhrase} heading towards ${dest}!`
+                    : `${out.name} has left ${origin} and is ${modePhrase}!`;
+
+                alertEvent = {
+                    id: `evt_${now}_${memberId}`,
+                    type: 'DEPARTURE',
+                    memberId: memberId,
+                    memberName: out.name,
+                    title: out.transitMode === 'TRAIN' ? '🚆 Journey Notice' : '🚪 Departure Warning',
+                    message: msg,
+                    origin: origin,
+                    destination: dest,
+                    transitMode: out.transitMode,
+                    speedMph: speed,
+                    timestamp: now
+                };
+            }
+        } else {
+            // TRIP CONTINUES: Append breadcrumb if moved >= 25m or >= 12s
+            const lastBc = activeTrip.breadcrumbs[activeTrip.breadcrumbs.length - 1];
+            const distFromLastM = distMeters(lat, lng, lastBc.lat, lastBc.lng);
+            const timeDiff = now - (activeTrip.lastBreadcrumbTime || 0);
+
+            if (distFromLastM >= 25 || timeDiff >= 12000) {
+                // Safety Telemetry: harsh braking & acceleration
+                const speedDiff = speed - lastBc.speedMph;
+                if (speedDiff < -18 && activeTrip.transitMode === 'DRIVING') {
+                    activeTrip.harshBrakingCount = (activeTrip.harshBrakingCount || 0) + 1;
+                } else if (speedDiff > 18 && activeTrip.transitMode === 'DRIVING') {
+                    activeTrip.rapidAccelerationCount = (activeTrip.rapidAccelerationCount || 0) + 1;
+                }
+
+                activeTrip.breadcrumbs.push({ lat, lng, speedMph: speed, timestamp: now });
+                activeTrip.totalDistanceKm += (distFromLastM / 1000.0);
+                activeTrip.topSpeedMph = Math.max(activeTrip.topSpeedMph || 0, speed);
+                activeTrip.transitMode = out.transitMode;
+                activeTrip.lastBreadcrumbTime = now;
+            }
+        }
+    } 
+    // 2. FINISH AN ACTIVE TRIP (Member has arrived and is stationary)
+    else if (activeTrip && (out.transitMode === 'STATIONARY' || speed < 1.0)) {
+        const atHome = (home && distMeters(lat, lng, home.lat, home.lng) <= (home.radius || 150) + 50);
+        const atSafeZone = DEFAULT_SAFE_ZONES.some(z => distMeters(lat, lng, z.latitude, z.longitude) <= z.radiusMeters + 50);
+        const timeSinceMove = now - (activeTrip.lastBreadcrumbTime || now);
+
+        if (atHome || atSafeZone || timeSinceMove > 90000) {
+            activeTrip.endTime = now;
+            activeTrip.endLat = lat;
+            activeTrip.endLng = lng;
+            activeTrip.durationMinutes = Math.max(1, Math.round((activeTrip.endTime - activeTrip.startTime) / 60000));
+            activeTrip.destination = atHome ? 'Home' : resolveOriginName(lat, lng, home, safeZones);
+
+            // Only save if traveled a meaningful distance (> 250 meters)
+            if (activeTrip.totalDistanceKm >= 0.25) {
+                const existing = loadCompletedTrips(token);
+                existing.push(activeTrip);
+                saveCompletedTrips(token, existing);
+                finishedTrip = activeTrip;
+
+                // Generate Arrival Alert Event
+                const alertKey = `${memberId}_ARRIVAL`;
+                const lastAlert = lastAlertTimestamp.get(alertKey) || 0;
+                if (now - lastAlert > 15 * 60 * 1000) {
+                    lastAlertTimestamp.set(alertKey, now);
+                    alertEvent = {
+                        id: `evt_${now}_${memberId}`,
+                        type: 'ARRIVAL',
+                        memberId: memberId,
+                        memberName: out.name,
+                        title: '📍 Arrival Notice',
+                        message: `${out.name} has arrived at ${activeTrip.destination}!`,
+                        destination: activeTrip.destination,
+                        transitMode: activeTrip.transitMode,
+                        timestamp: now
+                    };
+                }
+            }
+            activeTrips.remove ? activeTrips.remove(memberId) : activeTrips.delete(memberId);
+        }
+    }
+
+    return { completedTrip: finishedTrip, alertEvent };
+}
+
 module.exports = {
     distMeters,
     calcBearing,
@@ -280,6 +455,9 @@ module.exports = {
     determineDestination,
     classifyTransitMode,
     enrichMemberState,
+    processTripLifecycle,
+    loadCompletedTrips,
     KNOWN_HUBS,
     DEFAULT_SAFE_ZONES
 };
+

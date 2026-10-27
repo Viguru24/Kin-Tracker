@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const Busboy = require('busboy');
-const { enrichMemberState } = require('./tripTransitEngine');
+const { WebSocketServer } = require('ws');
+const { enrichMemberState, processTripLifecycle, loadCompletedTrips } = require('./tripTransitEngine');
 
 const PORT = 3000;
 const DATA_DIR = path.join(__dirname, 'kv-data');       // Group config + legacy blobs
@@ -58,6 +59,42 @@ function getSafeZones(token) {
     return [];
 }
 
+// Active WebSocket connections & recent alert events cache
+const circleSockets = new Map(); // token -> Set of ws clients
+const recentAlertsMap = new Map(); // token -> array of alert events
+
+function broadcastMemberUpdate(token, member) {
+    const sockets = circleSockets.get(token);
+    if (!sockets || sockets.size === 0) return;
+    const msg = JSON.stringify({ type: 'MEMBER_UPDATE', token, member });
+    for (const ws of sockets) {
+        if (ws.readyState === 1) ws.send(msg);
+    }
+}
+
+function broadcastAlertEvent(token, alert) {
+    if (!recentAlertsMap.has(token)) recentAlertsMap.set(token, []);
+    const list = recentAlertsMap.get(token);
+    list.push(alert);
+    if (list.length > 20) list.shift();
+
+    const sockets = circleSockets.get(token);
+    if (!sockets || sockets.size === 0) return;
+    const msg = JSON.stringify({ type: 'ALERT', token, alert });
+    for (const ws of sockets) {
+        if (ws.readyState === 1) ws.send(msg);
+    }
+}
+
+function broadcastCompletedTrip(token, trip) {
+    const sockets = circleSockets.get(token);
+    if (!sockets || sockets.size === 0) return;
+    const msg = JSON.stringify({ type: 'COMPLETED_TRIP', token, trip });
+    for (const ws of sockets) {
+        if (ws.readyState === 1) ws.send(msg);
+    }
+}
+
 // Save member - only if newer, enriched with real-time transit & destination intelligence
 function saveMember(token, memberId, data) {
     const file = path.join(MEMBER_DIR, safeKey(token) + '__' + safeKey(memberId) + '.json');
@@ -65,7 +102,7 @@ function saveMember(token, memberId, data) {
     try {
         if (fs.existsSync(file)) {
             stored = JSON.parse(fs.readFileSync(file, 'utf8'));
-            if ((stored.lastActive || 0) >= (data.lastActive || 0)) return;
+            if ((stored.lastActive || 0) >= (data.lastActive || 0)) return stored;
         }
     } catch (e) {}
 
@@ -73,7 +110,15 @@ function saveMember(token, memberId, data) {
     const safeZones = getSafeZones(token);
     const out = enrichMemberState(token, memberId, data, stored, home, safeZones);
 
+    const { completedTrip, alertEvent } = processTripLifecycle(token, memberId, out, stored, home, safeZones);
+
     fs.writeFileSync(file, JSON.stringify(out), 'utf8');
+
+    broadcastMemberUpdate(token, out);
+    if (alertEvent) broadcastAlertEvent(token, alertEvent);
+    if (completedTrip) broadcastCompletedTrip(token, completedTrip);
+
+    return out;
 }
 
 // Load all members for a token (respecting stale rules)
