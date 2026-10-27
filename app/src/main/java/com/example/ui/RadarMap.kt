@@ -80,9 +80,9 @@ import android.net.Uri
 import java.io.FileOutputStream
 
 /**
- * Map tile provider switch. Set to false to instantly fall back to the classic OpenStreetMap (Mapnik) tiles.
+ * Map tile provider is controlled from the VPS remote config (map.provider): "esri_street" (default) or
+ * "osm" for the classic OpenStreetMap (Mapnik) tiles. Change it on the server to switch everyone instantly.
  */
-private const val USE_CARTO_TILES = true
 
 /** Esri World Street Map: clean, Google-Maps-like free basemap (no API key). Esri tile URLs use z/y/x order. */
 private val cartoVoyagerTileSource = object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
@@ -98,7 +98,7 @@ private val cartoVoyagerTileSource = object : org.osmdroid.tileprovider.tilesour
 }
 
 private val kinBaseTileSource
-    get() = if (USE_CARTO_TILES) cartoVoyagerTileSource else TileSourceFactory.MAPNIK
+    get() = if (com.example.data.RemoteConfig.mapProvider.equals("osm", ignoreCase = true)) TileSourceFactory.MAPNIK else cartoVoyagerTileSource
 
 
 
@@ -469,6 +469,23 @@ fun RadarMap(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // Server-controlled settings (cached on the phone; defaults if the VPS has never been reached)
+    LaunchedEffect(Unit) {
+        com.example.data.RemoteConfig.loadCached(context)
+        com.example.data.RemoteConfig.refresh(context)
+    }
+    // A Work zone saved on top of a school duplicates it (school + briefcase circle). Hide it so only the school shows.
+    // Controlled remotely via zones.hideWorkNearSchool / zones.hideWorkZone in the VPS config.
+    val isWorkCalibrated = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
+        !com.example.data.RemoteConfig.hideWorkZone &&
+        !(com.example.data.RemoteConfig.hideWorkNearSchool && (safeZones + listOf(
+            com.example.data.GeoUtils.DEFAULT_WOODCOTE_PRIMARY_SCHOOL,
+            com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL,
+            com.example.data.GeoUtils.DEFAULT_OASIS_ACADEMY_BYRON
+        )).any { z ->
+            z.iconName.equals("school", ignoreCase = true) &&
+                com.example.data.GeoUtils.distanceMeters(workLat, workLng, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 100.0
+        })
     val prefs = remember { context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE) }
     var mapTypeMode by remember { mutableStateOf(prefs.getString("mapTypeMode", "streets").let { if (it == "satellite" || it.isNullOrBlank()) "streets" else it }) }
     var showMapStyleMenu by remember { mutableStateOf(false) }

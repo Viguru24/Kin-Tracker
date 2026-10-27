@@ -549,12 +549,97 @@ function handleUpdates(req, res) {
 
 migrateExistingData();
 
+// ---------------------------------------------------------------------------
+// REMOTE CONFIG: server-controlled app settings so most fixes need no app update.
+// GET  /config/<app>.json        -> merged config (defaults + config/<app>.json)
+// PUT  /config/<app>.json        -> replace config (requires x-admin-key)
+// ---------------------------------------------------------------------------
+const CONFIG_DIR = path.join(__dirname, 'config');
+const DEFAULT_APP_CONFIG = {
+    version: 1,
+    map: {
+        // "esri_street" (default) or "osm" (classic OpenStreetMap fallback)
+        provider: 'esri_street'
+    },
+    zones: {
+        // Hide a saved Work zone that sits on top of a school zone
+        hideWorkNearSchool: true,
+        // Hide the Work zone entirely for everyone
+        hideWorkZone: false
+    },
+    features: {}
+};
+
+function deepMerge(base, extra) {
+    const out = Array.isArray(base) ? base.slice() : Object.assign({}, base);
+    Object.keys(extra || {}).forEach(k => {
+        if (extra[k] && typeof extra[k] === 'object' && !Array.isArray(extra[k]) && base && typeof base[k] === 'object') {
+            out[k] = deepMerge(base[k], extra[k]);
+        } else {
+            out[k] = extra[k];
+        }
+    });
+    return out;
+}
+
+function handleConfig(req, res) {
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    const appId = (pathname.replace(/^\/config\/?/, '').replace(/\.json$/, '').split('/')[0] || 'kin-tracker')
+        .replace(/[^a-zA-Z0-9_-]/g, '');
+    const file = path.join(CONFIG_DIR, `${appId}.json`);
+
+    if (req.method === 'GET') {
+        let config = DEFAULT_APP_CONFIG;
+        try {
+            if (fs.existsSync(file)) config = deepMerge(DEFAULT_APP_CONFIG, JSON.parse(fs.readFileSync(file, 'utf8')));
+        } catch (e) {
+            console.error('[CONFIG] Bad config file, serving defaults:', e.message);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(config));
+        return;
+    }
+
+    if (req.method === 'PUT' || req.method === 'POST') {
+        if (req.headers['x-admin-key'] !== ADMIN_KEY) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid admin key' }));
+            return;
+        }
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body);
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Config must be a JSON object');
+                fs.mkdirSync(CONFIG_DIR, { recursive: true });
+                fs.writeFileSync(file, JSON.stringify(parsed, null, 2), 'utf8');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, config: deepMerge(DEFAULT_APP_CONFIG, parsed) }));
+            } catch (e) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: e.message }));
+            }
+        });
+        return;
+    }
+
+    res.writeHead(405, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
+}
+
 const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-key, x-group-token');
 
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    // Intercept Remote Config routes (server-controlled app settings)
+    if (req.url.startsWith('/config/') || req.url === '/config') {
+        handleConfig(req, res);
+        return;
+    }
 
     // Intercept OTA Update routes
     if (req.url.startsWith('/updates/') || req.url === '/updates') {
