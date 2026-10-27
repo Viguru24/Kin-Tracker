@@ -10,6 +10,15 @@ object AppConfig {
     const val DEFAULT_CIRCLE_INVITE_CODE = "KT-4666"
     const val DEFAULT_GROUP_SYNC_TOKEN = "81e5632c_pin_group"
 
+    // Test isolation flag: auto-detects unit test environments (JUnit / Robolectric)
+    // to guarantee tests NEVER contact external production VPS endpoints or mutate real family circles.
+    var isTestEnvironment: Boolean = try {
+        Class.forName("org.junit.Test") != null ||
+        Class.forName("org.robolectric.Robolectric") != null
+    } catch (_: Throwable) {
+        false
+    }
+
 
     // Default landmark coordinates (Croydon area, UK)
     const val DEFAULT_HOME_LAT = 51.329480

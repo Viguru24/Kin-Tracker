@@ -14,9 +14,7 @@ const consecutiveRoadHits = new Map();
 
 // Default safe zones (Croydon / Surrey school campuses)
 const DEFAULT_SAFE_ZONES = [
-    { id: "zone_oasis_academy_byron", name: "Oasis Academy Byron", latitude: 51.3141000, longitude: -0.1288000, radiusMeters: 240.0 },
-    { id: "zone_woodcote_high_school", name: "Woodcote High School", latitude: 51.3301600, longitude: -0.1422829, radiusMeters: 220.0 },
-    { id: "zone_woodcote_school", name: "Woodcote Primary School", latitude: 51.3279926, longitude: -0.1405488, radiusMeters: 160.0 }
+    { id: "zone_woodcote_high_school", name: "Woodcote High School", latitude: 51.3301600, longitude: -0.1422829, radiusMeters: 220.0 }
 ];
 
 // Major transport hubs along the London - Brighton - Surrey corridors

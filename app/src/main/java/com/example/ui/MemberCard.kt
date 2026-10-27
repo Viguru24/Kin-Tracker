@@ -67,6 +67,7 @@ fun MemberCard(
     }
     var showContextMenu by remember { mutableStateOf(false) }
     var showBatteryDialog by remember { mutableStateOf(false) }
+    var showAlarmConfirmDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val isListening by RoomAudioStreamManager.isListening.collectAsState()
     val activeListeningId by RoomAudioStreamManager.activeListeningMemberId.collectAsState()
@@ -81,6 +82,46 @@ fun MemberCard(
         BatteryStatusDialog(
             member = member,
             onDismiss = { showBatteryDialog = false }
+        )
+    }
+
+    if (showAlarmConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showAlarmConfirmDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("🚨", fontSize = 20.sp)
+                    Text("Sound Loud Alarm?", fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to sound the sovereign alarm on ${member.name}'s phone?\n\nThis plays a high-decibel siren at maximum volume to locate the device, even if it is on silent.",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAlarmConfirmDialog = false
+                        onTriggerAlarm(member.id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ActiveAmber)
+                ) {
+                    Text("🔔 Sound Alarm", fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAlarmConfirmDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = CosmicSlateCard,
+            shape = RoundedCornerShape(16.dp)
         )
     }
 
@@ -768,7 +809,11 @@ fun MemberCard(
                     },
                     onClick = {
                         showContextMenu = false
-                        onTriggerAlarm(member.id)
+                        if (isRingingNow) {
+                            onTriggerAlarm(member.id)
+                        } else {
+                            showAlarmConfirmDialog = true
+                        }
                     }
                 )
             }

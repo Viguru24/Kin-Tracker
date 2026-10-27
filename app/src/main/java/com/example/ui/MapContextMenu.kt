@@ -13,7 +13,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +49,7 @@ fun MapContextMenu(
     onDeleteMember: (FamilyMember) -> Unit
 ) {
     val isOwner = myDeviceUUID.isNotBlank() && activeGroupCreatorId.isNotBlank() && myDeviceUUID == activeGroupCreatorId
+    var showAlarmConfirmDialog by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -260,8 +261,12 @@ fun MapContextMenu(
                     val isRingingNow = isRinging || member.statusText == "🚨 ALARM"
                     Button(
                         onClick = {
-                            onDismiss()
-                            onTriggerAlarm(member.id)
+                            if (isRingingNow) {
+                                onDismiss()
+                                onTriggerAlarm(member.id)
+                            } else {
+                                showAlarmConfirmDialog = true
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = if (isRingingNow) Color(0xFFE53935) else ActiveAmber),
                         modifier = Modifier.fillMaxWidth(),
@@ -370,4 +375,45 @@ fun MapContextMenu(
         shape = RoundedCornerShape(16.dp),
         tonalElevation = 6.dp
     )
+
+    if (showAlarmConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showAlarmConfirmDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("🚨", fontSize = 20.sp)
+                    Text("Sound Loud Alarm?", fontWeight = FontWeight.Bold, color = TextPrimary)
+                }
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to sound the sovereign alarm on ${member.name}'s phone?\n\nThis plays a high-decibel siren at maximum volume to locate the device, even if it is on silent.",
+                    color = TextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAlarmConfirmDialog = false
+                        onDismiss()
+                        onTriggerAlarm(member.id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ActiveAmber)
+                ) {
+                    Text("🔔 Sound Alarm", fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAlarmConfirmDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = CosmicSlateCard,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
 }

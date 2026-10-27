@@ -910,6 +910,8 @@
                     delete state.ringingTimers[memberId];
                 }
             } else {
+                const confirmed = window.confirm(`Sound loud alarm on ${targetName}'s phone?\n\nThis will sound a sovereign siren at maximum volume even if their device is set to silent.`);
+                if (!confirmed) return;
                 playDashboardRingChime();
                 await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/ring`, {
                     method: 'POST',
@@ -1715,6 +1717,12 @@
         // Trigger / Silence Alarm
         el.ctrlTriggerAlarmBtn.addEventListener('click', async () => {
             const memberId = el.ctrlMemberId.value;
+            const member = state.members.find(m => m.id === memberId);
+            const isAlarm = member && member.statusText === '🚨 ALARM';
+            if (!isAlarm) {
+                const confirmed = window.confirm(`Trigger emergency SOS distress alarm for ${member ? member.name : memberId}?`);
+                if (!confirmed) return;
+            }
             try {
                 const res = await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/toggle-alarm`, { method: 'POST' });
                 el.memberControlModal.classList.add('hidden');

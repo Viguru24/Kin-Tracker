@@ -6,7 +6,9 @@ import com.example.data.AlarmHelper
 import com.example.ui.FamilyViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -17,12 +19,26 @@ import org.robolectric.shadows.ShadowLooper
 @Config(sdk = [34])
 class FindMyPhoneAlarmTest {
 
+    @Before
+    fun setup() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("groupSyncToken", "test_circle_isolated_unit_test")
+            .commit()
+    }
+
+    @After
+    fun teardown() {
+        AlarmHelper.stopAlarm()
+    }
+
     @Test
     fun testFindMyPhoneTriggerSetsAlarmState() = runBlocking {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = FamilyViewModel(application)
 
-        val targetMemberId = "annette"
+        val targetMemberId = "test_member_alpha"
 
         // Trigger Find My Phone
         viewModel.triggerFindMyPhone(targetMemberId)
@@ -38,7 +54,7 @@ class FindMyPhoneAlarmTest {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = FamilyViewModel(application)
 
-        val targetMemberId = "isabel"
+        val targetMemberId = "test_member_beta"
 
         // Start alarm
         viewModel.triggerFindMyPhone(targetMemberId)
@@ -57,7 +73,7 @@ class FindMyPhoneAlarmTest {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = FamilyViewModel(application)
 
-        val targetMemberId = "eloise"
+        val targetMemberId = "test_member_gamma"
 
         // First toggle turns it ON
         viewModel.toggleFindMyPhone(targetMemberId)

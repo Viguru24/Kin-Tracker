@@ -61,7 +61,7 @@ object TelemetryWebSocketManager {
         myDeviceUUID: String,
         onUiEvent: ((String) -> Unit)? = null
     ) {
-        if (token.isBlank()) return
+        if (token.isBlank() || AppConfig.isTestEnvironment) return
         if (isConnected && activeToken == token && webSocket != null) return
 
         disconnect()

@@ -28,7 +28,8 @@ class DeviceRenameSyncTest {
             application = ApplicationProvider.getApplicationContext<Application>()
             database = AppDatabase.getDatabase(application)
             database.clearAllTables()
-            application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+            application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+                .edit().clear().putString("groupSyncToken", "test_circle_isolated_unit_test").commit()
             application.getSharedPreferences("kintracker_contacts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
             application.getSharedPreferences("deleted_members", android.content.Context.MODE_PRIVATE).edit().clear().commit()
             repository = FamilyRepository(database.familyDao())
@@ -105,8 +106,8 @@ class DeviceRenameSyncTest {
         viewModel.isSimulationModeEnabled.value = false
         ShadowLooper.idleMainLooper()
 
-        // Rename this member to "Isabel's iPhone"
-        val renamed = initialDevice.copy(name = "Isabel's iPhone")
+        // Rename this member to "Secondary Tablet"
+        val renamed = initialDevice.copy(name = "Secondary Tablet")
         viewModel.updateFamilyMember(renamed)
         ShadowLooper.idleMainLooper()
         kotlinx.coroutines.delay(100)
@@ -115,7 +116,7 @@ class DeviceRenameSyncTest {
         val allMembers = repository.getFamilyMembersOnce()
         val matching = allMembers.filter { it.id == "device_oldphone_abc123" }
         assertEquals(1, matching.size)
-        assertEquals("Isabel's iPhone", matching.first().name)
+        assertEquals("Secondary Tablet", matching.first().name)
     }
 
     @Test
