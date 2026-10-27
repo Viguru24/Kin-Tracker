@@ -180,7 +180,7 @@ function handleSmartPut(token, incoming, res, req) {
     res.end(JSON.stringify({ success: true }));
 }
 
-// GET: serve merged payload (always fresh)
+// GET: serve merged payload (always fresh with trips and alerts)
 function handleGet(token, res) {
     const config = loadGroupConfig(token);
     if (!config) {
@@ -189,7 +189,14 @@ function handleGet(token, res) {
         return;
     }
     const allMembers = loadAllMembers(token);
-    const payload = { ...config, members: allMembers };
+    const completedTrips = loadCompletedTrips(token);
+    const alerts = recentAlertsMap.get(token) || [];
+    const payload = {
+        ...config,
+        members: allMembers,
+        completedTrips: completedTrips.slice(-30),
+        recentAlerts: alerts.slice(-10)
+    };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(payload));
 }
@@ -555,7 +562,16 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    const key = req.url.slice(1);
+    // Intercept Trip History route
+    if (req.url.startsWith('/trips/')) {
+        const token = req.url.slice(7).split('?')[0];
+        const trips = loadCompletedTrips(token);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, trips }));
+        return;
+    }
+
+    const key = req.url.slice(1).split('?')[0];
     if (!key || key.length > 255) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid key' }));
@@ -591,9 +607,76 @@ const server = http.createServer((req, res) => {
     }
 });
 
+// Setup WebSocket Server for Sub-second Telemetry Streaming
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+    try {
+        const host = request.headers.host || 'localhost';
+        const urlObj = new URL(request.url, `http://${host}`);
+        let token = urlObj.searchParams.get('token');
+        if (!token) {
+            const parts = urlObj.pathname.split('/').filter(Boolean);
+            token = parts.find(p => p !== 'sync' && p !== 'ws') || '81e5632c_pin_group';
+        }
+
+        wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit('connection', ws, request, token);
+        });
+    } catch (err) {
+        socket.destroy();
+    }
+});
+
+wss.on('connection', (ws, request, token) => {
+    if (!circleSockets.has(token)) circleSockets.set(token, new Set());
+    circleSockets.get(token).add(ws);
+
+    // Send immediate snapshot on connect
+    const config = loadGroupConfig(token) || {};
+    const allMembers = loadAllMembers(token);
+    const completedTrips = loadCompletedTrips(token);
+    const alerts = recentAlertsMap.get(token) || [];
+
+    try {
+        ws.send(JSON.stringify({
+            type: 'SNAPSHOT',
+            token,
+            config,
+            members: allMembers,
+            completedTrips: completedTrips.slice(-30),
+            recentAlerts: alerts.slice(-10)
+        }));
+    } catch (_) {}
+
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            if (data.type === 'LOCATION_UPDATE' && data.memberId && data.member) {
+                saveMember(token, data.memberId, data.member);
+            }
+        } catch (_) {}
+    });
+
+    ws.on('close', () => {
+        const set = circleSockets.get(token);
+        if (set) {
+            set.delete(ws);
+            if (set.size === 0) circleSockets.delete(token);
+        }
+    });
+
+    ws.on('error', () => {
+        const set = circleSockets.get(token);
+        if (set) set.delete(ws);
+    });
+});
+
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`[Ra] Smart KinTracker Sync Server running on port ${PORT}`);
     console.log(`[Ra] Group configs  -> ${DATA_DIR}`);
     console.log(`[Ra] Member records -> ${MEMBER_DIR}`);
     console.log(`[Ra] OTA Updates    -> ${UPDATE_DIR}`);
+    console.log(`[Ra] Trips Storage  -> ${path.join(__dirname, '../trips-data')}`);
+    console.log(`[Ra] Realtime WebSocket Telemetry Hub Active`);
 });
