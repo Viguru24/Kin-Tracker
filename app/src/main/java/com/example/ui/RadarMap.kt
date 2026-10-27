@@ -481,9 +481,7 @@ fun RadarMap(
     val isWorkCalibrated = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
         !com.example.data.RemoteConfig.hideWorkZone &&
         !(com.example.data.RemoteConfig.hideWorkNearSchool && (safeZones + listOf(
-            com.example.data.GeoUtils.DEFAULT_WOODCOTE_PRIMARY_SCHOOL,
-            com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL,
-            com.example.data.GeoUtils.DEFAULT_OASIS_ACADEMY_BYRON
+            com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL
         )).any { z ->
             z.iconName.equals("school", ignoreCase = true) &&
                 com.example.data.GeoUtils.distanceMeters(workLat, workLng, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 100.0

@@ -605,9 +605,7 @@
     function isWorkDuplicateOfSchool(circle) {
         if (!circle || !circle.workLat || !circle.workLng) return false;
         const schools = [
-            { latitude: 51.3279926, longitude: -0.1405488, radiusMeters: 160 },
             { latitude: 51.3301600, longitude: -0.1422829, radiusMeters: 220 },
-            { latitude: 51.3141000, longitude: -0.1288000, radiusMeters: 240 },
             ...((circle.safeZones || []).filter(z => String(z.iconName || '').toLowerCase() === 'school'))
         ];
         return schools.some(z => distanceMeters(Number(circle.workLat), Number(circle.workLng), Number(z.latitude), Number(z.longitude)) <= Math.max(Number(z.radiusMeters || 150), 160) + 100);
@@ -622,10 +620,15 @@
         const isWorkCalibrated = Boolean(circle && circle.isWorkCalibrated) && !isWorkDuplicateOfSchool(circle);
 
         const defaultSchoolZones = [
-            { id: 'zone_woodcote_high_school', name: 'Woodcote High School', latitude: 51.3205711, longitude: -0.1292201, radiusMeters: 180 },
-            { id: 'zone_woodcote_school', name: 'Woodcote Primary School', latitude: 51.3279926, longitude: -0.1405488, radiusMeters: 140 }
+            { id: 'zone_woodcote_high_school', name: 'Woodcote High School', latitude: 51.3301600, longitude: -0.1422829, radiusMeters: 220 }
         ];
-        const safeZones = [...((circle && circle.safeZones) || [])];
+        const safeZones = [
+            ...((circle && circle.safeZones) || []).filter(z => {
+                const n = (z.name || '').toLowerCase();
+                const zid = (z.id || '').toLowerCase();
+                return zid !== 'zone_oasis_academy_byron' && zid !== 'zone_woodcote_school' && !n.includes('byron') && !(n.includes('woodcote') && n.includes('primary'));
+            })
+        ];
         defaultSchoolZones.forEach(def => {
             if (!safeZones.some(z => z.id === def.id || String(z.name || '').toLowerCase() === def.name.toLowerCase())) {
                 safeZones.push(def);

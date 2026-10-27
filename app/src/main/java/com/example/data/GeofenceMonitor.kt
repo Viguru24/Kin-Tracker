@@ -55,10 +55,7 @@ object GeofenceMonitor {
             rawPlaces.add(MonitoredPlace("place_home", "Home", homeLat, homeLng, homeRadius, "home", isHome = true))
         }
         if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
-            val isWoodcote = Math.hypot((workLat - 51.3280) * 111.0, (workLng - (-0.1405)) * 111.0) < 0.6
-            val placeName = if (isWoodcote) "Woodcote Primary School" else "Work"
-            val placeIcon = if (isWoodcote) "school" else "work"
-            rawPlaces.add(MonitoredPlace("place_work", placeName, workLat, workLng, workRadius, placeIcon, isWork = !isWoodcote))
+            rawPlaces.add(MonitoredPlace("place_work", "Work", workLat, workLng, workRadius, "work", isWork = true))
         }
         customZones.forEach { zone ->
             if (zone.iconName.lowercase() != "home" && !zone.name.lowercase().contains("home")) {

@@ -69,15 +69,6 @@ object GeoUtils {
         return if (digitsOnly.startsWith("+")) digitsOnly else digitsOnly.replace("+", "")
     }
 
-    val DEFAULT_OASIS_ACADEMY_BYRON = SafeZone(
-        id = "zone_oasis_academy_byron",
-        name = "Oasis Academy Byron",
-        latitude = 51.3141000,
-        longitude = -0.1288000,
-        radiusMeters = 240.0,
-        iconName = "school"
-    )
-
     val DEFAULT_WOODCOTE_HIGH_SCHOOL = SafeZone(
         id = "zone_woodcote_high_school",
         name = "Woodcote High School",
@@ -87,63 +78,44 @@ object GeoUtils {
         iconName = "school"
     )
 
-    val DEFAULT_WOODCOTE_PRIMARY_SCHOOL = SafeZone(
-        id = "zone_woodcote_school",
-        name = "Woodcote Primary School",
-        latitude = 51.3279926,
-        longitude = -0.1405488,
-        radiusMeters = 160.0,
-        iconName = "school"
-    )
-
     /**
      * Computes a realistic effective radius for a SafeZone so large school campuses
      * and indoor Wi-Fi/cellular triangulation drift do not cause boundary bounce.
      */
     fun effectiveSafeZoneRadiusMeters(zone: SafeZone): Double {
-        val isOasisByron = zone.id == "zone_oasis_academy_byron" ||
-            zone.name.contains("Byron", ignoreCase = true) ||
-            zone.name.contains("Oasis", ignoreCase = true)
         val isWoodcoteHigh = zone.id == "zone_woodcote_high_school" ||
             (zone.name.contains("Woodcote", ignoreCase = true) && zone.name.contains("High", ignoreCase = true)) ||
             zone.name.contains("Woodcoat", ignoreCase = true)
-        val isWoodcotePrimary = zone.id == "zone_woodcote_school" ||
-            (zone.name.contains("Woodcote", ignoreCase = true) && zone.name.contains("Primary", ignoreCase = true))
         val isSchool = zone.iconName.equals("school", ignoreCase = true) ||
             zone.name.contains("school", ignoreCase = true) ||
             zone.name.contains("college", ignoreCase = true) ||
             zone.name.contains("academy", ignoreCase = true)
 
         return when {
-            isOasisByron -> maxOf(zone.radiusMeters, 240.0)
             isWoodcoteHigh -> maxOf(zone.radiusMeters, 220.0)
-            isWoodcotePrimary -> maxOf(zone.radiusMeters, 160.0)
             isSchool -> maxOf(zone.radiusMeters, 180.0)
             else -> maxOf(zone.radiusMeters, 100.0)
         }
     }
 
     /**
-     * Merges user-configured SafeZones with the default family school zones and upgrades
+     * Merges user-configured SafeZones with the default family school zones, filtering out
+     * rogue/stale school zones (e.g. Byron or duplicate primary school), and upgrades
      * any legacy narrow school radii to their full campus effective radii.
      */
     fun withDefaultSafeZones(customZones: List<SafeZone>): List<SafeZone> {
-        val result = customZones.map { zone ->
+        val result = customZones.filterNot { zone ->
+            zone.id == "zone_oasis_academy_byron" ||
+                zone.id == "zone_woodcote_school" ||
+                zone.name.contains("Byron", ignoreCase = true) ||
+                (zone.name.contains("Woodcote", ignoreCase = true) && zone.name.contains("Primary", ignoreCase = true))
+        }.map { zone ->
             // If user has a legacy Woodcote High pin stuck at Byron Ave (51.3205711), auto-correct to real Woodcote High
             val correctedZone = if (zone.id == "zone_woodcote_high_school" && Math.abs(zone.latitude - 51.3205711) < 0.001) {
                 zone.copy(latitude = DEFAULT_WOODCOTE_HIGH_SCHOOL.latitude, longitude = DEFAULT_WOODCOTE_HIGH_SCHOOL.longitude)
             } else zone
             correctedZone.copy(radiusMeters = effectiveSafeZoneRadiusMeters(correctedZone))
         }.toMutableList()
-
-        val hasOasisByron = result.any {
-            it.id == "zone_oasis_academy_byron" ||
-                it.name.contains("Byron", ignoreCase = true) ||
-                it.name.contains("Oasis", ignoreCase = true)
-        }
-        if (!hasOasisByron) {
-            result.add(DEFAULT_OASIS_ACADEMY_BYRON)
-        }
 
         val hasHighSchool = result.any {
             it.id == "zone_woodcote_high_school" ||
@@ -152,14 +124,6 @@ object GeoUtils {
         }
         if (!hasHighSchool) {
             result.add(DEFAULT_WOODCOTE_HIGH_SCHOOL)
-        }
-
-        val hasPrimarySchool = result.any {
-            it.id == "zone_woodcote_school" ||
-                (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true))
-        }
-        if (!hasPrimarySchool) {
-            result.add(DEFAULT_WOODCOTE_PRIMARY_SCHOOL)
         }
 
         return result

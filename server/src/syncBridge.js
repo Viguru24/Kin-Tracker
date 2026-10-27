@@ -64,7 +64,6 @@ async function syncLiveProductionFamily() {
                                             const matchedZone = safeZones.find(z => {
                                                 const isSchool = (z.iconName || '').toLowerCase() === 'school' ||
                                                     (z.name || '').toLowerCase().includes('school') ||
-                                                    (z.name || '').toLowerCase().includes('byron') ||
                                                     (z.name || '').toLowerCase().includes('academy');
                                                 const buffer = (speed < 1.5 && isSchool) ? 150 : 30;
                                                 const effRadius = Math.max(Number(z.radiusMeters || 180), 160) + buffer;

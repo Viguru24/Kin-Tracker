@@ -462,21 +462,20 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 savePreferences()
             }
 
-            // Ensure Oasis Academy Byron, Woodcote High School & Woodcote Primary School are registered as safe zones with full campus radii
+            // Purge rogue Byron and duplicate Woodcote Primary zones, and ensure only Woodcote High School is registered
             try {
                 val existingZones = repository.getAllSafeZonesOnce()
 
-                val byronMatch = existingZones.firstOrNull {
+                // 1. Purge unwanted Byron Primary and Woodcote Primary safe zones from local database
+                val rogueZones = existingZones.filter {
                     it.id == "zone_oasis_academy_byron" ||
+                        it.id == "zone_woodcote_school" ||
                         it.name.contains("Byron", ignoreCase = true) ||
-                        it.name.contains("Oasis", ignoreCase = true)
+                        (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true))
                 }
-                if (byronMatch == null) {
-                    repository.insertSafeZone(com.example.data.GeoUtils.DEFAULT_OASIS_ACADEMY_BYRON)
-                } else if (byronMatch.radiusMeters < 240.0) {
-                    repository.insertSafeZone(byronMatch.copy(radiusMeters = 240.0))
-                }
+                rogueZones.forEach { repository.deleteSafeZone(it) }
 
+                // 2. Ensure Woodcote High School is the single registered school safe zone with full campus radius
                 val highSchoolMatch = existingZones.firstOrNull {
                     it.id == "zone_woodcote_high_school" ||
                         (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("High", ignoreCase = true)) ||
@@ -490,16 +489,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     val newLat = if (isLegacyCoord) com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL.latitude else highSchoolMatch.latitude
                     val newLng = if (isLegacyCoord) com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL.longitude else highSchoolMatch.longitude
                     repository.insertSafeZone(highSchoolMatch.copy(latitude = newLat, longitude = newLng, radiusMeters = maxOf(highSchoolMatch.radiusMeters, 220.0)))
-                }
-
-                val primarySchoolMatch = existingZones.firstOrNull {
-                    it.id == "zone_woodcote_school" ||
-                        (it.name.contains("Woodcote", ignoreCase = true) && it.name.contains("Primary", ignoreCase = true))
-                }
-                if (primarySchoolMatch == null) {
-                    repository.insertSafeZone(com.example.data.GeoUtils.DEFAULT_WOODCOTE_PRIMARY_SCHOOL)
-                } else if (primarySchoolMatch.radiusMeters < 160.0) {
-                    repository.insertSafeZone(primarySchoolMatch.copy(radiusMeters = 160.0))
                 }
             } catch (_: Exception) {}
 

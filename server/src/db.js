@@ -289,15 +289,6 @@ const dbOperations = {
         if (!db.safeZones) db.safeZones = {};
         const defaultZones = [
             {
-                id: 'zone_oasis_academy_byron',
-                circleId: circleId || 'circle_default_sovereign',
-                name: 'Oasis Academy Byron',
-                latitude: 51.3141000,
-                longitude: -0.1288000,
-                radiusMeters: 240,
-                iconName: 'school'
-            },
-            {
                 id: 'zone_woodcote_high_school',
                 circleId: circleId || 'circle_default_sovereign',
                 name: 'Woodcote High School',
@@ -305,18 +296,26 @@ const dbOperations = {
                 longitude: -0.1422829,
                 radiusMeters: 220,
                 iconName: 'school'
-            },
-            {
-                id: 'zone_woodcote_school',
-                circleId: circleId || 'circle_default_sovereign',
-                name: 'Woodcote Primary School',
-                latitude: 51.3279926,
-                longitude: -0.1405488,
-                radiusMeters: 160,
-                iconName: 'school'
             }
         ];
         let changed = false;
+
+        // Purge unwanted legacy Byron & Woodcote Primary zones
+        ['zone_oasis_academy_byron', 'zone_woodcote_school'].forEach(id => {
+            if (db.safeZones[id]) {
+                delete db.safeZones[id];
+                changed = true;
+            }
+        });
+        Object.keys(db.safeZones).forEach(k => {
+            const z = db.safeZones[k];
+            if ((z.name || '').toLowerCase().includes('byron') ||
+                ((z.name || '').toLowerCase().includes('woodcote') && (z.name || '').toLowerCase().includes('primary'))) {
+                delete db.safeZones[k];
+                changed = true;
+            }
+        });
+
         defaultZones.forEach(def => {
             const existing = db.safeZones[def.id];
             if (!existing) {
