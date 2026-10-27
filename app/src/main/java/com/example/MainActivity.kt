@@ -963,7 +963,7 @@ fun MainScreen(
                                 modifier = Modifier.clickable { viewModel.checkForAppUpdatesManually() }
                             ) {
                                 Text(
-                                    text = "v2.6 • Check Update",
+                                    text = "v${com.example.BuildConfig.VERSION_NAME} • Check Update",
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,

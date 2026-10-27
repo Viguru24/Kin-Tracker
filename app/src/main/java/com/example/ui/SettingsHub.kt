@@ -1573,7 +1573,7 @@ private fun SystemTabContent(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "Kin Tracker v2.6 • Ra Smart Server Architecture",
+                    text = "Kin Tracker v${com.example.BuildConfig.VERSION_NAME} • Ra Smart Server Architecture",
                     color = SecondarySlate.copy(alpha = 0.6f),
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace
