@@ -372,8 +372,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val shouldOpenNotificationHistoryFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("open_notification_history", false)) {
+            shouldOpenNotificationHistoryFlow.value = true
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra("open_notification_history", false) == true) {
+            shouldOpenNotificationHistoryFlow.value = true
+        }
         
         // Safely configure OSMDroid prior to UI rendering to prevent storage write permission crashes
         try {
@@ -433,6 +446,7 @@ class MainActivity : ComponentActivity() {
                         MainScreen(
                             viewModel = viewModel,
                             textToSpeech = textToSpeech,
+                            shouldOpenNotificationHistoryFlow = shouldOpenNotificationHistoryFlow,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -446,6 +460,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     viewModel: FamilyViewModel,
     textToSpeech: TextToSpeech?,
+    shouldOpenNotificationHistoryFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false),
     modifier: Modifier = Modifier
 ) {
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
@@ -502,6 +517,22 @@ fun MainScreen(
     var isShoppingListPopupOpen by remember { mutableStateOf(false) }
     var isFeedbackOpen by remember { mutableStateOf(false) }
     var showAddDeviceDialog by remember { mutableStateOf(false) }
+    var showNotificationHistory by remember { mutableStateOf(false) }
+
+    val shouldOpenFromIntent by shouldOpenNotificationHistoryFlow.collectAsStateWithLifecycle()
+    LaunchedEffect(shouldOpenFromIntent) {
+        if (shouldOpenFromIntent) {
+            showNotificationHistory = true
+            if (shouldOpenNotificationHistoryFlow is kotlinx.coroutines.flow.MutableStateFlow) {
+                shouldOpenNotificationHistoryFlow.value = false
+            }
+        }
+    }
+
+    val recentAlertCount = remember(logs) {
+        val dayAgo = System.currentTimeMillis() - (24L * 60 * 60 * 1000)
+        logs.count { it.timestamp >= dayAgo }
+    }
 
 
     // Top toast alert notification channel overlay
@@ -539,8 +570,10 @@ fun MainScreen(
 
 
     // Handle system back gesture / back button to naturally close open panels
-    BackHandler(enabled = isSettingsOpen || isFamilyPopupOpen) {
-        if (isSettingsOpen) {
+    BackHandler(enabled = isSettingsOpen || isFamilyPopupOpen || showNotificationHistory) {
+        if (showNotificationHistory) {
+            showNotificationHistory = false
+        } else if (isSettingsOpen) {
             isSettingsOpen = false
         } else if (isFamilyPopupOpen) {
             isFamilyPopupOpen = false
@@ -604,6 +637,8 @@ fun MainScreen(
             onTriggerCheckIn = { viewModel.triggerCheckIn() },
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },
             onSettingsClick = { isSettingsOpen = true },
+            onOpenNotificationHistory = { showNotificationHistory = true },
+            recentAlertCount = recentAlertCount,
             onOpenWhatsApp = openWhatsApp,
             onUpdateMember = { viewModel.updateFamilyMember(it) },
             onDeleteMember = { viewModel.deleteFamilyMember(it) },
@@ -1021,6 +1056,18 @@ fun MainScreen(
                 onDismiss = { isFeedbackOpen = false },
                 onFeedbackSubmitted = {
                     viewModel.triggerUIFeedback("Thank you for your feedback! 🚀")
+                }
+            )
+        }
+
+        if (showNotificationHistory) {
+            com.example.ui.NotificationHistorySheet(
+                logs = logs,
+                onDismiss = { showNotificationHistory = false },
+                onClearLogs = { viewModel.clearLogHistory() },
+                onSelectMember = { memberId ->
+                    viewModel.selectedMemberId.value = memberId
+                    showNotificationHistory = false
                 }
             )
         }

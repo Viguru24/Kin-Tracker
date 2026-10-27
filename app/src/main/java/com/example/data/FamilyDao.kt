@@ -26,11 +26,17 @@ interface FamilyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertActivityLog(log: ActivityLog)
 
-    @Query("SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT 50")
+    @Query("SELECT * FROM activity_logs ORDER BY timestamp DESC LIMIT 200")
     fun getActivityLogs(): Flow<List<ActivityLog>>
 
     @Query("DELETE FROM activity_logs")
     suspend fun clearActivityLogs()
+
+    @Query("DELETE FROM activity_logs WHERE timestamp < :cutoffTimestamp")
+    suspend fun pruneOldLogs(cutoffTimestamp: Long)
+
+    @Query("SELECT COUNT(*) FROM activity_logs WHERE timestamp >= :sinceTimestamp")
+    fun getRecentLogCount(sinceTimestamp: Long): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertGroupPinMapping(mapping: GroupPinMapping)

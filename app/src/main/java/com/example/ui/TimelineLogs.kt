@@ -127,6 +127,12 @@ fun TimelineLogs(
 
             // TAB 0: LIVE ACTIVITY LOGS
             if (selectedTab == 0) {
+                Text(
+                    text = "🛡️ Auto-pruned after 7 days • Notifications & alerts",
+                    color = SecondarySlate.copy(alpha = 0.8f),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
                 if (logs.isEmpty()) {
                     Box(
                         modifier = Modifier

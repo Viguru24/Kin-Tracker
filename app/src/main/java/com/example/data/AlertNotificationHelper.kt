@@ -15,11 +15,17 @@ import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 object AlertNotificationHelper {
     private const val CHANNEL_ID = "kintracker_geofence_alerts"
     private const val CHANNEL_NAME = "KinTracker Departure & Arrival Alerts"
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun ensureNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -121,11 +127,56 @@ object AlertNotificationHelper {
         }
     }
 
-    fun postAlertNotification(context: Context, title: String, message: String, notificationId: Int = (System.currentTimeMillis() % 100000).toInt()) {
+    fun postAlertNotification(
+        context: Context,
+        title: String,
+        message: String,
+        notificationId: Int = (System.currentTimeMillis() % 100000).toInt(),
+        memberId: String = "",
+        memberName: String = ""
+    ) {
+        // 1. Persist notification to Activity/Notification History database & auto-prune
+        scope.launch {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val icon = when {
+                    title.contains("SOS", ignoreCase = true) || message.contains("SOS", ignoreCase = true) -> "critical"
+                    title.contains("Train", ignoreCase = true) || message.contains("train", ignoreCase = true) -> "train"
+                    title.contains("Left", ignoreCase = true) || message.contains("left", ignoreCase = true) -> "away"
+                    title.contains("Arrived", ignoreCase = true) || message.contains("arrived", ignoreCase = true) -> "home"
+                    title.contains("Battery", ignoreCase = true) || message.contains("battery", ignoreCase = true) -> "battery"
+                    title.contains("Proximity", ignoreCase = true) || message.contains("near", ignoreCase = true) -> "proximity"
+                    else -> "check_in"
+                }
+
+                val resolvedMemberName = if (memberName.isNotBlank()) {
+                    memberName
+                } else {
+                    val words = title.replace("Kin-Tracker", "").replace("Alert:", "").trim().split(" ").filter { it.isNotBlank() }
+                    words.firstOrNull() ?: "Circle"
+                }
+
+                db.familyDao().insertActivityLog(
+                    ActivityLog(
+                        memberId = memberId.ifBlank { "system" },
+                        memberName = resolvedMemberName,
+                        actionText = "$title • $message",
+                        timestamp = System.currentTimeMillis(),
+                        iconName = icon
+                    )
+                )
+
+                // Time-based pruning: automatically purge notifications older than 7 days (604,800,000 ms)
+                val sevenDaysAgo = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
+                db.familyDao().pruneOldLogs(sevenDaysAgo)
+            } catch (_: Exception) {}
+        }
+
         try {
             ensureNotificationChannel(context)
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("open_notification_history", true)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,

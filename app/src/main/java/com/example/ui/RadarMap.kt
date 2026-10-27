@@ -465,6 +465,8 @@ fun RadarMap(
     isLocationPaused: Boolean = false,
     onToggleLocationPaused: (Boolean) -> Unit = {},
     isSettingsOpen: Boolean = false,
+    onOpenNotificationHistory: () -> Unit = {},
+    recentAlertCount: Int = 0,
     bottomPadding: Dp = 120.dp,
     modifier: Modifier = Modifier
 ) {
@@ -1414,23 +1416,56 @@ fun RadarMap(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── 1. LEFT: Dedicated Settings Gear Button ──
-                Surface(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clickable {
-                            showCircleSwitcher = false
-                            showToolsMenu = false
-                            onSettingsClick()
-                        }
-                        .testTag("settings_button"),
-                    color = Color(0xF2161A24),
-                    shape = CircleShape,
-                    border = BorderStroke(1.2.dp, Color(0xFF384358)),
-                    shadowElevation = 8.dp
+                // ── 1. LEFT: Dedicated Settings Gear Button & Notification History Bell ──
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("⚙️", fontSize = 16.sp)
+                    Surface(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clickable {
+                                showCircleSwitcher = false
+                                showToolsMenu = false
+                                onSettingsClick()
+                            }
+                            .testTag("settings_button"),
+                        color = Color(0xF2161A24),
+                        shape = CircleShape,
+                        border = BorderStroke(1.2.dp, Color(0xFF384358)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text("⚙️", fontSize = 16.sp)
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clickable {
+                                showCircleSwitcher = false
+                                showToolsMenu = false
+                                onOpenNotificationHistory()
+                            }
+                            .testTag("notification_bell_button"),
+                        color = Color(0xF2161A24),
+                        shape = CircleShape,
+                        border = BorderStroke(1.2.dp, if (recentAlertCount > 0) Color(0xFF00E5FF) else Color(0xFF384358)),
+                        shadowElevation = 8.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text("🔔", fontSize = 16.sp)
+                            if (recentAlertCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 4.dp, end = 4.dp)
+                                        .size(8.dp)
+                                        .background(Color(0xFF00E5FF), CircleShape)
+                                )
+                            }
+                        }
                     }
                 }
 

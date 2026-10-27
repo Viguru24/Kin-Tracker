@@ -27,7 +27,16 @@ class FamilyRepository(private val familyDao: FamilyDao) {
 
     suspend fun insertLog(log: ActivityLog) = withContext(Dispatchers.IO) {
         familyDao.insertActivityLog(log)
+        // Auto-prune logs older than 7 days (604,800,000 ms)
+        val sevenDaysAgo = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000)
+        familyDao.pruneOldLogs(sevenDaysAgo)
     }
+
+    suspend fun pruneOldLogs(cutoffTimestamp: Long) = withContext(Dispatchers.IO) {
+        familyDao.pruneOldLogs(cutoffTimestamp)
+    }
+
+    fun getRecentLogCount(sinceTimestamp: Long): Flow<Int> = familyDao.getRecentLogCount(sinceTimestamp)
 
     suspend fun clearLogs() = withContext(Dispatchers.IO) {
         familyDao.clearActivityLogs()
