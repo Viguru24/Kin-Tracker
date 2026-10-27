@@ -235,8 +235,8 @@
             minZoom: 2
         }).setView([51.329480, -0.119095], 14);
 
-        // Map style switch: CARTO Voyager (default) or the classic Esri dark map.
-        // Switch back with ?map=classic in the URL (remembered), or ?map=carto to return.
+        // Map style switch: Esri Street (default) or the classic Esri dark map.
+        // Switch back with ?map=classic in the URL (remembered), or ?map=carto to return to the new street map.
         const mapParam = new URLSearchParams(location.search).get('map');
         if (mapParam === 'classic' || mapParam === 'carto') localStorage.setItem('kinMapStyle', mapParam);
         const mapStyle = localStorage.getItem('kinMapStyle') || 'carto';
@@ -257,12 +257,11 @@
                 opacity: 0.9
             }).addTo(state.map);
         } else {
-            // CARTO Voyager: clean Google-Maps-like basemap, free, no API key
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                subdomains: 'abcd',
-                maxNativeZoom: 20,
+            // Esri World Street Map: clean Google-Maps-like basemap, free, no API key
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxNativeZoom: 19,
                 maxZoom: 21,
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+                attribution: 'Tiles &copy; Esri'
             }).addTo(state.map);
         }
 

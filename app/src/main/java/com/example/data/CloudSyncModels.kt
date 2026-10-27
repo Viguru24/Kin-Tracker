@@ -17,7 +17,54 @@ data class CloudGroupPayload(
     val workLng: Double = 0.0,
     val isWorkCalibrated: Boolean = false,
     val homeRadiusMeters: Double = AppConfig.DEFAULT_HOME_RADIUS_METERS,
-    val workRadiusMeters: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS
+    val workRadiusMeters: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS,
+    val completedTrips: List<CloudCompletedTrip> = emptyList(),
+    val recentAlerts: List<CloudAlertEvent> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class CloudAlertEvent(
+    val id: String = "",
+    val type: String = "",
+    val memberId: String = "",
+    val memberName: String = "",
+    val title: String = "",
+    val message: String = "",
+    val origin: String? = null,
+    val destination: String? = null,
+    val transitMode: String = "",
+    val speedMph: Double = 0.0,
+    val timestamp: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class CloudTripBreadcrumb(
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val speedMph: Double = 0.0,
+    val timestamp: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class CloudCompletedTrip(
+    val id: String = "",
+    val memberId: String = "",
+    val memberName: String = "",
+    val transitMode: String = "",
+    val origin: String = "",
+    val destination: String? = null,
+    val startLat: Double = 0.0,
+    val startLng: Double = 0.0,
+    val endLat: Double = 0.0,
+    val endLng: Double = 0.0,
+    val startTime: Long = 0L,
+    val endTime: Long? = null,
+    val durationMinutes: Int = 0,
+    val topSpeedMph: Double = 0.0,
+    val totalDistanceKm: Double = 0.0,
+    val harshBrakingCount: Int = 0,
+    val rapidAccelerationCount: Int = 0,
+    val breadcrumbs: List<CloudTripBreadcrumb> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)

@@ -82,17 +82,18 @@ import java.io.FileOutputStream
  */
 private const val USE_CARTO_TILES = true
 
-/** CARTO Voyager: clean, Google-Maps-like free basemap (no API key). */
-private val cartoVoyagerTileSource = XYTileSource(
-    "CartoVoyager", 0, 20, 256, ".png",
-    arrayOf(
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://d.basemaps.cartocdn.com/rastertiles/voyager/"
-    ),
-    "© OpenStreetMap contributors © CARTO"
-)
+/** Esri World Street Map: clean, Google-Maps-like free basemap (no API key). Esri tile URLs use z/y/x order. */
+private val cartoVoyagerTileSource = object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
+    "EsriWorldStreet", 0, 19, 256, ".png",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"),
+    "Tiles © Esri"
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String =
+        baseUrl +
+            org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex) + "/" +
+            org.osmdroid.util.MapTileIndex.getY(pMapTileIndex) + "/" +
+            org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
+}
 
 private val kinBaseTileSource
     get() = if (USE_CARTO_TILES) cartoVoyagerTileSource else TileSourceFactory.MAPNIK
@@ -684,8 +685,8 @@ fun RadarMap(
 
                 if (state.isMoving) {
                     val speedMps = (state.speedMph * 0.44704).coerceAtLeast(0.6)
-                    // Catchup speed smoothly scales to ensure it tracks incoming pings without lag
-                    val catchupSpeedMps = maxOf(speedMps, distToTargetM / 1.0)
+                    // Catchup speed smoothly scales across the update window for continuous fluid gliding
+                    val catchupSpeedMps = maxOf(speedMps * 0.95, distToTargetM / 3.5)
                     val stepM = catchupSpeedMps * dt
 
                     if (distToTargetM > stepM && distToTargetM > 0.2) {

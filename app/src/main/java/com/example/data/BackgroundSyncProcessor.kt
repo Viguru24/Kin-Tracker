@@ -590,7 +590,31 @@ object BackgroundSyncProcessor {
                 } else {
                     repository.insertFamilyMembers(listOf(mappedMember))
                 }
+                if (mappedMember.x != 0.0 && mappedMember.y != 0.0) {
+                    RailwayTransitDetector.checkRailwayCorridorAsync(
+                        memberId = mappedMember.id,
+                        lat = mappedMember.y,
+                        lng = mappedMember.x,
+                        speedMph = mappedMember.speedMph
+                    )
+                }
                 evaluatedMembers.add(mappedMember)
+            }
+
+            // Process any server-computed alerts and completed trips
+            payload?.let { p ->
+                if (p.completedTrips.isNotEmpty()) {
+                    TelemetryWebSocketManager.updateCompletedTrips(p.completedTrips)
+                }
+                if (p.recentAlerts.isNotEmpty()) {
+                    TelemetryWebSocketManager.processServerAlerts(
+                        context = context,
+                        repository = repository,
+                        alerts = p.recentAlerts,
+                        myDeviceName = myName,
+                        myDeviceUUID = dUuid
+                    )
+                }
             }
 
             // Run 24/7 background geofence presence detection and alert notifications

@@ -69,9 +69,20 @@ class CloudSyncManager(
 
     fun startCloudSyncLoop() {
         cloudSyncJob?.cancel()
+        com.example.data.TelemetryWebSocketManager.onRealtimeMemberUpdated = {
+            triggerSyncNow()
+        }
         cloudSyncJob = scope.launch {
             while (isActive) {
                 if (isCloudSyncEnabled.value && groupSyncToken.value.isNotBlank()) {
+                    com.example.data.TelemetryWebSocketManager.connect(
+                        context = application,
+                        repository = repository,
+                        token = groupSyncToken.value,
+                        myDeviceName = myDeviceName.value,
+                        myDeviceUUID = myDeviceUUID.value,
+                        onUiEvent = { event -> scope.launch { uiEvents.emit(event) } }
+                    )
                     performCloudSyncTick()
                 }
                 delay(5000)
@@ -81,6 +92,7 @@ class CloudSyncManager(
 
     fun stopCloudSyncLoop() {
         cloudSyncJob?.cancel()
+        com.example.data.TelemetryWebSocketManager.disconnect()
     }
 
     private suspend fun performCloudSyncTick() {
@@ -137,6 +149,20 @@ class CloudSyncManager(
             payload?.let { p ->
                 activeGroupCreatorId.value = p.creatorId
                 activeGroupPinCode.value = p.pinCode
+
+                if (p.completedTrips.isNotEmpty()) {
+                    com.example.data.TelemetryWebSocketManager.updateCompletedTrips(p.completedTrips)
+                }
+                if (p.recentAlerts.isNotEmpty()) {
+                    com.example.data.TelemetryWebSocketManager.processServerAlerts(
+                        context = application,
+                        repository = repository,
+                        alerts = p.recentAlerts,
+                        myDeviceName = myName,
+                        myDeviceUUID = myDeviceUUID.value,
+                        onUiEvent = { event -> scope.launch { uiEvents.emit(event) } }
+                    )
+                }
                 
                 if (p.members.containsKey(myCloudId)) {
                     hasSuccessfullySyncedThisSession = true
