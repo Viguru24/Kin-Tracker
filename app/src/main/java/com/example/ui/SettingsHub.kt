@@ -213,7 +213,8 @@ fun SettingsHub(
                     cloudStatusText = cloudStatusText,
                     activityLogs = activityLogs,
                     onClearLogs = onClearLogs,
-                    onOpenFeedback = onOpenFeedback
+                    onOpenFeedback = onOpenFeedback,
+                    onSelectTrip = onSelectTrip
                 )
             }
         }
@@ -1400,7 +1401,8 @@ private fun SystemTabContent(
     cloudStatusText: String,
     activityLogs: List<ActivityLog>,
     onClearLogs: () -> Unit,
-    onOpenFeedback: () -> Unit
+    onOpenFeedback: () -> Unit,
+    onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(

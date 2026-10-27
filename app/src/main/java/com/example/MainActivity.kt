@@ -1008,7 +1008,7 @@ fun MainScreen(
                             onUpdateMember = { member -> viewModel.updateFamilyMember(member) },
                             onSelectTrip = { trip ->
                                 com.example.data.TelemetryWebSocketManager.selectTrip(trip)
-                                showSettings = false
+                                isSettingsOpen = false
                             }
                         )
                     }
