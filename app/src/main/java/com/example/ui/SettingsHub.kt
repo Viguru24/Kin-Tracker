@@ -1542,6 +1542,13 @@ private fun SystemTabContent(
             }
         }
 
+        val completedTrips by com.example.data.TelemetryWebSocketManager.completedTrips.collectAsState()
+        TimelineLogs(
+            logs = activityLogs,
+            onClearLogs = onClearLogs,
+            completedTrips = completedTrips
+        )
+
         Button(
             onClick = onOpenFeedback,
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E6FF2)),
