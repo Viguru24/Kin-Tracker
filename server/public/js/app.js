@@ -494,7 +494,7 @@
         }
 
         // WORK GEOFENCE
-        if (circle.workLat && circle.workLng && (circle.workLat !== 0 || circle.workLng !== 0)) {
+        if (circle.workLat && circle.workLng && (circle.workLat !== 0 || circle.workLng !== 0) && !isWorkDuplicateOfSchool(circle)) {
             const workLatLng = [circle.workLat, circle.workLng];
             if (!state.workCircleLayer) {
                 state.workCircleLayer = L.circle(workLatLng, {
@@ -601,6 +601,17 @@
         return R * c;
     }
 
+    // A Work zone saved on top of a school duplicates it (school + briefcase circle). Treat it as unset so only the school shows.
+    function isWorkDuplicateOfSchool(circle) {
+        if (!circle || !circle.workLat || !circle.workLng) return false;
+        const schools = [
+            { latitude: 51.3279926, longitude: -0.1405488, radiusMeters: 160 },
+            { latitude: 51.3301600, longitude: -0.1422829, radiusMeters: 220 },
+            { latitude: 51.3141000, longitude: -0.1288000, radiusMeters: 240 },
+            ...((circle.safeZones || []).filter(z => String(z.iconName || '').toLowerCase() === 'school'))
+        ];
+        return schools.some(z => distanceMeters(Number(circle.workLat), Number(circle.workLng), Number(z.latitude), Number(z.longitude)) <= Math.max(Number(z.radiusMeters || 150), 160) + 100);
+    }
     function computeClusterLayout(members, circle) {
         const homeLat = circle ? Number(circle.homeLat || 0) : 0;
         const homeLng = circle ? Number(circle.homeLng || 0) : 0;
@@ -608,7 +619,7 @@
         const workLat = circle ? Number(circle.workLat || 0) : 0;
         const workLng = circle ? Number(circle.workLng || 0) : 0;
         const workRadius = circle ? Number(circle.workRadiusMeters || 75) : 75;
-        const isWorkCalibrated = Boolean(circle && circle.isWorkCalibrated);
+        const isWorkCalibrated = Boolean(circle && circle.isWorkCalibrated) && !isWorkDuplicateOfSchool(circle);
 
         const defaultSchoolZones = [
             { id: 'zone_woodcote_high_school', name: 'Woodcote High School', latitude: 51.3205711, longitude: -0.1292201, radiusMeters: 180 },

@@ -504,6 +504,35 @@ fun RadarMap(
     var isRouteTrailEnabled by remember { mutableStateOf(false) }
     var isUserInteractingWithMap by remember { mutableStateOf(false) }
 
+    // Life360 selected completed trip route playback
+    val selectedTrip by com.example.data.TelemetryWebSocketManager.selectedTrip.collectAsState()
+    LaunchedEffect(selectedTrip) {
+        selectedTrip?.let { trip ->
+            val points = if (trip.breadcrumbs.isNotEmpty()) {
+                trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
+            } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
+                listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
+            } else {
+                emptyList()
+            }
+            if (points.isNotEmpty()) {
+                val minLat = points.minOf { it.latitude }
+                val maxLat = points.maxOf { it.latitude }
+                val minLng = points.minOf { it.longitude }
+                val maxLng = points.maxOf { it.longitude }
+                val latSpan = (maxLat - minLat).coerceAtLeast(0.008)
+                val lngSpan = (maxLng - minLng).coerceAtLeast(0.008)
+                val box = org.osmdroid.util.BoundingBox(
+                    maxLat + latSpan * 0.35,
+                    maxLng + lngSpan * 0.35,
+                    minLat - latSpan * 0.35,
+                    minLng - lngSpan * 0.35
+                )
+                mapViewRef?.zoomToBoundingBox(box, true, 400)
+            }
+        }
+    }
+
     var animTick by remember { mutableStateOf(0) }
     val hasMovingMembers = remember(members) {
         members.any { it.speedMph >= 0.6 || classifyTransitMode(it.speedMph, it.statusText, it.id) != TransitMode.STATIONARY }
@@ -1231,6 +1260,69 @@ fun RadarMap(
                     visualState.markerRef = memberMarker
                 }
 
+                // 4. Draw Selected Trip Route History (Life360 Route Playback)
+                selectedTrip?.let { trip ->
+                    val tripPoints = if (trip.breadcrumbs.isNotEmpty()) {
+                        trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
+                    } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
+                        listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
+                    } else {
+                        emptyList()
+                    }
+
+                    if (tripPoints.size >= 2) {
+                        // High-contrast outer glow
+                        val tripGlow = Polyline(mapView).apply {
+                            setPoints(tripPoints)
+                            outlinePaint.color = android.graphics.Color.WHITE
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            outlinePaint.strokeWidth = 11.0f * density
+                            outlinePaint.alpha = 210
+                        }
+                        mapView.overlays.add(tripGlow)
+
+                        val isTrain = trip.transitMode.equals("TRAIN", ignoreCase = true)
+                        val tripColor = if (isTrain) android.graphics.Color.parseColor("#9C27B0") else android.graphics.Color.parseColor("#00E5FF")
+
+                        val tripRoute = Polyline(mapView).apply {
+                            setPoints(tripPoints)
+                            outlinePaint.color = tripColor
+                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                            outlinePaint.strokeWidth = 6.5f * density
+                            outlinePaint.alpha = 255
+                        }
+                        mapView.overlays.add(tripRoute)
+
+                        // Start Pin
+                        val startMarker = Marker(mapView).apply {
+                            position = tripPoints.first()
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            icon = MapMarkerRenderer.getOrCreateMarkerDrawable(
+                                context = context,
+                                colorHex = "#00E676",
+                                emoji = "🟢",
+                                isSelected = false
+                            )
+                            setOnMarkerClickListener { _, _ -> true }
+                        }
+                        mapView.overlays.add(startMarker)
+
+                        // End Pin
+                        val endMarker = Marker(mapView).apply {
+                            position = tripPoints.last()
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            icon = MapMarkerRenderer.getOrCreateMarkerDrawable(
+                                context = context,
+                                colorHex = "#FF1744",
+                                emoji = "🏁",
+                                isSelected = false
+                            )
+                            setOnMarkerClickListener { _, _ -> true }
+                        }
+                        mapView.overlays.add(endMarker)
+                    }
+                }
+
                 // Apply OpenStreetMap customizable styling options using tile sources and matrices
                 when (mapTypeMode) {
                     "streets" -> {
@@ -1633,6 +1725,154 @@ fun RadarMap(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+
+            // ── 1.5 TRIP PLAYBACK HUD CARD (When inspecting trip from History) ──
+            AnimatedVisibility(
+                visible = selectedTrip != null,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                selectedTrip?.let { trip ->
+                    val isTrain = trip.transitMode.equals("TRAIN", ignoreCase = true)
+                    val modeEmoji = when (trip.transitMode.uppercase()) {
+                        "TRAIN" -> "🚆"
+                        "DRIVING" -> "🚗"
+                        "CYCLING" -> "🚲"
+                        "WALKING" -> "👣"
+                        else -> "🚗"
+                    }
+                    val accentColor = if (isTrain) Color(0xFFBA68C8) else RadarCyan
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp),
+                        color = Color(0xF2161A24),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.2.dp, accentColor.copy(alpha = 0.8f)),
+                        shadowElevation = 10.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Surface(
+                                        color = accentColor.copy(alpha = 0.2f),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(modeEmoji, fontSize = 16.sp)
+                                        }
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "${trip.memberName}'s Journey",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "${trip.origin} → ${trip.destination ?: "Destination"}",
+                                            color = Color(0xFF90A4AE),
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    modifier = Modifier
+                                        .clickable { com.example.data.TelemetryWebSocketManager.selectTrip(null) }
+                                        .padding(4.dp),
+                                    color = Color(0xFF263238),
+                                    shape = CircleShape
+                                ) {
+                                    Text(
+                                        text = "✕",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            // Stat Pills Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = Color(0xFF1E2638),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Duration", fontSize = 9.sp, color = Color(0xFF78909C))
+                                        Text("${trip.durationMinutes} min", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                }
+                                Surface(
+                                    color = Color(0xFF1E2638),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Distance", fontSize = 9.sp, color = Color(0xFF78909C))
+                                        Text("${String.format(java.util.Locale.US, "%.1f", trip.totalDistanceKm)} km", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                }
+                                Surface(
+                                    color = Color(0xFF1E2638),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Top Speed", fontSize = 9.sp, color = Color(0xFF78909C))
+                                        Text("${trip.topSpeedMph.toInt()} mph", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = accentColor)
+                                    }
+                                }
+                                if (trip.harshBrakingCount > 0) {
+                                    Surface(
+                                        color = Color(0xFF3E2723),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("Harsh Brakes", fontSize = 9.sp, color = Color(0xFFFFAB91))
+                                            Text("${trip.harshBrakingCount}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

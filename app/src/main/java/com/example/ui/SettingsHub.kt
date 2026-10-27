@@ -102,6 +102,7 @@ fun SettingsHub(
     onDeleteMember: ((FamilyMember) -> Unit)? = null,
     onToggleMemberTracking: ((String) -> Unit)? = null,
     onUpdateMember: ((FamilyMember) -> Unit)? = null,
+    onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(SettingsTab.CIRCLE) }
@@ -1546,7 +1547,8 @@ private fun SystemTabContent(
         TimelineLogs(
             logs = activityLogs,
             onClearLogs = onClearLogs,
-            completedTrips = completedTrips
+            completedTrips = completedTrips,
+            onSelectTrip = onSelectTrip
         )
 
         Button(

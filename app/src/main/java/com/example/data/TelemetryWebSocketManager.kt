@@ -43,6 +43,14 @@ object TelemetryWebSocketManager {
     private val _completedTrips = MutableStateFlow<List<CloudCompletedTrip>>(emptyList())
     val completedTrips: StateFlow<List<CloudCompletedTrip>> = _completedTrips
 
+    // Selected completed trip for route playback and inspection on map
+    private val _selectedTrip = MutableStateFlow<CloudCompletedTrip?>(null)
+    val selectedTrip: StateFlow<CloudCompletedTrip?> = _selectedTrip
+
+    fun selectTrip(trip: CloudCompletedTrip?) {
+        _selectedTrip.value = trip
+    }
+
     var onRealtimeMemberUpdated: (() -> Unit)? = null
 
     fun connect(

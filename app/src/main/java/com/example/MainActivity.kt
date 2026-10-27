@@ -1005,7 +1005,11 @@ fun MainScreen(
                             onCleanDuplicates = { viewModel.cleanDuplicates() },
                             onDeleteMember = { member -> viewModel.deleteFamilyMember(member.id) },
                             onToggleMemberTracking = { memberId -> viewModel.toggleMemberTracking(memberId) },
-                            onUpdateMember = { member -> viewModel.updateFamilyMember(member) }
+                            onUpdateMember = { member -> viewModel.updateFamilyMember(member) },
+                            onSelectTrip = { trip ->
+                                com.example.data.TelemetryWebSocketManager.selectTrip(trip)
+                                showSettings = false
+                            }
                         )
                     }
                 }
