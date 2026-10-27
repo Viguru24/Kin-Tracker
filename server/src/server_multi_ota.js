@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const Busboy = require('busboy');
+const { enrichMemberState } = require('./tripTransitEngine');
 
 const PORT = 3000;
 const DATA_DIR = path.join(__dirname, 'kv-data');       // Group config + legacy blobs
@@ -46,33 +47,32 @@ function distKm(lat1, lng1, lat2, lng2) {
     return Math.sqrt(dLat * dLat + dLng * dLng);
 }
 
-// Save member - only if newer, and snap coords to home pin to kill GPS jitter
+// Helper: get safe zones from group config
+function getSafeZones(token) {
+    try {
+        const file = path.join(DATA_DIR, safeKey(token) + '.json');
+        if (!fs.existsSync(file)) return [];
+        const d = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return d.safeZones || [];
+    } catch (e) {}
+    return [];
+}
+
+// Save member - only if newer, enriched with real-time transit & destination intelligence
 function saveMember(token, memberId, data) {
     const file = path.join(MEMBER_DIR, safeKey(token) + '__' + safeKey(memberId) + '.json');
+    let stored = null;
     try {
         if (fs.existsSync(file)) {
-            const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+            stored = JSON.parse(fs.readFileSync(file, 'utf8'));
             if ((stored.lastActive || 0) >= (data.lastActive || 0)) return;
         }
     } catch (e) {}
 
-    const out = Object.assign({}, data);
-    if (out.x && out.y && out.x !== 0 && out.y !== 0) {
-        const home = getHomeCoords(token);
-        if (home) {
-            const snapKm = Math.max(home.radius, 150) / 1000;
-            if (distKm(out.y, out.x, home.lat, home.lng) <= snapKm) {
-                out.x = home.lng;
-                out.y = home.lat;
-                out.speedMph = 0.0;
-                out.isLocationPaused = false;
-                if (!out.statusText || out.statusText === 'Stationary' ||
-                    /away|tracking/i.test(out.statusText)) {
-                    out.statusText = 'At Home (Live GPS)';
-                }
-            }
-        }
-    }
+    const home = getHomeCoords(token);
+    const safeZones = getSafeZones(token);
+    const out = enrichMemberState(token, memberId, data, stored, home, safeZones);
+
     fs.writeFileSync(file, JSON.stringify(out), 'utf8');
 }
 
