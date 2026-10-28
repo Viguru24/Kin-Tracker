@@ -302,17 +302,26 @@ private fun CircleTabContent(
                     Button(
                         onClick = onOpenAddDevice,
                         colors = ButtonDefaults.buttonColors(containerColor = RadarCyan),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.weight(1f).height(40.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Pair New Phone", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF0D1117))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "Pair New Phone",
+                            color = Color(0xFF0D1117),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
                     }
 
                     OutlinedButton(
                         onClick = { showJoinSheet = !showJoinSheet },
                         shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                         border = BorderStroke(1.dp, SlateBorder),
                         modifier = Modifier.height(40.dp)
                     ) {
