@@ -53,6 +53,9 @@ class CloudSyncManager(
     private val lastProcessedReaction = ConcurrentHashMap<String, String>()
     private val lastProcessedCheckIn = ConcurrentHashMap<String, String>()
 
+    private var lastTriggerSyncTime = 0L
+    private val isSyncTickInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
+
     init {
         com.example.data.RoomAudioStreamManager.onTransmitterToggled = {
             triggerSyncNow()
@@ -60,6 +63,12 @@ class CloudSyncManager(
     }
 
     fun triggerSyncNow() {
+        val now = System.currentTimeMillis()
+        // Throttle triggers to at most once every 3 seconds to prevent recursive WebSocket feedback loops
+        if (now - lastTriggerSyncTime < 3000L) {
+            return
+        }
+        lastTriggerSyncTime = now
         scope.launch {
             if (isCloudSyncEnabled.value && groupSyncToken.value.isNotBlank()) {
                 performCloudSyncTick()
@@ -96,6 +105,9 @@ class CloudSyncManager(
     }
 
     private suspend fun performCloudSyncTick() {
+        if (!isSyncTickInProgress.compareAndSet(false, true)) {
+            return
+        }
         val token = groupSyncToken.value
         val myName = myDeviceName.value
         val myColor = myDeviceColor.value
@@ -839,6 +851,8 @@ class CloudSyncManager(
                                  e is java.net.SocketTimeoutException || e is java.io.IOException ||
                                  e.message?.contains("Unable to resolve host", ignoreCase = true) == true
             cloudStatusText.value = if (isNetworkIssue) "Synced Live (Active Offline Mode)" else "Sync Offline: ${e.localizedMessage}"
+        } finally {
+            isSyncTickInProgress.set(false)
         }
     }
 

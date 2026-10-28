@@ -231,10 +231,13 @@ object RoomAudioStreamManager {
         }
     }
 
-    fun registerMemberIp(memberId: String, ip: String, memberName: String = "") {
+    fun registerMemberIp(memberId: String, ip: String, memberName: String = "", isTransmitting: Boolean = false) {
         if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1") {
             memberIpRegistry[memberId] = ip
-            _latestDiscoveredIp.value = ip
+            // Only update latestDiscoveredIp if this member is actively transmitting or found as a live beacon
+            if (isTransmitting) {
+                _latestDiscoveredIp.value = ip
+            }
             if (memberName.isNotBlank()) {
                 val clean = memberName.lowercase().replace(Regex("\\s*\\(.*?\\)"), "").trim()
                 memberIpRegistry[clean] = ip
@@ -244,7 +247,7 @@ object RoomAudioStreamManager {
 
     fun registerMemberAudioState(memberId: String, ip: String, isTransmitting: Boolean, memberName: String = "") {
         if (ip.isNotBlank() && ip != "0.0.0.0" && ip != "127.0.0.1") {
-            registerMemberIp(memberId, ip, memberName)
+            registerMemberIp(memberId, ip, memberName, isTransmitting)
         }
         val cleanName = memberName.lowercase().replace(Regex("\\s*\\(.*?\\)"), "").trim()
         val currentSet = _activeTransmittingMembers.value.toMutableSet()
@@ -254,6 +257,9 @@ object RoomAudioStreamManager {
         } else {
             currentSet.remove(memberId)
             if (cleanName.isNotBlank()) currentSet.remove(cleanName)
+            if (_latestDiscoveredIp.value == ip) {
+                _latestDiscoveredIp.value = ""
+            }
         }
         _activeTransmittingMembers.value = currentSet
     }
@@ -488,18 +494,28 @@ object RoomAudioStreamManager {
             } catch (_: Exception) {}
         }
 
-        // 2. Enumerate ALL network interfaces as fallback / supplement
+        // 2. Enumerate ALL network interfaces as fallback / supplement (skipping mobile data/carrier interfaces)
         try {
             val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
             while (interfaces?.hasMoreElements() == true) {
                 val iface = interfaces.nextElement()
                 if (iface.isLoopback || !iface.isUp) continue
+                val ifaceLower = iface.name.lowercase()
+                // Never scan cellular carrier modems (rmnet, ccmni, pdp, dummy, tun) for LAN audio beacons
+                val isCellular = ifaceLower.contains("rmnet") || ifaceLower.contains("ccmni") ||
+                        ifaceLower.contains("pdp") || ifaceLower.contains("dummy") || ifaceLower.contains("tun")
+                if (isCellular) continue
+
                 val addrs = iface.inetAddresses
                 while (addrs.hasMoreElements()) {
                     val addr = addrs.nextElement()
                     if (addr is java.net.Inet4Address && !addr.isLoopbackAddress) {
                         val h = addr.hostAddress ?: continue
                         if (h != "127.0.0.1" && h != "0.0.0.0" && h.contains(".")) {
+                            // If it starts with 10., only scan if it's on a confirmed Wi-Fi/Ethernet/AP interface
+                            if (h.startsWith("10.") && !ifaceLower.contains("wlan") && !ifaceLower.contains("eth") && !ifaceLower.contains("ap")) {
+                                continue
+                            }
                             subnets.add(h.substringBeforeLast(".") + ".")
                         }
                     }
@@ -801,20 +817,27 @@ object RoomAudioStreamManager {
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 if (iface.isLoopback || !iface.isUp) continue
+                val ifaceLower = iface.name.lowercase()
+                // Ignore cellular carrier modem interfaces for LAN audio reporting
+                val isCellular = ifaceLower.contains("rmnet") || ifaceLower.contains("ccmni") ||
+                        ifaceLower.contains("pdp") || ifaceLower.contains("dummy") || ifaceLower.contains("tun")
+                if (isCellular) continue
+
                 val addresses = iface.inetAddresses
                 while (addresses.hasMoreElements()) {
                     val addr = addresses.nextElement()
                     if (addr is Inet4Address && !addr.isLoopbackAddress) {
                         val hostAddress = addr.hostAddress ?: ""
                         if (hostAddress.isNotBlank() && hostAddress != "127.0.0.1" && hostAddress != "0.0.0.0") {
-                            val ifaceLower = iface.name.lowercase()
-                            // Prioritize Wi-Fi, Ethernet, and Hotspot network interfaces
-                            if (ifaceLower.contains("wlan") ||
-                                ifaceLower.contains("ap") ||
-                                ifaceLower.contains("eth") ||
-                                hostAddress.startsWith("192.168.") ||
-                                hostAddress.startsWith("10.") ||
-                                hostAddress.startsWith("172.")) {
+                            // Prioritize true Wi-Fi, Ethernet, and Hotspot network interfaces
+                            val isLanInterface = ifaceLower.contains("wlan") ||
+                                    ifaceLower.contains("ap") ||
+                                    ifaceLower.contains("eth")
+                            if (isLanInterface || hostAddress.startsWith("192.168.") || hostAddress.startsWith("172.")) {
+                                return hostAddress
+                            }
+                            // Only accept 10.x if on an explicit LAN interface
+                            if (hostAddress.startsWith("10.") && isLanInterface) {
                                 return hostAddress
                             }
                             candidateIps.add(hostAddress)

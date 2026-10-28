@@ -58,8 +58,11 @@ fun RoomAudioMonitorControls(
     val diagnosticLog by RoomAudioStreamManager.diagnosticLog.collectAsState()
 
     val fallbackMemberIp = remember(members, activeTransmitters) {
-        members.firstOrNull { it.id != "me" && !RoomAudioStreamManager.getMemberIp(it.id, it.name).isNullOrBlank() }
-            ?.let { RoomAudioStreamManager.getMemberIp(it.id, it.name) } ?: ""
+        // Prioritize a member that is actively transmitting audio
+        members.firstOrNull { it.id != "me" && RoomAudioStreamManager.isMemberTransmitting(it.id, it.name) && !RoomAudioStreamManager.getMemberIp(it.id, it.name).isNullOrBlank() }
+            ?.let { RoomAudioStreamManager.getMemberIp(it.id, it.name) }
+            ?: members.firstOrNull { it.id != "me" && !RoomAudioStreamManager.getMemberIp(it.id, it.name).isNullOrBlank() }
+                ?.let { RoomAudioStreamManager.getMemberIp(it.id, it.name) } ?: ""
     }
     val autoDetectedIp = if (latestDiscoveredIp.isNotBlank()) latestDiscoveredIp else fallbackMemberIp
 
@@ -563,7 +566,7 @@ private fun AudioDiagnosticsPanel(
     activeConnectionsCount: Int,
     context: android.content.Context
 ) {
-    var manualIp by remember(autoDetectedIp) { mutableStateOf(autoDetectedIp) }
+    var manualIp by remember { mutableStateOf(autoDetectedIp) }
     val coroutineScope = rememberCoroutineScope()
     var isScanning by remember { mutableStateOf(false) }
 
@@ -683,7 +686,7 @@ private fun AudioDiagnosticsPanel(
                                 val ip = manualIp.trim()
                                 if (ip.isNotBlank()) {
                                     RoomAudioStreamManager.stopListening()
-                                    RoomAudioStreamManager.registerMemberIp("manual_$ip", ip, ip)
+                                    RoomAudioStreamManager.registerMemberIp("manual_$ip", ip, ip, isTransmitting = true)
                                     RoomAudioStreamManager.startListeningToMember(
                                         context = context,
                                         memberId = "manual_$ip",
@@ -731,7 +734,7 @@ private fun AudioDiagnosticsPanel(
                                     val found = RoomAudioStreamManager.discoverActiveBeaconIp(context)
                                     if (!found.isNullOrBlank()) {
                                         manualIp = found
-                                        RoomAudioStreamManager.registerMemberIp("manual_$found", found, found)
+                                        RoomAudioStreamManager.registerMemberIp("manual_$found", found, found, isTransmitting = true)
                                     }
                                     isScanning = false
                                 }
