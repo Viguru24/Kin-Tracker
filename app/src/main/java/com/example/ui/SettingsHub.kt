@@ -621,10 +621,7 @@ private fun ProfileTabContent(
             phoneNumber = phone
         )
 
-    val allSelectableMembers = if (members.isNotEmpty()) members else listOf(meMember)
-    var selectedMemberId by remember { mutableStateOf<String?>(null) }
-    val activeMember = allSelectableMembers.firstOrNull { it.id == selectedMemberId } ?: meMember
-
+    val activeMember = meMember
     var nameState by remember(activeMember.id) { mutableStateOf(activeMember.name) }
     var phoneState by remember(activeMember.id) { mutableStateOf(activeMember.phoneNumber) }
     var selectedColor by remember(activeMember.id) { mutableStateOf(activeMember.avatarColorHex) }
@@ -656,87 +653,6 @@ private fun ProfileTabContent(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // ── Member Selector Chips (Dad, Isabel, Annette, etc.) ──
-        if (allSelectableMembers.size > 1) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
-                border = BorderStroke(1.dp, SlateBorder),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "SELECT PROFILE TO UPDATE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SecondarySlate,
-                        letterSpacing = 1.sp
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        allSelectableMembers.forEach { member ->
-                            val isSelected = (activeMember.id == member.id)
-                            val isMe = member.id == "me" || member.id == myDeviceUUID || member.id.endsWith("_$myDeviceUUID")
-                            val chipBorderColor = if (isSelected) RadarCyan else SlateBorder
-                            val chipBgColor = if (isSelected) RadarCyan.copy(alpha = 0.15f) else Color.Transparent
-
-                            Surface(
-                                onClick = {
-                                    selectedMemberId = member.id
-                                    nameState = member.name
-                                    phoneState = member.phoneNumber
-                                    selectedColor = member.avatarColorHex
-                                    selectedEmoji = member.avatarEmoji
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = chipBgColor,
-                                border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, chipBorderColor)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier.size(24.dp).clip(CircleShape).background(Color(0xFF1E293B)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
-                                            val b = remember(member.photoPath) {
-                                                try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
-                                            }
-                                            if (b != null) {
-                                                Image(
-                                                    bitmap = b.asImageBitmap(),
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            } else {
-                                                Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 12.sp)
-                                            }
-                                        } else {
-                                            Text(member.avatarEmoji.ifBlank { "👤" }, fontSize = 12.sp)
-                                        }
-                                    }
-
-                                    Text(
-                                        text = member.name + if (isMe) " (You)" else "",
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) TextPrimary else SecondarySlate
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // ── Active Member Details & Photo Editing Card ──
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -790,7 +706,7 @@ private fun ProfileTabContent(
 
                         Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
-                                text = "Editing: ${activeMember.name}",
+                                text = "My Profile (This Phone)",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary,
@@ -941,10 +857,7 @@ private fun ProfileTabContent(
                             avatarEmoji = selectedEmoji
                         )
                         onEditMember(updated)
-                        val isMe = activeMember.id == meMember.id || activeMember.id == "me" || activeMember.id == myDeviceUUID || activeMember.id.endsWith("_$myDeviceUUID")
-                        if (isMe) {
-                            onUpdate(nameState.trim(), selectedColor, selectedEmoji, phoneState.trim())
-                        }
+                        onUpdate(nameState.trim(), selectedColor, selectedEmoji, phoneState.trim())
                         saveSuccess = true
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = if (saveSuccess) GlowingEmerald else RadarCyan),
@@ -954,7 +867,7 @@ private fun ProfileTabContent(
                     Icon(if (saveSuccess) Icons.Default.Check else Icons.Default.Done, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (saveSuccess) "Saved Successfully!" else "Save ${activeMember.name}'s Profile",
+                        text = if (saveSuccess) "Saved Successfully!" else "Save My Profile",
                         color = Color.Black,
                         fontWeight = FontWeight.Black,
                         fontSize = 13.sp

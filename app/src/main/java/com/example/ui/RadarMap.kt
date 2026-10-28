@@ -158,6 +158,7 @@ fun getVibrantSpokeColor(hexColor: String): Int {
     }
 }
 
+
 fun computeClusterLayout(
     members: List<FamilyMember>,
     safeZones: List<SafeZone>,
@@ -2763,32 +2764,6 @@ fun RadarMap(
                             shape = RoundedCornerShape(16.dp)
                         )
                     }
-
-                    // 5. Circle Settings Hub
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showToolsMenu = false
-                                onSettingsClick()
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = PrimaryCosmic.copy(alpha = 0.2f),
-                        border = BorderStroke(1.2.dp, PrimaryCosmic.copy(alpha = 0.5f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("⚙️", fontSize = 18.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Circle Settings Hub", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Profile, places, alerts, ghost mode", color = RadarCyan, fontSize = 11.sp)
-                            }
-                            Text("›", color = RadarCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
                 }
             }
         }
@@ -2796,4 +2771,27 @@ fun RadarMap(
 
     }
 }
+
+@Composable
+fun AnimatedTransitIcon(
+    mode: com.example.data.TransitMode,
+    modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = 14.dp
+) {
+    val emoji = when (mode) {
+        com.example.data.TransitMode.WALKING -> "👣"
+        com.example.data.TransitMode.CYCLING -> "🚲"
+        com.example.data.TransitMode.DRIVING -> "🚗"
+        com.example.data.TransitMode.TRAIN -> "🚆"
+        com.example.data.TransitMode.STATIONARY -> "📍"
+    }
+    Box(
+        modifier = modifier.size(size),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(emoji, fontSize = (size.value * 0.9f).sp)
+    }
+}
+
+
 
