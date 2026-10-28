@@ -53,7 +53,7 @@ fun SettingsHub(
     myDeviceColorHex: String,
     myDeviceEmoji: String,
     myDevicePhone: String,
-    onUpdateProfile: (name: String, color: String, emoji: String, phone: String) -> Unit,
+    onUpdateProfile: (name: String, color: String, emoji: String, phone: String, photoPath: String) -> Unit,
     ghostModeExpiryTime: Long,
     onToggleGhostMode: (Boolean) -> Unit,
     activeGroupPinCode: String,
@@ -179,6 +179,7 @@ fun SettingsHub(
                     onToggleGhostMode = onToggleGhostMode,
                     members = members,
                     myDeviceUUID = myDeviceUUID,
+                    onUpdateMember = onUpdateMember,
                     onEditMember = { memberToEdit = it }
                 )
                 SettingsTab.PLACES -> PlacesTabContent(
@@ -229,7 +230,7 @@ fun SettingsHub(
                 onUpdateMember?.invoke(updated)
                 val isMe = updated.id == "me" || updated.id == myDeviceUUID || updated.id.endsWith("_$myDeviceUUID")
                 if (isMe) {
-                    onUpdateProfile(updated.name, updated.avatarColorHex, updated.avatarEmoji, updated.phoneNumber)
+                    onUpdateProfile(updated.name, updated.avatarColorHex, updated.avatarEmoji, updated.phoneNumber, updated.photoPath)
                 }
                 memberToEdit = null
             }
@@ -252,6 +253,7 @@ private fun CircleTabContent(
     isLocationPaused: Boolean = false,
     onToggleLocationPaused: (Boolean) -> Unit = {},
     onToggleMemberTracking: ((String) -> Unit)? = null,
+    onUpdateMember: ((FamilyMember) -> Unit)? = null,
     onEditMember: (FamilyMember) -> Unit = {}
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -606,11 +608,12 @@ private fun ProfileTabContent(
     colorHex: String,
     emoji: String,
     phone: String,
-    onUpdate: (name: String, color: String, emoji: String, phone: String) -> Unit,
+    onUpdate: (name: String, color: String, emoji: String, phone: String, photoPath: String) -> Unit,
     ghostModeExpiryTime: Long,
     onToggleGhostMode: (Boolean) -> Unit,
     members: List<FamilyMember> = emptyList(),
     myDeviceUUID: String = "",
+    onUpdateMember: ((FamilyMember) -> Unit)? = null,
     onEditMember: (FamilyMember) -> Unit = {}
 ) {
     val meMember = members.firstOrNull { it.id == "me" || it.id == myDeviceUUID || it.id.endsWith("_$myDeviceUUID") }
@@ -631,11 +634,30 @@ private fun ProfileTabContent(
         )
 
     val activeMember = meMember
-    var nameState by remember(activeMember.id) { mutableStateOf(activeMember.name) }
-    var phoneState by remember(activeMember.id) { mutableStateOf(activeMember.phoneNumber) }
-    var selectedColor by remember(activeMember.id) { mutableStateOf(activeMember.avatarColorHex) }
-    var selectedEmoji by remember(activeMember.id) { mutableStateOf(activeMember.avatarEmoji) }
+    var nameState by remember(activeMember.id, activeMember.name) { mutableStateOf(activeMember.name) }
+    var phoneState by remember(activeMember.id, activeMember.phoneNumber) { mutableStateOf(activeMember.phoneNumber) }
+    var selectedColor by remember(activeMember.id, activeMember.avatarColorHex, colorHex) {
+        mutableStateOf(if (activeMember.avatarColorHex.isNotBlank()) activeMember.avatarColorHex else colorHex.ifBlank { "#0061A4" })
+    }
+    var selectedEmoji by remember(activeMember.id, activeMember.avatarEmoji) { mutableStateOf(activeMember.avatarEmoji) }
     var saveSuccess by remember { mutableStateOf(false) }
+
+    LaunchedEffect(colorHex, activeMember.avatarColorHex) {
+        val c = if (activeMember.avatarColorHex.isNotBlank()) activeMember.avatarColorHex else colorHex
+        if (c.isNotBlank()) selectedColor = c
+    }
+    LaunchedEffect(name, activeMember.name) {
+        val n = if (activeMember.name.isNotBlank()) activeMember.name else name
+        if (n.isNotBlank()) nameState = n
+    }
+    LaunchedEffect(phone, activeMember.phoneNumber) {
+        val p = if (activeMember.phoneNumber.isNotBlank()) activeMember.phoneNumber else phone
+        if (p.isNotBlank()) phoneState = p
+    }
+    LaunchedEffect(emoji, activeMember.avatarEmoji) {
+        val e = if (activeMember.avatarEmoji.isNotBlank()) activeMember.avatarEmoji else emoji
+        if (e.isNotBlank()) selectedEmoji = e
+    }
 
     LaunchedEffect(saveSuccess) {
         if (saveSuccess) {
@@ -645,7 +667,7 @@ private fun ProfileTabContent(
     }
 
     val emojis = listOf("👨", "👩", "👧", "👦", "👵", "👴", "🐱", "🐶")
-    val colors = listOf("#0061A4", "#AA22FF", "#EC407A", "#2E7D32", "#FF9800", "#00B4D8")
+    val colors = listOf("#0061A4", "#AA22FF", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#E040FB")
 
     val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime
     var timeLeftString by remember { mutableStateOf("") }
@@ -865,8 +887,8 @@ private fun ProfileTabContent(
                             avatarColorHex = selectedColor,
                             avatarEmoji = selectedEmoji
                         )
-                        onEditMember(updated)
-                        onUpdate(nameState.trim(), selectedColor, selectedEmoji, phoneState.trim())
+                        onUpdateMember?.invoke(updated)
+                        onUpdate(nameState.trim(), selectedColor, selectedEmoji, phoneState.trim(), activeMember.photoPath)
                         saveSuccess = true
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = if (saveSuccess) GlowingEmerald else RadarCyan),

@@ -1014,7 +1014,18 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 val cleanName = updated.name.lowercase().trim()
                 prefs.edit().apply {
                     if (updated.phoneNumber.isNotBlank()) putString("phone_$cleanName", updated.phoneNumber)
-                    if (updated.photoPath.isNotBlank()) putString("photo_$cleanName", updated.photoPath)
+                    if (updated.photoPath.isNotBlank()) {
+                        putString("photo_$cleanName", updated.photoPath)
+                        putString("photo_${updated.id}", updated.photoPath)
+                    }
+                    if (updated.avatarColorHex.isNotBlank()) {
+                        putString("color_$cleanName", updated.avatarColorHex)
+                        putString("color_${updated.id}", updated.avatarColorHex)
+                    }
+                    if (updated.avatarEmoji.isNotBlank()) {
+                        putString("emoji_$cleanName", updated.avatarEmoji)
+                        putString("emoji_${updated.id}", updated.avatarEmoji)
+                    }
                     // Persist the user's chosen name so the cloud sync loop never overwrites it
                     if (updated.id != "me") putString("edited_name_${updated.id}", updated.name)
                     apply()
@@ -1029,14 +1040,14 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 myDeviceColor.value = updated.avatarColorHex
                 myDeviceEmoji.value = updated.avatarEmoji
                 myDevicePhone.value = updated.phoneNumber
-                myDevicePhotoPath.value = updated.photoPath
+                if (updated.photoPath.isNotBlank()) myDevicePhotoPath.value = updated.photoPath
                 repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
                     repository.updateMember(it.copy(
                         name = updated.name,
                         avatarColorHex = updated.avatarColorHex,
                         avatarEmoji = updated.avatarEmoji,
                         phoneNumber = updated.phoneNumber,
-                        photoPath = updated.photoPath
+                        photoPath = if (updated.photoPath.isNotBlank()) updated.photoPath else it.photoPath
                     ))
                 }
                 savePreferences()
@@ -1541,7 +1552,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         myDeviceName.value = cleanName; myDeviceColor.value = c; myDeviceEmoji.value = em; myDevicePhone.value = p
         viewModelScope.launch {
             repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let {
-                repository.updateMember(it.copy(name = cleanName, avatarColorHex = c, avatarEmoji = em, phoneNumber = p))
+                repository.updateMember(it.copy(name = cleanName, avatarColorHex = c, avatarEmoji = em, phoneNumber = p, photoPath = if (myDevicePhotoPath.value.isNotBlank()) myDevicePhotoPath.value else it.photoPath))
             }
             cloudSyncManager.syncMyProfileToCloud()
         }

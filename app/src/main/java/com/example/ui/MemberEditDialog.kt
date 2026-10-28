@@ -43,19 +43,19 @@ fun MemberEditDialog(
     onSave: (FamilyMember) -> Unit
 ) {
     val context = LocalContext.current
-    var editName by remember(member.id) { mutableStateOf(member.name) }
-    var editStatus by remember(member.id) { mutableStateOf(member.statusText) }
-    var editColorHex by remember(member.id) { mutableStateOf(member.avatarColorHex) }
-    var editEmoji by remember(member.id) { mutableStateOf(member.avatarEmoji) }
-    var editPhone by remember(member.id) { mutableStateOf(member.phoneNumber) }
-    var editPhotoPath by remember(member.id) { mutableStateOf(member.photoPath) }
-    var cropZoom by remember(member.id) { mutableStateOf(1.0f) }
-    var rotationAngle by remember(member.id) { mutableStateOf(0f) }
-    var rawPhotoPath by remember(member.id) { mutableStateOf(member.photoPath) }
-    var panXFraction by remember(member.id) { mutableStateOf(0f) }
-    var panYFraction by remember(member.id) { mutableStateOf(0f) }
+    var editName by remember(member.id, member.name) { mutableStateOf(member.name) }
+    var editStatus by remember(member.id, member.statusText) { mutableStateOf(member.statusText) }
+    var editColorHex by remember(member.id, member.avatarColorHex) { mutableStateOf(member.avatarColorHex) }
+    var editEmoji by remember(member.id, member.avatarEmoji) { mutableStateOf(member.avatarEmoji) }
+    var editPhone by remember(member.id, member.phoneNumber) { mutableStateOf(member.phoneNumber) }
+    var editPhotoPath by remember(member.id, member.photoPath) { mutableStateOf(member.photoPath) }
+    var cropZoom by remember(member.id, member.photoPath) { mutableStateOf(1.0f) }
+    var rotationAngle by remember(member.id, member.photoPath) { mutableStateOf(0f) }
+    var rawPhotoPath by remember(member.id, member.photoPath) { mutableStateOf(member.photoPath) }
+    var panXFraction by remember(member.id, member.photoPath) { mutableStateOf(0f) }
+    var panYFraction by remember(member.id, member.photoPath) { mutableStateOf(0f) }
 
-    val colorsList = listOf("#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#FFEA00", "#E040FB", "#00FF87")
+    val colorsList = listOf("#0061A4", "#AA22FF", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#E040FB")
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -381,7 +381,7 @@ fun MemberEditDialog(
                         var finalPhotoPath = editPhotoPath
                         
                         val hasNewPhotoSelected = rawPhotoPath.isNotEmpty() && rawPhotoPath != member.photoPath
-                        val hasCropOrRotationApplied = cropZoom != 1.0f || rotationAngle != 0f
+                        val hasCropOrRotationApplied = cropZoom != 1.0f || rotationAngle != 0f || panXFraction != 0f || panYFraction != 0f
                         
                         if (rawPhotoPath.isNotEmpty() && (hasNewPhotoSelected || hasCropOrRotationApplied || panXFraction != 0f || panYFraction != 0f)) {
                             val processedFile = saveProcessedProfileImage(context, rawPhotoPath, cropZoom, rotationAngle, panXFraction, panYFraction)
@@ -394,7 +394,7 @@ fun MemberEditDialog(
                                     } catch (e: Exception) {}
                                 }
                                 
-                                if (member.photoPath.isNotEmpty() && member.photoPath != rawPhotoPath) {
+                                if (member.photoPath.isNotEmpty() && member.photoPath != finalPhotoPath) {
                                     try {
                                         File(member.photoPath).delete()
                                     } catch (e: Exception) {}

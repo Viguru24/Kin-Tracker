@@ -1008,8 +1008,8 @@ fun MainScreen(
                             myDeviceColorHex = myDeviceColor,
                             myDeviceEmoji = myDeviceEmoji,
                             myDevicePhone = myDevicePhone,
-                            onUpdateProfile = { name, color, emoji, phone ->
-                                viewModel.toggleCloudSync(isCloudSyncEnabled, groupSyncToken, name, color, emoji, phone)
+                            onUpdateProfile = { name, color, emoji, phone, photoPath ->
+                                viewModel.updateMyDeviceProfile(name, color, emoji, phone, photoPath)
                             },
                             ghostModeExpiryTime = ghostModeExpiryTime,
                             onToggleGhostMode = { enabled -> viewModel.toggleGhostMode(enabled) },

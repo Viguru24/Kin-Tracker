@@ -784,13 +784,20 @@ class CloudSyncManager(
                     else -> ""
                 }
                 val resolvedEmoji = com.example.data.IdentityUtils.sanitizeAvatarEmoji(rawEmoji, resolvedName, cloudM.id)
+                val locallyEditedEmoji = contactsPrefs.getString("emoji_${cloudM.id}", "")?.takeIf { it.isNotBlank() }
+                    ?: contactsPrefs.getString("emoji_$cleanKey", "")?.takeIf { it.isNotBlank() }
+                val finalEmoji = locallyEditedEmoji ?: resolvedEmoji
+
+                val locallyEditedColor = contactsPrefs.getString("color_${cloudM.id}", "")?.takeIf { it.isNotBlank() }
+                    ?: contactsPrefs.getString("color_$cleanKey", "")?.takeIf { it.isNotBlank() }
+                val resolvedColor = locallyEditedColor ?: cloudM.avatarColorHex.takeIf { it.isNotBlank() } ?: matchingLocal?.avatarColorHex ?: "#0061A4"
 
                 val mappedLocal = FamilyMember(
-                    id = cloudM.id, name = resolvedName, avatarColorHex = cloudM.avatarColorHex,
+                    id = cloudM.id, name = resolvedName, avatarColorHex = resolvedColor,
                     x = finalX, y = finalY, batteryPercentage = cloudM.batteryPercentage,
                     isCharging = cloudM.isCharging, speedMph = finalSpeedMph,
                     statusText = finalStatus, isComingHome = finalComingHome,
-                    etaMinutes = finalEta, avatarEmoji = resolvedEmoji,
+                    etaMinutes = finalEta, avatarEmoji = finalEmoji,
                     phoneNumber = if (matchingLocal?.phoneNumber?.isNotBlank() == true) matchingLocal.phoneNumber else resolvedPhone,
                     photoPath = if (matchingLocal?.photoPath?.isNotBlank() == true) matchingLocal.photoPath else resolvedPhoto,
                     lastActive = targetLastActive,
@@ -867,7 +874,7 @@ class CloudSyncManager(
             val current = repository.getFamilyMembersOnce()
             val me = current.firstOrNull { it.id == "me" }
             if (me != null) {
-                repository.updateMember(me.copy(name = myName.value, avatarColorHex = myColor.value, avatarEmoji = myEmoji.value, phoneNumber = myPhone.value))
+                repository.updateMember(me.copy(name = myName.value, avatarColorHex = myColor.value, avatarEmoji = myEmoji.value, phoneNumber = myPhone.value, photoPath = me.photoPath))
             }
             savePreferences()
 

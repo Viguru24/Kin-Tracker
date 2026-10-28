@@ -475,7 +475,7 @@ object BackgroundSyncProcessor {
             cloudService.updateGroupData(token, requestBody)
 
             // 6. Ingest incoming circle members and evaluate background geofence arrival/departure alerts
-            val contactsPrefs = context.getSharedPreferences("circle_contacts_prefs", Context.MODE_PRIVATE)
+            val contactsPrefs = context.getSharedPreferences("kintracker_contacts", Context.MODE_PRIVATE)
             val existingLocal = repository.getFamilyMembersOnce()
             val evaluatedMembers = mutableListOf<FamilyMember>()
 
@@ -565,10 +565,22 @@ object BackgroundSyncProcessor {
                     else -> matchingLocal?.locationSince ?: cloudM.locationSince
                 }
 
+                val locallyEditedColor = contactsPrefs.getString("color_${cloudM.id}", "")?.takeIf { it.isNotBlank() }
+                    ?: contactsPrefs.getString("color_$cleanKey", "")?.takeIf { it.isNotBlank() }
+                val resolvedColor = locallyEditedColor ?: cloudM.avatarColorHex.takeIf { it.isNotBlank() } ?: matchingLocal?.avatarColorHex ?: "#0061A4"
+
+                val locallyEditedEmoji = contactsPrefs.getString("emoji_${cloudM.id}", "")?.takeIf { it.isNotBlank() }
+                    ?: contactsPrefs.getString("emoji_$cleanKey", "")?.takeIf { it.isNotBlank() }
+                val resolvedEmoji = locallyEditedEmoji ?: com.example.data.IdentityUtils.sanitizeAvatarEmoji(cloudM.avatarEmoji, resolvedName, cloudM.id)
+
+                val locallyEditedPhoto = contactsPrefs.getString("photo_${cloudM.id}", "")?.takeIf { it.isNotBlank() }
+                    ?: contactsPrefs.getString("photo_$cleanKey", "")?.takeIf { it.isNotBlank() }
+                val resolvedPhoto = matchingLocal?.photoPath?.takeIf { it.isNotBlank() } ?: locallyEditedPhoto ?: ""
+
                 val mappedMember = FamilyMember(
                     id = cloudM.id,
                     name = resolvedName,
-                    avatarColorHex = cloudM.avatarColorHex,
+                    avatarColorHex = resolvedColor,
                     x = finalX,
                     y = finalY,
                     batteryPercentage = cloudM.batteryPercentage,
@@ -577,9 +589,9 @@ object BackgroundSyncProcessor {
                     statusText = finalStatus,
                     isComingHome = if (isMemberLocPaused || isStationaryInBarrier) false else cloudM.isComingHome,
                     etaMinutes = if (isMemberLocPaused || isStationaryInBarrier) 0 else cloudM.etaMinutes,
-                    avatarEmoji = com.example.data.IdentityUtils.sanitizeAvatarEmoji(cloudM.avatarEmoji, resolvedName, cloudM.id),
+                    avatarEmoji = resolvedEmoji,
                     phoneNumber = matchingLocal?.phoneNumber ?: "",
-                    photoPath = matchingLocal?.photoPath ?: "",
+                    photoPath = resolvedPhoto,
                     lastActive = effLastActive,
                     locationSince = finalLocationSince,
                     isLocationPaused = isMemberLocPaused
