@@ -1729,8 +1729,8 @@ fun RadarMap(
                                             modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally
                                         ) {
-                                            Text("Harsh Brakes", fontSize = 9.sp, color = Color(0xFFFFAB91))
-                                            Text("${trip.harshBrakingCount}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252))
+                                            Text("Harsh Brakes", fontSize = 9.sp, color = Color(0xFFFFAB91), maxLines = 1, softWrap = false)
+                                            Text("${trip.harshBrakingCount}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252), maxLines = 1, softWrap = false)
                                         }
                                     }
                                 }

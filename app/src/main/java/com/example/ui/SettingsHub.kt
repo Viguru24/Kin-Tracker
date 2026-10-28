@@ -1464,7 +1464,8 @@ private fun SystemTabContent(
                                 fontSize = 11.sp,
                                 color = SecondarySlate,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                         }
                     }
@@ -1535,17 +1536,38 @@ private fun SystemTabContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text("Activity History Logs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${activityLogs.size} recorded events", fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("📋", fontSize = 15.sp)
+                        Text(
+                            text = "Notification & Movement Logs",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        text = "${activityLogs.size} events recorded • Viewable via 🔔 on map",
+                        fontSize = 11.sp,
+                        color = SecondarySlate,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
 
-                OutlinedButton(
-                    onClick = onClearLogs,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text("Clear", fontSize = 11.sp, color = ErrorRed, maxLines = 1, softWrap = false)
+                if (activityLogs.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = onClearLogs,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp).testTag("clear_logs_btn")
+                    ) {
+                        Text("Clear", fontSize = 11.sp, color = ErrorRed, maxLines = 1, softWrap = false)
+                    }
                 }
             }
         }
