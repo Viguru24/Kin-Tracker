@@ -174,4 +174,75 @@ describe('Server TripTransitEngine', () => {
         assert.strictEqual(step3.alertEvent.type, 'ARRIVAL');
         assert.ok(step3.alertEvent.message.includes('arrived at Home'));
     });
+    it('should reset locationSince when relocating from Home to School and not leak 18h dwell time', () => {
+        const storedAtHome = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: home.lng,
+            y: home.lat,
+            speedMph: 0.0,
+            transitMode: 'STATIONARY',
+            lastStationaryPlace: 'the house',
+            locationSince: Date.now() - (18 * 3600 * 1000) // 18 hours ago
+        };
+        const incomingAtSchool = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            speedMph: 0.0,
+            statusText: 'Live GPS'
+        };
+        const result = enrichMemberState('token1', 'device_annette', incomingAtSchool, storedAtHome, home, [woodcoteSchool]);
+        assert.strictEqual(result.statusText, 'At Woodcote High School');
+        assert.ok(result.locationSince > Date.now() - 5000, 'locationSince must be fresh upon arrival, not 18 hours ago');
+        assert.notStrictEqual(result.locationSince, storedAtHome.locationSince);
+    });
+
+    it('should clear locationSince to 0 while actively moving', () => {
+        const stored = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: -0.1400,
+            y: 51.3300,
+            speedMph: 0.0,
+            transitMode: 'STATIONARY',
+            locationSince: Date.now() - 3600000
+        };
+        const incomingMoving = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: -0.1300,
+            y: 51.3298,
+            speedMph: 28.0,
+            statusText: 'Driving'
+        };
+        const result = enrichMemberState('token1', 'device_annette', incomingMoving, stored, home, [woodcoteSchool]);
+        assert.strictEqual(result.transitMode, 'DRIVING');
+        assert.strictEqual(result.locationSince, 0, 'locationSince must be 0 while moving');
+    });
+
+    it('should preserve locationSince when stationary at the same place', () => {
+        const arrivalTime = Date.now() - (2 * 3600 * 1000); // 2 hours ago
+        const storedAtSchool = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            speedMph: 0.0,
+            transitMode: 'STATIONARY',
+            lastStationaryPlace: 'Woodcote High School',
+            locationSince: arrivalTime
+        };
+        const incomingStillAtSchool = {
+            id: 'device_annette',
+            name: 'Annette',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            speedMph: 0.0,
+            statusText: 'At Woodcote High School'
+        };
+        const result = enrichMemberState('token1', 'device_annette', incomingStillAtSchool, storedAtSchool, home, [woodcoteSchool]);
+        assert.strictEqual(result.locationSince, arrivalTime, 'locationSince must be preserved while staying at the same place');
+    });
 });

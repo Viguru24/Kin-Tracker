@@ -202,6 +202,16 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
             out.lastStationaryLat = home.lat;
             out.lastStationaryLng = home.lng;
             out.transitMode = 'STATIONARY';
+
+            const now = Date.now();
+            const wasAtHome = stored && stored.lastStationaryPlace === 'the house' && stored.transitMode === 'STATIONARY';
+            if (wasAtHome && stored.locationSince > 0) {
+                out.locationSince = stored.locationSince;
+            } else if (incoming.locationSince > 0 && incoming.locationSince <= now && (!stored?.lastActive || incoming.locationSince >= stored.lastActive - 120000)) {
+                out.locationSince = incoming.locationSince;
+            } else {
+                out.locationSince = now;
+            }
             return out;
         }
     }
@@ -219,6 +229,16 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
             out.lastStationaryLat = z.latitude;
             out.lastStationaryLng = z.longitude;
             out.transitMode = 'STATIONARY';
+
+            const now = Date.now();
+            const wasAtThisZone = stored && stored.lastStationaryPlace === z.name && stored.transitMode === 'STATIONARY';
+            if (wasAtThisZone && stored.locationSince > 0) {
+                out.locationSince = stored.locationSince;
+            } else if (incoming.locationSince > 0 && incoming.locationSince <= now && (!stored?.lastActive || incoming.locationSince >= stored.lastActive - 120000)) {
+                out.locationSince = incoming.locationSince;
+            } else {
+                out.locationSince = now;
+            }
             return out;
         }
     }
@@ -239,8 +259,26 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
         }
         out.lastStationaryLat = lat;
         out.lastStationaryLng = lng;
+        out.transitMode = 'STATIONARY';
+
+        const now = Date.now();
+        const prevStationaryDistM = stored?.lastStationaryLat && stored?.lastStationaryLng
+            ? distMeters(lat, lng, stored.lastStationaryLat, stored.lastStationaryLng)
+            : movedM;
+        const wasStationaryNearby = stored && stored.transitMode === 'STATIONARY' && prevStationaryDistM <= 150;
+
+        if (wasStationaryNearby && stored.locationSince > 0) {
+            out.locationSince = stored.locationSince;
+        } else if (incoming.locationSince > 0 && incoming.locationSince <= now && (!stored?.lastActive || incoming.locationSince >= stored.lastActive - 120000)) {
+            out.locationSince = incoming.locationSince;
+        } else {
+            out.locationSince = now;
+        }
         return out;
     }
+
+    // Member is actively in transit (Walking, Cycling, Driving, Train) -> stationary dwell timer resets to 0
+    out.locationSince = 0;
 
     // Determine Destination
     const isTrain = (transitMode === 'TRAIN');

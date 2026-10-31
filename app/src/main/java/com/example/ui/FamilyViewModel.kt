@@ -1439,7 +1439,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 0L
             } else {
                 if (isAtHome || isAtSafeZone) {
-                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20) {
+                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20 && anchorLat != 0.0) {
                         savedLocationSince
                     } else {
                         prefs.edit()

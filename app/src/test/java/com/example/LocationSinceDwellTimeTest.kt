@@ -53,4 +53,24 @@ class LocationSinceDwellTimeTest {
         val drivingBadge = formatTransitBadge(30.0, "Driving", tenHoursAgo)
         assertEquals("🚗 30 mph", drivingBadge)
     }
+    @Test
+    fun testTwoHourDwellDoesNotLeakEighteenHours() {
+        val now = System.currentTimeMillis()
+        val twoHoursAgo = now - (2L * 3600 * 1000L)
+        val eighteenHoursAgo = now - (18L * 3600 * 1000L)
+
+        val twoHourBadge = formatTransitBadge(0.0, "At Woodcote High School", twoHoursAgo)
+        val eighteenHourBadge = formatTransitBadge(0.0, "At Woodcote High School", eighteenHoursAgo)
+
+        assertTrue(twoHourBadge.contains("2h"))
+        assertTrue(!twoHourBadge.contains("18h"))
+        assertTrue(eighteenHourBadge.contains("18h"))
+        assertTrue(twoHourBadge != eighteenHourBadge)
+    }
+
+    @Test
+    fun testStationaryWithZeroLocationSinceShowsNoBadge() {
+        val badge = formatTransitBadge(0.0, "Stationary", 0L)
+        assertEquals("", badge)
+    }
 }

@@ -255,7 +255,7 @@ object BackgroundSyncProcessor {
                 0L
             } else {
                 if (isAtHome || isAtSafeZone) {
-                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20) {
+                    if (savedLocationSince > 0L && distFromAnchorKm <= 0.20 && anchorLat != 0.0) {
                         savedLocationSince
                     } else {
                         prefs.edit()
@@ -556,13 +556,31 @@ object BackgroundSyncProcessor {
                 }
                 val finalSpeedMph = if (isMemberLocPaused || isStationaryInBarrier) 0.0 else cloudM.speedMph
                 val isMoving = if (isStationaryInBarrier) false else (finalSpeedMph >= 1.2)
+
+                val physicalDistKm = if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && effX != 0.0 && effY != 0.0) {
+                    Math.hypot((matchingLocal.x - effX) * 111.0 * Math.cos(Math.toRadians(effY)), (matchingLocal.y - effY) * 111.0)
+                } else 0.0
+
+                val wasMemberAtThisSafeZone = matchedSafeZone != null && matchingLocal?.statusText?.contains("At ${matchedSafeZone.name}", ignoreCase = true) == true
+                val isSamePlace = (isMemberAtHome && wasMemberAtHome) || (isMemberAtSafeZone && wasMemberAtThisSafeZone)
+                val hasRelocated = !isSamePlace || physicalDistKm > 0.15
+
+                val now = System.currentTimeMillis()
                 val finalLocationSince = if (isMoving) {
                     0L
-                } else when {
-                    isStationaryInBarrier && matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
-                    cloudM.locationSince > 0L && cloudM.locationSince <= System.currentTimeMillis() -> cloudM.locationSince
-                    isStationaryInBarrier -> System.currentTimeMillis()
-                    else -> matchingLocal?.locationSince ?: cloudM.locationSince
+                } else if (hasRelocated) {
+                    if (cloudM.locationSince > 0L && cloudM.locationSince <= now &&
+                        (matchingLocal == null || matchingLocal.lastActive <= 0L || cloudM.locationSince >= matchingLocal.lastActive - 120_000L)) {
+                        cloudM.locationSince
+                    } else {
+                        now
+                    }
+                } else {
+                    when {
+                        matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
+                        cloudM.locationSince > 0L && cloudM.locationSince <= now -> cloudM.locationSince
+                        else -> now
+                    }
                 }
 
                 val locallyEditedColor = contactsPrefs.getString("color_${cloudM.id}", "")?.takeIf { it.isNotBlank() }

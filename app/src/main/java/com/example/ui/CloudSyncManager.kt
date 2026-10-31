@@ -675,21 +675,28 @@ class CloudSyncManager(
                 val isStationaryInBarrier = (isMemberAtHome || isMemberAtSafeZone) && cloudM.speedMph < 3.5
 
                 // Compute speed and movement:
-                // When stationary inside Home or a SafeZone, matchingLocal.x/y is snapped to the zone pin while
-                // cloudM.x/y may be raw classroom GPS (e.g. 62m away). Never treat that pin-to-classroom offset as movement!
+                // Only suppress pin-to-classroom offset when confirmed inside the exact same barrier
                 val wasInBarrier = wasMemberAtHome || (matchingLocal?.statusText?.startsWith("At ", ignoreCase = true) == true)
-                val movedDistanceKm = if (isStationaryInBarrier || (wasInBarrier && cloudM.speedMph < 1.0)) {
-                    0.0
-                } else if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && targetMemberX != 0.0 && targetMemberY != 0.0) {
+                val wasMemberAtThisSafeZone = matchedSafeZone != null &&
+                    matchingLocal?.statusText?.contains("At ${matchedSafeZone.name}", ignoreCase = true) == true
+                val isSamePlace = (isMemberAtHome && wasMemberAtHome) || (isMemberAtSafeZone && wasMemberAtThisSafeZone)
+
+                val physicalDistKm = if (matchingLocal != null && matchingLocal.x != 0.0 && matchingLocal.y != 0.0 && targetMemberX != 0.0 && targetMemberY != 0.0) {
                     Math.hypot((matchingLocal.x - targetMemberX) * 111.0 * Math.cos(Math.toRadians(targetMemberY)), (matchingLocal.y - targetMemberY) * 111.0)
                 } else 0.0
+
+                val movedDistanceKm = if (isSamePlace && physicalDistKm <= 0.15) {
+                    0.0
+                } else {
+                    physicalDistKm
+                }
 
                 val timeDeltaSec = if (matchingLocal != null && matchingLocal.lastActive > 0L && targetLastActive > matchingLocal.lastActive) {
                     (targetLastActive - matchingLocal.lastActive) / 1000.0
                 } else 0.0
 
                 // When remote GPS reports 0.0 speed, derive speed only when moving significantly outside a barrier
-                val derivedSpeedMph = if (!isStationaryInBarrier && !wasInBarrier && timeDeltaSec in 1.0..300.0 && movedDistanceKm > 0.025) {
+                val derivedSpeedMph = if (!isStationaryInBarrier && !isSamePlace && timeDeltaSec in 1.0..300.0 && movedDistanceKm > 0.025) {
                     (movedDistanceKm / timeDeltaSec) * 3600.0 * 0.621371
                 } else 0.0
 
@@ -703,31 +710,33 @@ class CloudSyncManager(
                 // True movement requires sustained speed >= 1.2 mph or derived speed from rapid relocation
                 val isMoving = if (isStationaryInBarrier) false else (resolvedSpeedMph >= 1.2 || derivedSpeedMph >= 1.5)
                 val remoteSince = cloudM.locationSince
-                val wasMemberAtThisSafeZone = matchedSafeZone != null &&
-                    matchingLocal?.statusText?.contains("At ${matchedSafeZone.name}", ignoreCase = true) == true
-                val hasStatusTransitioned = (isMemberAtHome != wasMemberAtHome) ||
-                    (isMemberAtSafeZone && !wasMemberAtThisSafeZone && matchingLocal != null && matchingLocal.locationSince == 0L)
 
+                // Place or vicinity transition: arrived at new location or relocated > 150m
+                val hasStatusTransitioned = (isMemberAtHome != wasMemberAtHome) ||
+                    (isMemberAtSafeZone != wasMemberAtThisSafeZone) ||
+                    (!isMemberAtHome && !isMemberAtSafeZone && wasInBarrier) ||
+                    (physicalDistKm > 0.15)
 
                 val locationSince = if (isMoving) {
                     0L // Moving/traveling: reset stationary timer
                 } else {
                     val now = System.currentTimeMillis()
                     when {
-                        // 1. If already locked at this SafeZone or Home with a valid local arrival timestamp, keep it stable
-                        (wasMemberAtThisSafeZone || (isMemberAtHome && wasMemberAtHome)) && matchingLocal != null && matchingLocal.locationSince > 0L -> {
+                        // 1. If still at the SAME place/SafeZone/Home without having relocated, keep existing arrival timestamp
+                        isSamePlace && !hasStatusTransitioned && matchingLocal != null && matchingLocal.locationSince > 0L -> {
                             matchingLocal.locationSince
                         }
-                        // 2. If remote provided a valid arrival timestamp that is consistent with the current location:
-                        remoteSince > 0L && remoteSince <= now && !(hasStatusTransitioned && (now - remoteSince) > 2 * 3600 * 1000L) && !(movedDistanceKm > 0.2 && (now - remoteSince) > 2 * 3600 * 1000L) -> {
+                        // 2. If remote provided a valid arrival timestamp that is fresh and consistent with arriving at this new location:
+                        remoteSince > 0L && remoteSince <= now &&
+                            (matchingLocal == null || matchingLocal.lastActive <= 0L || remoteSince >= matchingLocal.lastActive - 120_000L || !hasStatusTransitioned) -> {
                             remoteSince
                         }
-                        // 3. Member recently relocated (> 100m) or transitioned status: record fresh arrival at new location
-                        movedDistanceKm > 0.10 || hasStatusTransitioned -> {
+                        // 3. Member has relocated or transitioned to a new place: record fresh arrival at new location
+                        hasStatusTransitioned || physicalDistKm > 0.15 -> {
                             now
                         }
-                        // 4. If previously recorded stationary timestamp exists and member hasn't moved away, keep it!
-                        matchingLocal != null && matchingLocal.locationSince > 0L && (isMemberAtHome || isMemberAtSafeZone || movedDistanceKm <= 0.08) -> {
+                        // 4. Fallback if still stationary in same vicinity (<= 80m)
+                        matchingLocal != null && matchingLocal.locationSince > 0L && physicalDistKm <= 0.08 -> {
                             matchingLocal.locationSince
                         }
                         else -> now
