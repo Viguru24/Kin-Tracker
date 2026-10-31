@@ -569,16 +569,16 @@ object BackgroundSyncProcessor {
                 val finalLocationSince = if (isMoving) {
                     0L
                 } else if (hasRelocated) {
-                    if (cloudM.locationSince > 0L && cloudM.locationSince <= now &&
+                    if (cloudM.locationSince > 0L && cloudM.locationSince <= now + 60_000L &&
                         (matchingLocal == null || matchingLocal.lastActive <= 0L || cloudM.locationSince >= matchingLocal.lastActive - 120_000L)) {
-                        cloudM.locationSince
+                        minOf(cloudM.locationSince, now)
                     } else {
                         now
                     }
                 } else {
                     when {
                         matchingLocal != null && matchingLocal.locationSince > 0L -> matchingLocal.locationSince
-                        cloudM.locationSince > 0L && cloudM.locationSince <= now -> cloudM.locationSince
+                        cloudM.locationSince > 0L && cloudM.locationSince <= now + 60_000L -> minOf(cloudM.locationSince, now)
                         else -> now
                     }
                 }

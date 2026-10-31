@@ -1074,6 +1074,9 @@
 
             const relativeTime = getRelativeTime(m.lastActive);
             const isRinging = isAlarm;
+            const dwellStr = (m.locationSince && Number(m.locationSince) > 0 && Number(m.speedMph || 0) < 1.0 && !m.isLocationPaused)
+                ? formatDwellTime(m.locationSince)
+                : '';
 
             card.innerHTML = `
                 <div class="member-card-content">
@@ -1086,9 +1089,10 @@
                             <div class="member-status-line">
                                 <span class="member-badge ${badgeClass}">${m.statusText || 'Active'}</span>
                                 ${m.speedMph > 2 ? `<span>${m.speedMph} mph</span>` : ''}
+                                ${dwellStr ? `<span class="member-dwell-badge" style="color: #00ff88; font-size: 11px; margin-left: 6px; font-weight: 500;">📍 here ${dwellStr}</span>` : ''}
                             </div>
                         </div>
-                    </div>
+                    </div>`;
                     <div class="member-actions-col">
                         <button class="btn-ring-phone ${isRinging ? 'ringing' : ''}" title="Ring ${m.name}'s phone loudly">
                             <span>${isRinging ? '🚨' : '🔔'}</span>
@@ -1117,6 +1121,18 @@
             card.addEventListener('click', () => openMemberControlModal(m));
             el.membersList.appendChild(card);
         });
+    }
+
+    function formatDwellTime(sinceMs) {
+        if (!sinceMs || sinceMs <= 0) return '';
+        const diffMs = Date.now() - Number(sinceMs);
+        if (diffMs < 60000) return '< 1m';
+        const mins = Math.floor(diffMs / 60000);
+        const hours = Math.floor(mins / 60);
+        const days = Math.floor(hours / 24);
+        if (days > 0) return `${days}d ${hours % 24}h`;
+        if (hours > 0) return `${hours}h ${mins % 60}m`;
+        return `${mins}m`;
     }
 
     function getRelativeTime(timestamp) {

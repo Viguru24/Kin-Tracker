@@ -727,9 +727,9 @@ class CloudSyncManager(
                             matchingLocal.locationSince
                         }
                         // 2. If remote provided a valid arrival timestamp that is fresh and consistent with arriving at this new location:
-                        remoteSince > 0L && remoteSince <= now &&
+                        remoteSince > 0L && remoteSince <= now + 60_000L &&
                             (matchingLocal == null || matchingLocal.lastActive <= 0L || remoteSince >= matchingLocal.lastActive - 120_000L || !hasStatusTransitioned) -> {
-                            remoteSince
+                            minOf(remoteSince, now)
                         }
                         // 3. Member has relocated or transitioned to a new place: record fresh arrival at new location
                         hasStatusTransitioned || physicalDistKm > 0.15 -> {

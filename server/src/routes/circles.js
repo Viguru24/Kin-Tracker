@@ -228,7 +228,8 @@ router.post('/:circleId/location', (req, res) => {
             statusText,
             isComingHome,
             etaMinutes,
-            isLocationPaused
+            isLocationPaused,
+            locationSince
         } = req.body;
 
         if (!memberId) {
@@ -259,7 +260,8 @@ router.post('/:circleId/location', (req, res) => {
             isComingHome: isComingHome !== undefined ? Boolean(isComingHome) : false,
             etaMinutes: etaMinutes !== undefined ? Number(etaMinutes) : 0,
             lastActive: Date.now(),
-            isLocationPaused: isLocationPaused !== undefined ? Boolean(isLocationPaused) : false
+            isLocationPaused: isLocationPaused !== undefined ? Boolean(isLocationPaused) : false,
+            locationSince: locationSince !== undefined ? Number(locationSince) : (existingMember?.locationSince || 0)
         };
 
         db.saveMember(updatedMember);
