@@ -8,15 +8,25 @@
 <br/>
 
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-00C853?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Privacy First](https://img.shields.io/badge/Privacy-100%25%20No%20Data%20Brokers-00ff88?style=for-the-badge&logo=shield)](https://github.com/Viguru24/Kin-Tracker)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![Latest Release](https://img.shields.io/badge/Release-v2.8.1_Latest-10B981?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
+
+<br/>
+
+<p align="center">
+  <a href="https://github.com/Viguru24/Kin-Tracker/releases/download/v2.8.1/KinTracker-v2.8.1.apk">
+    <img src="https://img.shields.io/badge/📥_Download_APK-v2.8.1_Stable-00E676?style=for-the-badge&logo=android&logoColor=black" alt="Download APK" height="42" />
+  </a>
+</p>
 
 <p align="center">
   <a href="#-why-kin-tracker">🌟 <b>Why Kin-Tracker</b></a> •
   <a href="#-feature-comparison">📊 <b>Comparison</b></a> •
   <a href="#-key-features">🚀 <b>Features</b></a> •
+  <a href="#-download--installation">📥 <b>Download & Install</b></a> •
   <a href="#-tech-stack--architecture">🛠️ <b>Tech Stack</b></a> •
   <a href="#-the-ecosystem">🌟 <b>Ecosystem</b></a>
 </p>
@@ -77,7 +87,29 @@ Commercial family trackers (like Life360) have faced severe backlash for selling
 
 ---
 
-## 📥 Build & Installation
+## 📥 Download & Installation
+
+### Option 1: Direct APK Download (Android Phones)
+
+Download the pre-compiled Android package directly to your phone:
+
+<div align="center">
+
+[![Download Kin-Tracker APK](https://img.shields.io/badge/Download-KinTracker_APK_(v2.8.1)-00E676?style=for-the-badge&logo=android&logoColor=black)](https://github.com/Viguru24/Kin-Tracker/releases/download/v2.8.1/KinTracker-v2.8.1.apk)
+[![GitHub Releases](https://img.shields.io/badge/All_Releases-GitHub-27272a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases)
+
+</div>
+
+1. Tap **Download APK** above on your Android phone (Android 8.0 Oreo or newer).
+2. Open the downloaded `.apk` file and tap **Install** (allow *"Install unknown apps"* if prompted by your browser/file manager).
+3. Open **Kin-Tracker**, select your name and avatar emoji, and either:
+   - **Create a New Circle:** Generates your private invite code to share with family members.
+   - **Join an Existing Circle:** Enter the 6-character circle code from your family.
+4. *(Optional for Self-Hosters)* Tap the **Server URL** button on the setup screen or in **Settings** to route all traffic to your own private sovereign VPS.
+
+---
+
+### Option 2: Build From Source (Developers)
 
 ### Prerequisites
 - Android Studio Ladybug (or newer)
