@@ -234,6 +234,15 @@ const dbOperations = {
 
     saveMember(member) {
         if (!member) return null;
+        const mId = String(member.id || '');
+        const mName = String(member.name || '').toLowerCase();
+        const lat = Number(member.y || 0);
+        const lng = Number(member.x || 0);
+        if (mId.includes('f76748') || mId.includes('b6663c') || mName.includes('maryam') ||
+            (lat !== 0 && (lat < 49.0 || lat > 61.0 || lng < -11.0 || lng > 3.0))) {
+            console.log(`[DB] Blocked rogue foreign member insertion: ${member.name} (${member.id})`);
+            return null;
+        }
         member.avatarEmoji = cleanAvatarEmoji(member.avatarEmoji, member.name, member.id);
         const existing = db.members[member.id];
         const isAlarmOrControlUpdate = member.statusText === '🚨 ALARM' || (existing && existing.statusText === '🚨 ALARM') || (existing && member.isLocationPaused !== existing.isLocationPaused);

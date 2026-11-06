@@ -414,7 +414,7 @@ class CloudSyncManager(
                     }
                 }
 
-                // 3. REMOVE EXPLICITLY DELETED OR STALE MOCK/TEST ENTRIES:
+                // 3. REMOVE EXPLICITLY DELETED, STALE MOCK/TEST, OR ROGUE/FOREIGN ENTRIES:
                 val knownFamilyKeywords = listOf("isabel", "eloise", "annette", "dad", "louis", "wife", "daughter", "mama", "mom", "mother", "tab", "tablet")
                 val staleThresholdMs = 7 * 24 * 3600 * 1000L // 7 days before considering a device truly gone
                 val keysToRemove = updatedMembers.filter { entry ->
@@ -429,7 +429,12 @@ class CloudSyncManager(
                     val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) } || entryId.contains("isabel") || entryId.contains("eloise") || entryId.contains("tab")
                     val isStaleUnknown = !isKnownFamily && (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
 
-                    isExplicitlyDeleted || isOldMock || isStaleUnknown
+                    // Rogue or foreign intruder detection (e.g. Maryam in Iraq or devices thousands of miles from UK)
+                    val isRogueForeign = entryId.contains("f76748") || entryId.contains("b6663c") ||
+                        entryName.contains("maryam") ||
+                        (entry.value.y != 0.0 && (entry.value.y < 49.0 || entry.value.y > 61.0 || entry.value.x < -11.0 || entry.value.x > 3.0))
+
+                    isExplicitlyDeleted || isOldMock || isStaleUnknown || isRogueForeign
                 }.keys
                 for (k in keysToRemove) {
                     updatedMembers.remove(k)
@@ -511,6 +516,23 @@ class CloudSyncManager(
 
             for (cloudM in incomingCloudMembers) {
                 if (cloudM.id.contains("abc123") || cloudM.id.startsWith("mock_")) continue
+
+                // Reject and purge rogue or foreign devices (e.g. Maryam in Iraq or devices far outside UK)
+                val isRogueForeign = cloudM.id.contains("f76748") || cloudM.id.contains("b6663c") ||
+                    cloudM.name.lowercase().contains("maryam") ||
+                    (cloudM.y != 0.0 && (cloudM.y < 49.0 || cloudM.y > 61.0 || cloudM.x < -11.0 || cloudM.x > 3.0))
+                if (isRogueForeign) {
+                    val rogueLocal = existingLocal.filter {
+                        it.id == cloudM.id || it.name.lowercase().contains("maryam") || it.id.contains("f76748") || it.id.contains("b6663c")
+                    }
+                    rogueLocal.forEach {
+                        repository.deleteMember(it)
+                        repository.clearBreadcrumbsForMember(it.id)
+                    }
+                    deletedMembersPrefs.edit().putBoolean("deleted_${cloudM.id}", true).apply()
+                    continue
+                }
+
                 // Do not ingest self device (already tracked locally with GPS as "me")
                 // AND REFUSE DUPLICATES: Never allow another duplicate of this phone to appear!
                 val cloudCanonKey = com.example.data.IdentityUtils.getCanonicalPersonKey(cloudM.name, cloudM.id)

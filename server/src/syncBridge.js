@@ -43,6 +43,14 @@ async function syncLiveProductionFamily() {
 
                             Object.values(json.members).forEach(m => {
                                 if (m && m.id) {
+                                    const mId = String(m.id || '');
+                                    const mName = String(m.name || '').toLowerCase();
+                                    const rawLat = Number(m.y || 0);
+                                    const rawLng = Number(m.x || 0);
+                                    if (mId.includes('f76748') || mId.includes('b6663c') || mName.includes('maryam') ||
+                                        (rawLat !== 0 && (rawLat < 49.0 || rawLat > 61.0 || rawLng < -11.0 || rawLng > 3.0))) {
+                                        return; // Ignore rogue foreign intruder
+                                    }
                                     const normalized = { ...m, circleId: circle.id };
                                     const lat = Number(normalized.y || 0);
                                     const lng = Number(normalized.x || 0);

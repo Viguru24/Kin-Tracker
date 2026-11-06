@@ -121,7 +121,7 @@ function saveMember(token, memberId, data) {
     return out;
 }
 
-// Load all members for a token (respecting stale rules)
+// Load all members for a token (respecting stale rules, rogue filtering, and deduplication)
 function loadAllMembers(token) {
     const prefix = safeKey(token) + '__';
     const now = Date.now();
@@ -129,17 +129,62 @@ function loadAllMembers(token) {
     if (!fs.existsSync(MEMBER_DIR)) return members;
     for (const file of fs.readdirSync(MEMBER_DIR)) {
         if (!file.startsWith(prefix) || !file.endsWith('.json')) continue;
+        const filePath = path.join(MEMBER_DIR, file);
         try {
-            const m = JSON.parse(fs.readFileSync(path.join(MEMBER_DIR, file), 'utf8'));
+            const m = JSON.parse(fs.readFileSync(filePath, 'utf8'));
             const age = now - (m.lastActive || 0);
-            if (isKnownFamily(m.name) || age < STALE_UNKNOWN_MS) {
-                members[m.id] = m;
-            } else {
-                // Clean up truly stale unknown device files
-                fs.unlink(path.join(MEMBER_DIR, file), () => {});
+            const mId = String(m.id || '');
+            const mName = String(m.name || '').toLowerCase();
+            const lat = Number(m.y || 0);
+            const lng = Number(m.x || 0);
+
+            // 1. Purge rogue foreign intruder files (e.g. Maryam in Iraq or devices far outside UK)
+            const isRogueForeign = mId.includes('f76748') || mId.includes('b6663c') || mName.includes('maryam') ||
+                (lat !== 0 && (lat < 49.0 || lat > 61.0 || lng < -11.0 || lng > 3.0));
+
+            if (isRogueForeign) {
+                console.log(`[PURGE] Unlinking rogue foreign member file: ${file}`);
+                try { fs.unlinkSync(filePath); } catch (_) {}
+                continue;
             }
+
+            // 2. Clean up stale non-family devices (> 7 days)
+            if (!isKnownFamily(m.name) && age >= STALE_UNKNOWN_MS) {
+                try { fs.unlinkSync(filePath); } catch (_) {}
+                continue;
+            }
+
+            members[m.id] = m;
         } catch (e) {}
     }
+
+    // 3. Deduplicate multiple historical devices for the same family identity
+    // (Keep the single newest device per identity and prune obsolete ghost files > 24h old)
+    const membersByPerson = {};
+    for (const [id, m] of Object.entries(members)) {
+        const name = (m.name || '').toLowerCase();
+        const isTab = name.includes('tab') || name.includes('tablet') || name.includes('ipad') || id.includes('tab');
+        let key = id;
+        if (name.includes('dad') || name.includes('louis')) key = isTab ? 'dad_tab' : 'dad_phone';
+        else if (name.includes('annette') || name.includes('mama') || name.includes('wife')) key = isTab ? 'mama_tab' : 'mama_phone';
+        else if (name.includes('eloise')) key = isTab ? 'eloise_tab' : 'eloise_phone';
+        else if (name.includes('isabel')) key = isTab ? 'isabel_tab' : 'isabel_phone';
+
+        const existing = membersByPerson[key];
+        if (!existing || (m.lastActive || 0) > (existing.lastActive || 0)) {
+            if (existing && (now - (existing.lastActive || 0)) > 24 * 3600 * 1000) {
+                const oldFile = path.join(MEMBER_DIR, `${safeKey(token)}__${safeKey(existing.id)}.json`);
+                try { fs.unlinkSync(oldFile); } catch (_) {}
+                delete members[existing.id];
+            }
+            membersByPerson[key] = m;
+        } else if ((now - (m.lastActive || 0)) > 24 * 3600 * 1000) {
+            const oldFile = path.join(MEMBER_DIR, `${safeKey(token)}__${safeKey(id)}.json`);
+            try { fs.unlinkSync(oldFile); } catch (_) {}
+            delete members[id];
+        }
+    }
+
     return members;
 }
 
@@ -201,8 +246,28 @@ function handleGet(token, res) {
     res.end(JSON.stringify(payload));
 }
 
-// Migrate existing kv-data blobs
+// Migrate existing kv-data blobs and purge rogue foreign intruder files
 function migrateExistingData() {
+    // Purge any rogue foreign intruder files and legacy Maryam records on startup
+    if (fs.existsSync(MEMBER_DIR)) {
+        for (const f of fs.readdirSync(MEMBER_DIR)) {
+            if (!f.endsWith('.json')) continue;
+            const full = path.join(MEMBER_DIR, f);
+            try {
+                const m = JSON.parse(fs.readFileSync(full, 'utf8'));
+                const lat = Number(m.y || 0);
+                const lng = Number(m.x || 0);
+                const mId = String(m.id || '');
+                const mName = String(m.name || '').toLowerCase();
+                if (mId.includes('f76748') || mId.includes('b6663c') || mName.includes('maryam') ||
+                    (lat !== 0 && (lat < 49.0 || lat > 61.0 || lng < -11.0 || lng > 3.0))) {
+                    try { fs.unlinkSync(full); } catch (_) {}
+                    console.log(`[STARTUP PURGE] Removed rogue foreign file: ${f}`);
+                }
+            } catch (_) {}
+        }
+    }
+
     if (!fs.existsSync(DATA_DIR)) return;
     for (const file of fs.readdirSync(DATA_DIR)) {
         if (!file.endsWith('.json')) continue;
