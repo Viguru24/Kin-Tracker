@@ -507,6 +507,7 @@ fun MainScreen(
     val myDeviceUUID by viewModel.myDeviceUUID.collectAsStateWithLifecycle()
     val userDisplayName by viewModel.userDisplayName.collectAsStateWithLifecycle()
     val userEmail by viewModel.userEmail.collectAsStateWithLifecycle()
+    val serverUrl by viewModel.serverUrl.collectAsStateWithLifecycle()
 
 
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1115,7 +1116,9 @@ fun MainScreen(
                                 isSettingsOpen = false
                                 showAddSafeZoneDialog = true
                             },
-                            shoppingActiveCount = shoppingItems.count { !it.isChecked }
+                            shoppingActiveCount = shoppingItems.count { !it.isChecked },
+                            serverUrl = serverUrl,
+                            onUpdateServerUrl = { newUrl -> viewModel.updateServerUrl(newUrl) }
                         )
                     }
                 }

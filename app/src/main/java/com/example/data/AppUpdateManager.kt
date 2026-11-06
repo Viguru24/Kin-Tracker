@@ -34,7 +34,7 @@ class AppUpdateManager(private val context: Context) {
         "2.6"
     }
 
-    private val baseUrl = "https://api.cosmowhisper.com/updates"
+    private val baseUrl get() = "${AppConfig.getServerUrl(context).trimEnd('/')}/updates"
     private val groupToken = "81e5632c_pin_group"
 
     /**

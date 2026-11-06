@@ -172,7 +172,7 @@ object BackgroundSyncProcessor {
         }
 
         val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
-        val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+        val myColor = prefs.getString("myDeviceColor", "#10B981") ?: "#10B981"
         val myEmoji = prefs.getString("myDeviceEmoji", "👨") ?: "👨"
         var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
         if (dUuid.isBlank()) {

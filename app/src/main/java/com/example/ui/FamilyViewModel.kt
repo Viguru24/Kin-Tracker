@@ -37,7 +37,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val activeRingingMembers = MutableStateFlow<Set<String>>(emptySet())
     val ghostModeExpiryTime = MutableStateFlow(0L)
     val myDeviceName = MutableStateFlow("Dad")
-    val myDeviceColor = MutableStateFlow("#AA22FF")
+    val myDeviceColor = MutableStateFlow("#10B981")
     val myDeviceEmoji = MutableStateFlow("👨")
     val myDevicePhone = MutableStateFlow("+447802436159")
     val myDevicePhotoPath = MutableStateFlow("")
@@ -46,6 +46,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val isSimulationModeEnabled = MutableStateFlow(false)
     val isWifeCloudSimulationEnabled = MutableStateFlow(false)
     val hasCompletedOnboarding = MutableStateFlow(false)
+    val serverUrl = MutableStateFlow(AppConfig.getServerUrl(application))
     val isCircleDigestReset = MutableStateFlow(false)
     val isVoiceAnnouncementsEnabled = MutableStateFlow(false)
     val notificationVolume = MutableStateFlow(80)
@@ -439,7 +440,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             // Pre-populate PIN 4666 circle registry so it shows up in local UI circle selection list
-            if (repository.getGroupPinMappingByPin("4666") == null) {
+            if (storedPin == "4666" && repository.getGroupPinMappingByPin("4666") == null) {
                 repository.insertGroupPinMapping(
                     GroupPinMapping(
                         pinCode = "4666",
@@ -448,7 +449,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                         creatorId = "336a12",
                         createdTimestamp = System.currentTimeMillis(),
                         isOwner = false,
-                        isActive = (storedPin == "4666" || storedPin.isBlank())
+                        isActive = (storedPin == "4666")
                     )
                 )
             }
@@ -805,11 +806,12 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
           isUserSignedIn.value = prefs.getBoolean("isUserSignedIn", true)
           userDisplayName.value = prefs.getString("userDisplayName", "") ?: ""; userEmail.value = prefs.getString("userEmail", "") ?: ""
-          myDeviceName.value = prefs.getString("myDeviceName", "Dad") ?: "Dad"; myDeviceColor.value = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
+          myDeviceName.value = prefs.getString("myDeviceName", "Dad") ?: "Dad"; myDeviceColor.value = prefs.getString("myDeviceColor", "#10B981") ?: "#10B981"
           myDeviceEmoji.value = prefs.getString("myDeviceEmoji", "👨") ?: "👨"; myDevicePhone.value = prefs.getString("myDevicePhone", "+447802436159") ?: "+447802436159"
           myDevicePhotoPath.value = prefs.getString("myDevicePhotoPath", "") ?: ""
           
-          activeGroupPinCode.value = prefs.getString("activeGroupPinCode", "4666") ?: "4666"
+          val hasSavedPrefs = prefs.contains("groupSyncToken") || prefs.contains("activeGroupPinCode")
+          activeGroupPinCode.value = if (hasSavedPrefs) (prefs.getString("activeGroupPinCode", "4666") ?: "4666") else ""
           activeGroupCreatorId.value = prefs.getString("activeGroupCreatorId", "336a12") ?: "336a12"
           
           var dUuid = prefs.getString("myDeviceUUID", "") ?: ""
@@ -827,7 +829,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
           }
           myDeviceUUID.value = dUuid
 
-          val savedToken = prefs.getString("groupSyncToken", "81e5632c_pin_group") ?: "81e5632c_pin_group"
+          val savedToken = if (hasSavedPrefs) (prefs.getString("groupSyncToken", "81e5632c_pin_group") ?: "81e5632c_pin_group") else ""
+          serverUrl.value = AppConfig.getServerUrl(getApplication())
           groupSyncToken.value = cloudSyncManager.convertToValidToken(savedToken)
 
           isCloudSyncEnabled.value = prefs.getBoolean("isCloudSyncEnabled", true); ghostModeExpiryTime.value = prefs.getLong("ghostModeExpiryTime", 0L)
@@ -1632,6 +1635,15 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         repository.getFamilyMembersOnce().firstOrNull { it.id == "me" }?.let { repository.updateMember(it.copy(name = myDeviceName.value, avatarColorHex = myDeviceColor.value)) }
         savePreferences(); cloudStatusText.value = "Live Map Connected"; _uiEvents.emit("Map sharing connected successfully!"); cloudSyncManager.startCloudSyncLoop()
     } }
+
+    fun updateServerUrl(newUrl: String) {
+        AppConfig.setServerUrl(getApplication(), newUrl)
+        serverUrl.value = AppConfig.getServerUrl(getApplication())
+        cloudSyncManager.triggerSyncNow()
+        viewModelScope.launch {
+            _uiEvents.emit("Server URL updated: ${serverUrl.value}")
+        }
+    }
 
     fun toggleWifeCloudSimulation(enabled: Boolean) {
         simulationEngine.toggleWifeCloudSimulation(enabled)

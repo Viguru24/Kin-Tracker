@@ -55,7 +55,7 @@ fun MemberEditDialog(
     var panXFraction by remember(member.id, member.photoPath) { mutableStateOf(0f) }
     var panYFraction by remember(member.id, member.photoPath) { mutableStateOf(0f) }
 
-    val colorsList = listOf("#0061A4", "#AA22FF", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#E040FB")
+    val colorsList = listOf("#0061A4", "#10B981", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#14B8A6")
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()

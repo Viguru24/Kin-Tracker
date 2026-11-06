@@ -520,7 +520,7 @@ fun RadarMap(
         "#42A5F5", // Cyan Blue
         "#FF9800", // Gold/Orange
         "#FFEA00", // Yellow-Glow
-        "#E040FB", // Hot violet
+        "#10B981", // Emerald green
         "#00FF87"  // Neon green
     )
 
@@ -1075,9 +1075,9 @@ fun RadarMap(
                 if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
                     val workCircle = Polygon(mapView).apply {
                         points = Polygon.pointsAsCircle(GeoPoint(workLat, workLng), workRadiusMeters)
-                        fillPaint.color = android.graphics.Color.parseColor("#3D5AFE") // Indigo blue
+                        fillPaint.color = android.graphics.Color.parseColor("#0284C7") // Sky/Cyan
                         fillPaint.alpha = 25
-                        outlinePaint.color = android.graphics.Color.parseColor("#536DFE")
+                        outlinePaint.color = android.graphics.Color.parseColor("#0EA5E9")
                         outlinePaint.strokeWidth = 2.0f * density
                         outlinePaint.alpha = 130
                     }
@@ -1311,7 +1311,7 @@ fun RadarMap(
                         mapView.overlays.add(tripGlow)
 
                         val isTrain = trip.transitMode.equals("TRAIN", ignoreCase = true)
-                        val tripColor = if (isTrain) android.graphics.Color.parseColor("#9C27B0") else android.graphics.Color.parseColor("#00E5FF")
+                        val tripColor = if (isTrain) android.graphics.Color.parseColor("#0D9488") else android.graphics.Color.parseColor("#00E5FF")
 
                         val tripRoute = Polyline(mapView).apply {
                             setPoints(tripPoints)

@@ -67,7 +67,8 @@ object TelemetryWebSocketManager {
         disconnect()
         activeToken = token
 
-        val wsUrl = "wss://api.cosmowhisper.com/sync/$token"
+        val baseWs = AppConfig.getWebSocketBaseUrl(context).trimEnd('/')
+        val wsUrl = "$baseWs/sync/$token"
         val request = Request.Builder().url(wsUrl).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

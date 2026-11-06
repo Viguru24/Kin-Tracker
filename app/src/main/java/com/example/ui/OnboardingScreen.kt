@@ -47,14 +47,20 @@ fun OnboardingScreen(
 
     var myName      by remember { mutableStateOf("") }
     var myEmoji     by remember { mutableStateOf("👤") }
-    var myColor     by remember { mutableStateOf("#AA22FF") }
+    var myColor     by remember { mutableStateOf("#10B981") }
     var joinToken   by remember { mutableStateOf("") }
     var chosenFlow  by remember { mutableStateOf("") } // "create" | "join"
 
     val generatedKey by viewModel.groupSyncToken.collectAsState()
     val activeGroupPinCode by viewModel.activeGroupPinCode.collectAsState()
+    val serverUrl by viewModel.serverUrl.collectAsState()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+
+    var showServerConfigDialog by remember { mutableStateOf(false) }
+    var serverUrlInput by remember(serverUrl) {
+        mutableStateOf(if (serverUrl.isBlank()) "https://api.cosmowhisper.com" else serverUrl)
+    }
 
     // Pulse animation for the logo ring
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -65,12 +71,81 @@ fun OnboardingScreen(
         ), label = "pulse_scale"
     )
 
+    if (showServerConfigDialog) {
+        AlertDialog(
+            onDismissRequest = { showServerConfigDialog = false },
+            title = {
+                Text(
+                    text = "Sovereign VPS Server",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Enter your self-hosted Kin-Tracker server base URL (e.g. https://api.cosmowhisper.com or http://192.168.1.100:3000).",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                    OutlinedTextField(
+                        value = serverUrlInput,
+                        onValueChange = { serverUrlInput = it },
+                        label = { Text("Server URL", color = Color.White.copy(alpha = 0.6f)) },
+                        placeholder = { Text("https://api.cosmowhisper.com") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF10B981),
+                            cursorColor = Color(0xFF10B981)
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("onboarding_server_url_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleaned = serverUrlInput.trim().trimEnd('/')
+                        val finalUrl = if (cleaned.isBlank()) "https://api.cosmowhisper.com" else cleaned
+                        viewModel.updateServerUrl(finalUrl)
+                        showServerConfigDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("onboarding_server_url_save_btn")
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            serverUrlInput = "https://api.cosmowhisper.com"
+                            viewModel.updateServerUrl("https://api.cosmowhisper.com")
+                            showServerConfigDialog = false
+                        }
+                    ) {
+                        Text("Reset Default", color = Color.White.copy(alpha = 0.6f))
+                    }
+                    TextButton(onClick = { showServerConfigDialog = false }) {
+                        Text("Cancel", color = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+            },
+            containerColor = Color(0xFF18181B),
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(Color(0xFF0D0D1A), Color(0xFF111128), Color(0xFF0A0A16))
+                    listOf(Color(0xFF09090B), Color(0xFF121215), Color(0xFF09090B))
                 )
             ),
         contentAlignment = Alignment.Center
@@ -103,11 +178,11 @@ fun OnboardingScreen(
                             .size((80 * pulseScale).dp)
                             .background(
                                 Brush.radialGradient(
-                                    listOf(Color(0xFF7C3AED), Color(0xFF4F46E5), Color.Transparent)
+                                    listOf(Color(0xFF10B981), Color(0xFF059669), Color.Transparent)
                                 ),
                                 CircleShape
                             )
-                            .border(2.dp, Color(0xFF7C3AED).copy(alpha = 0.6f), CircleShape),
+                            .border(2.dp, Color(0xFF10B981).copy(alpha = 0.6f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("📍", fontSize = 36.sp)
@@ -123,7 +198,7 @@ fun OnboardingScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Real-time family location sharing.\nNo subscriptions. No tracking servers.",
+                            "Real-time family location sharing.\nNo subscriptions. Sovereign VPS sync.",
                             color = Color.White.copy(alpha = 0.55f),
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
@@ -144,15 +219,15 @@ fun OnboardingScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF7C3AED),
+                            focusedBorderColor = Color(0xFF10B981),
                             unfocusedBorderColor = SlateBorder,
-                            cursorColor = Color(0xFF7C3AED),
+                            cursorColor = Color(0xFF10B981),
                             focusedContainerColor = Color.White.copy(alpha = 0.04f),
                             unfocusedContainerColor = Color.White.copy(alpha = 0.02f)
                         )
                     )
 
-                    // Emoji picker — who are you? (2 rows of 6 so it fits comfortably on every phone width)
+                    // Emoji picker — who are you?
                     Text(
                         "Choose your icon",
                         color = SecondarySlate,
@@ -176,12 +251,12 @@ fun OnboardingScreen(
                                             .size(42.dp)
                                             .clip(CircleShape)
                                             .background(
-                                                if (myEmoji == emo) Color(0xFF7C3AED).copy(alpha = 0.3f)
+                                                if (myEmoji == emo) Color(0xFF10B981).copy(alpha = 0.25f)
                                                 else Color.White.copy(alpha = 0.05f)
                                             )
                                             .border(
                                                 if (myEmoji == emo) 2.dp else 1.dp,
-                                                if (myEmoji == emo) Color(0xFF7C3AED) else SlateBorder,
+                                                if (myEmoji == emo) Color(0xFF10B981) else SlateBorder,
                                                 CircleShape
                                             )
                                             .clickable { myEmoji = emo },
@@ -194,7 +269,7 @@ fun OnboardingScreen(
                         }
                     }
 
-                    // Colour accent
+                    // Colour accent (Strict No-Purple Palette)
                     Text(
                         "Pick your map colour",
                         color = SecondarySlate,
@@ -203,8 +278,8 @@ fun OnboardingScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
                     val colourOptions = listOf(
-                        "#AA22FF", "#EC407A", "#26A69A",
-                        "#42A5F5", "#FF9800", "#00FF87"
+                        "#10B981", "#06B6D4", "#3B82F6",
+                        "#F59E0B", "#14B8A6", "#EF4444"
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -249,10 +324,27 @@ fun OnboardingScreen(
                             step = 1
                         },
                         shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                         modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_next_btn")
                     ) {
                         Text("Continue →", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    // Sovereign Server Config Shortcut
+                    TextButton(
+                        onClick = { showServerConfigDialog = true },
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        val displayHost = remember(serverUrl) {
+                            val u = if (serverUrl.isBlank()) "api.cosmowhisper.com" else serverUrl
+                            u.removePrefix("https://").removePrefix("http://").trimEnd('/')
+                        }
+                        Text(
+                            text = "⚙️ Sovereign Server: $displayHost",
+                            fontSize = 11.sp,
+                            color = Color(0xFF10B981),
+                            fontWeight = FontWeight.Medium
+                        )
                     }
 
                     Spacer(Modifier.height(16.dp))
@@ -304,8 +396,8 @@ fun OnboardingScreen(
                             }
                             .testTag("onboarding_create_btn"),
                         shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF7C3AED).copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF7C3AED))
+                        color = Color(0xFF10B981).copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF10B981))
                     ) {
                         Column(
                             modifier = Modifier.padding(20.dp),
@@ -344,9 +436,9 @@ fun OnboardingScreen(
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedTextColor = Color.White,
                                         unfocusedTextColor = Color.White,
-                                        focusedBorderColor = Color(0xFF7C3AED),
+                                        focusedBorderColor = Color(0xFF10B981),
                                         unfocusedBorderColor = SlateBorder,
-                                        cursorColor = Color(0xFF7C3AED),
+                                        cursorColor = Color(0xFF10B981),
                                         focusedContainerColor = Color.White.copy(alpha = 0.04f),
                                         unfocusedContainerColor = Color.White.copy(alpha = 0.02f)
                                     )
@@ -362,7 +454,7 @@ fun OnboardingScreen(
                                             viewModel.createGroupWithPin(groupNameInput.trim().ifBlank { "Family Circle" })
                                             step = 2
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                                         shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier.weight(1f).height(38.dp)
                                     ) {
@@ -390,8 +482,8 @@ fun OnboardingScreen(
                             }
                             .testTag("onboarding_join_btn"),
                         shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF26A69A).copy(alpha = 0.15f),
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF26A69A))
+                        color = Color(0xFF06B6D4).copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF06B6D4))
                     ) {
                         Row(
                             modifier = Modifier.padding(20.dp),
@@ -414,6 +506,23 @@ fun OnboardingScreen(
                                 )
                             }
                         }
+                    }
+
+                    // Sovereign Server Config Shortcut
+                    TextButton(
+                        onClick = { showServerConfigDialog = true },
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        val displayHost = remember(serverUrl) {
+                            val u = if (serverUrl.isBlank()) "api.cosmowhisper.com" else serverUrl
+                            u.removePrefix("https://").removePrefix("http://").trimEnd('/')
+                        }
+                        Text(
+                            text = "⚙️ Sovereign Server: $displayHost",
+                            fontSize = 11.sp,
+                            color = Color(0xFF10B981),
+                            fontWeight = FontWeight.Medium
+                        )
                     }
 
                     TextButton(onClick = { step = 0 }) {
@@ -462,7 +571,7 @@ fun OnboardingScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
                             color = Color.White.copy(alpha = 0.06f),
-                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF7C3AED).copy(alpha = 0.5f))
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF10B981).copy(alpha = 0.5f))
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -478,7 +587,7 @@ fun OnboardingScreen(
                                 )
                                 Text(
                                     activeGroupPinCode.ifBlank { AppConfig.DEFAULT_CIRCLE_INVITE_CODE },
-                                    color = Color(0xFFB39DDB),
+                                    color = Color(0xFF10B981),
                                     fontSize = 32.sp,
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
@@ -535,7 +644,7 @@ fun OnboardingScreen(
                                 onComplete()
                             },
                             shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_open_map_btn")
                         ) {
                             Text("Open My Map →", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -597,9 +706,9 @@ fun OnboardingScreen(
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF26A69A),
+                                focusedBorderColor = Color(0xFF10B981),
                                 unfocusedBorderColor = SlateBorder,
-                                cursorColor = Color(0xFF26A69A),
+                                cursorColor = Color(0xFF10B981),
                                 focusedContainerColor = Color.White.copy(alpha = 0.04f),
                                 unfocusedContainerColor = Color.White.copy(alpha = 0.02f)
                             )
@@ -631,7 +740,7 @@ fun OnboardingScreen(
                             enabled = canJoin,
                             shape = RoundedCornerShape(16.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF26A69A),
+                                containerColor = Color(0xFF10B981),
                                 disabledContainerColor = SlateBorder
                             ),
                             modifier = Modifier.fillMaxWidth().height(52.dp).testTag("onboarding_join_submit_btn")
@@ -660,7 +769,7 @@ fun OnboardingScreen(
                         .size(if (step == i) 22.dp else 7.dp, 7.dp)
                         .clip(RoundedCornerShape(4.dp))
                         .background(
-                            if (step >= i) Color(0xFF7C3AED) else Color.White.copy(alpha = 0.2f)
+                            if (step >= i) Color(0xFF10B981) else Color.White.copy(alpha = 0.2f)
                         )
                 )
             }

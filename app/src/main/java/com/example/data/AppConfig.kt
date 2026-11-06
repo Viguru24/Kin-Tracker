@@ -1,12 +1,63 @@
 package com.example.data
 
+import android.content.Context
+
 object AppConfig {
-    // API Sync configuration (VPS sovereign server)
-    const val API_BASE_URL = "https://api.cosmowhisper.com/"
-    const val BASE_URL = "https://api.cosmowhisper.com/sync/"
-    const val HEARTBEAT_URL = "https://api.cosmowhisper.com/sync/heartbeat"
-    const val FEEDBACK_URL = "https://api.cosmowhisper.com/sync/feedback"
-    const val AUDIO_RELAY_WS_URL = "wss://api.cosmowhisper.com/audio"
+    const val DEFAULT_SERVER_URL = "https://api.cosmowhisper.com/"
+
+    @Volatile
+    private var _cachedServerUrl: String = ""
+
+    fun getServerUrl(context: Context? = null): String {
+        if (_cachedServerUrl.isNotBlank()) return _cachedServerUrl
+        if (context != null) {
+            val prefs = context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+            val saved = prefs.getString("custom_server_url", "") ?: ""
+            if (saved.isNotBlank()) {
+                _cachedServerUrl = normalizeUrl(saved)
+                return _cachedServerUrl
+            }
+        }
+        return DEFAULT_SERVER_URL
+    }
+
+    fun setServerUrl(context: Context, url: String) {
+        val clean = if (url.isBlank()) "" else normalizeUrl(url)
+        _cachedServerUrl = clean
+        context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("custom_server_url", clean)
+            .apply()
+    }
+
+    private fun normalizeUrl(url: String): String {
+        var u = url.trim()
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+            u = "https://$u"
+        }
+        if (!u.endsWith("/")) {
+            u += "/"
+        }
+        return u
+    }
+
+    fun getWebSocketBaseUrl(context: Context? = null): String {
+        val base = getServerUrl(context).trimEnd('/')
+        return if (base.startsWith("https://")) {
+            "wss://" + base.removePrefix("https://")
+        } else if (base.startsWith("http://")) {
+            "ws://" + base.removePrefix("http://")
+        } else {
+            "wss://$base"
+        }
+    }
+
+    // Dynamic API Sync configuration (supports custom self-hosted VPS)
+    val API_BASE_URL: String get() = getServerUrl()
+    val BASE_URL: String get() = "${getServerUrl()}sync/"
+    val HEARTBEAT_URL: String get() = "${getServerUrl()}sync/heartbeat"
+    val FEEDBACK_URL: String get() = "${getServerUrl()}sync/feedback"
+    val AUDIO_RELAY_WS_URL: String get() = "${getWebSocketBaseUrl()}/audio"
     const val DEFAULT_CIRCLE_INVITE_CODE = "KT-4666"
     const val DEFAULT_GROUP_SYNC_TOKEN = "81e5632c_pin_group"
 

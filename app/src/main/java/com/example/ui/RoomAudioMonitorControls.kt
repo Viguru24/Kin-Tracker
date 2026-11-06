@@ -674,8 +674,8 @@ private fun AudioDiagnosticsPanel(
                                 unfocusedTextColor = Color(0xFF0F172A),
                                 focusedContainerColor = Color.White,
                                 unfocusedContainerColor = Color.White,
-                                cursorColor = Color(0xFF4F46E5),
-                                focusedBorderColor = Color(0xFF4F46E5),
+                                cursorColor = Color(0xFF10B981),
+                                focusedBorderColor = Color(0xFF10B981),
                                 unfocusedBorderColor = Color(0xFF94A3B8),
                                 focusedPlaceholderColor = Color(0xFF64748B),
                                 unfocusedPlaceholderColor = Color(0xFF64748B)
@@ -697,7 +697,7 @@ private fun AudioDiagnosticsPanel(
                             },
                             enabled = manualIp.trim().isNotBlank() && !isListening,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF4F46E5)
+                                containerColor = Color(0xFF10B981)
                             ),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
@@ -746,7 +746,7 @@ private fun AudioDiagnosticsPanel(
                                 text = if (isScanning) "Scanning…" else "🔍 Re-scan Wi-Fi",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4F46E5)
+                                color = Color(0xFF10B981)
                             )
                         }
                     }

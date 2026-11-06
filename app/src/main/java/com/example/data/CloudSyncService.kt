@@ -1,5 +1,6 @@
 package com.example.data
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -53,7 +54,19 @@ interface CloudSyncService {
                             .body(dummyJson.toResponseBody("application/json".toMediaTypeOrNull()))
                             .build()
                     } else {
-                        chain.proceed(chain.request())
+                        val req = chain.request()
+                        val activeServer = AppConfig.getServerUrl()
+                        val targetHttpUrl = activeServer.toHttpUrlOrNull()
+                        if (targetHttpUrl != null && (req.url.host != targetHttpUrl.host || req.url.port != targetHttpUrl.port || req.url.scheme != targetHttpUrl.scheme)) {
+                            val newUrl = req.url.newBuilder()
+                                .scheme(targetHttpUrl.scheme)
+                                .host(targetHttpUrl.host)
+                                .port(targetHttpUrl.port)
+                                .build()
+                            chain.proceed(req.newBuilder().url(newUrl).build())
+                        } else {
+                            chain.proceed(req)
+                        }
                     }
                 })
                 .connectTimeout(15, TimeUnit.SECONDS)

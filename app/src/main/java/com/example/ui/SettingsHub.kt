@@ -106,6 +106,8 @@ fun SettingsHub(
     onUpdateMember: ((FamilyMember) -> Unit)? = null,
     onOpenGoogleMaps: ((FamilyMember) -> Unit)? = null,
     onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null,
+    serverUrl: String = "",
+    onUpdateServerUrl: ((String) -> Unit)? = null,
     mapTypeMode: String = "streets",
     onSelectMapType: (String) -> Unit = {},
     onOpenCircleDigest: (() -> Unit)? = null,
@@ -233,7 +235,9 @@ fun SettingsHub(
                     activityLogs = activityLogs,
                     onClearLogs = onClearLogs,
                     onOpenFeedback = onOpenFeedback,
-                    onSelectTrip = onSelectTrip
+                    onSelectTrip = onSelectTrip,
+                    serverUrl = serverUrl,
+                    onUpdateServerUrl = onUpdateServerUrl
                 )
             }
         }
@@ -701,7 +705,7 @@ private fun ProfileTabContent(
     }
 
     val emojis = listOf("👨", "👩", "👧", "👦", "👵", "👴", "🐱", "🐶")
-    val colors = listOf("#0061A4", "#AA22FF", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#E040FB")
+    val colors = listOf("#0061A4", "#10B981", "#EC407A", "#26A69A", "#42A5F5", "#FF9800", "#00FF87", "#14B8A6")
 
     val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime
     var timeLeftString by remember { mutableStateOf("") }
@@ -1713,8 +1717,80 @@ private fun SystemTabContent(
     activityLogs: List<ActivityLog>,
     onClearLogs: () -> Unit,
     onOpenFeedback: () -> Unit,
-    onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null
+    onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null,
+    serverUrl: String = "",
+    onUpdateServerUrl: ((String) -> Unit)? = null
 ) {
+    var showServerDialog by remember { mutableStateOf(false) }
+    var currentServerInput by remember(serverUrl) { mutableStateOf(if (serverUrl.isBlank()) "https://api.cosmowhisper.com" else serverUrl) }
+
+    if (showServerDialog) {
+        AlertDialog(
+            onDismissRequest = { showServerDialog = false },
+            title = {
+                Text(
+                    text = "Sovereign VPS Server",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Enter your self-hosted Kin-Tracker server base URL (e.g. https://api.cosmowhisper.com or http://192.168.1.100:3000).",
+                        fontSize = 12.sp,
+                        color = SecondarySlate
+                    )
+                    OutlinedTextField(
+                        value = currentServerInput,
+                        onValueChange = { currentServerInput = it },
+                        label = { Text("Server URL") },
+                        placeholder = { Text("https://api.cosmowhisper.com") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GlowingEmerald,
+                            cursorColor = GlowingEmerald
+                        ),
+                        modifier = Modifier.fillMaxWidth().testTag("server_url_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleaned = currentServerInput.trim().trimEnd('/')
+                        val finalUrl = if (cleaned.isBlank()) "https://api.cosmowhisper.com" else cleaned
+                        onUpdateServerUrl?.invoke(finalUrl)
+                        showServerDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GlowingEmerald),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("server_url_save_btn")
+                ) {
+                    Text("Save", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            currentServerInput = "https://api.cosmowhisper.com"
+                            onUpdateServerUrl?.invoke("https://api.cosmowhisper.com")
+                            showServerDialog = false
+                        }
+                    ) {
+                        Text("Reset Default", color = SecondarySlate)
+                    }
+                    TextButton(onClick = { showServerDialog = false }) {
+                        Text("Cancel", color = SecondarySlate)
+                    }
+                }
+            },
+            containerColor = CosmicSlateCard,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1785,6 +1861,8 @@ private fun SystemTabContent(
             }
         }
 
+        val activeDisplayUrl = if (serverUrl.isBlank()) "https://api.cosmowhisper.com" else serverUrl
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
@@ -1804,21 +1882,18 @@ private fun SystemTabContent(
                     ) {
                         Text("🖥️", fontSize = 18.sp)
                         Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Text("Ra Sync Server", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("api.cosmowhisper.com", fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Sovereign Sync Server", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(activeDisplayUrl, fontSize = 11.sp, color = SecondarySlate, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
 
-                    Surface(color = GlowingEmerald.copy(alpha = 0.12f), shape = RoundedCornerShape(6.dp)) {
-                        Text(
-                            "ONLINE • 200 OK",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = GlowingEmerald,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
+                    OutlinedButton(
+                        onClick = { showServerDialog = true },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp).testTag("configure_server_btn")
+                    ) {
+                        Text("Configure", fontSize = 11.sp, color = GlowingEmerald, maxLines = 1, softWrap = false)
                     }
                 }
 

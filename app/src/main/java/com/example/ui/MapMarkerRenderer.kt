@@ -344,7 +344,7 @@ object MapMarkerRenderer {
             } else if (text.startsWith("🚲")) {
                 Color.parseColor("#0C4A6E") // Cyan dark
             } else if (text.startsWith("🚆")) {
-                Color.parseColor("#4A044E") // Violet dark
+                Color.parseColor("#0F766E") // Teal dark
             } else {
                 Color.parseColor("#0F172A")
             }
@@ -498,7 +498,7 @@ object MapMarkerRenderer {
                 "👣" -> Color.parseColor("#10B981") // Emerald
                 "🚗" -> Color.parseColor("#F59E0B") // Amber
                 "🚲" -> Color.parseColor("#06B6D4") // Cyan
-                "🚆" -> Color.parseColor("#A855F7") // Purple
+                "🚆" -> Color.parseColor("#14B8A6") // Teal
                 else -> Color.WHITE
             }
             style = Paint.Style.STROKE
