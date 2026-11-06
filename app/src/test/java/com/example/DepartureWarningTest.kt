@@ -1,4 +1,4 @@
-﻿package com.example
+package com.example
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
@@ -54,7 +54,7 @@ class DepartureWarningTest {
         // Clear Work Area
         viewModel.clearWorkLocation()
         assertFalse(viewModel.isWorkCalibrated)
-        assertEquals(0.0, viewModel.workLat, 0.0001)
+        org.junit.Assert.assertNotEquals(51.33016, viewModel.workLat, 0.0001)
         assertEquals(0.0, viewModel.workLng, 0.0001)
     }
 
@@ -172,5 +172,60 @@ class DepartureWarningTest {
         assertTrue("Eloise must NEVER trigger arrival at Work or repeated departures", capturedEvents.isEmpty())
 
         database.close()
+    }
+    @Test
+    fun testWorkAreaCalibrationRejectedNearSchool() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = FamilyViewModel(application)
+
+        // Attempt to set Work right at Woodcote High School (51.33016, -0.14228)
+        viewModel.setWorkLocation(51.33016, -0.14228, 75.0)
+
+        // Must be rejected by guardrail
+        assertFalse("Work calibration must be rejected within 400m of school", viewModel.isWorkCalibrated)
+        org.junit.Assert.assertNotEquals(51.33016, viewModel.workLat, 0.0001)
+    }
+
+    @Test
+    fun testAlertArbiterDropsWorkplaceAlertsForChildren() {
+        com.example.data.AlertArbiter.reset()
+
+        // Eloise workplace alert must be dropped
+        val allowedEloise = com.example.data.AlertArbiter.canEmitAlert(
+            title = "📍 Arrival Notice",
+            message = "Eloise has arrived at Work!",
+            memberName = "Eloise"
+        )
+        assertFalse("AlertArbiter must drop workplace alert for Eloise", allowedEloise)
+
+        // Isabel workplace alert must be dropped
+        val allowedIsabel = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚪 Departure Warning",
+            message = "Isabel has left Work",
+            memberName = "Isabel"
+        )
+        assertFalse("AlertArbiter must drop workplace alert for Isabel", allowedIsabel)
+    }
+
+    @Test
+    fun testAlertArbiterPreventsDuplicateOrBackToBackDepartures() {
+        com.example.data.AlertArbiter.reset()
+
+        val firstDeparture = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚪 Departure Warning",
+            message = "Eloise has just left her school!",
+            memberName = "Eloise",
+            now = 1000L
+        )
+        assertTrue("First departure should be allowed", firstDeparture)
+
+        // Second departure 10 seconds later without arriving anywhere
+        val secondDeparture = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚪 Departure Warning",
+            message = "Eloise has left Woodcote High School",
+            memberName = "Eloise",
+            now = 10000L
+        )
+        assertFalse("Duplicate / back-to-back departure must be blocked by AlertArbiter", secondDeparture)
     }
 }

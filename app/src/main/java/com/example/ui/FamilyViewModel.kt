@@ -864,6 +864,17 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val me = familyMembers.value.firstOrNull { it.id == "me" }
             if (me != null && me.x != 0.0 && me.y != 0.0) {
+                val zones = safeZones.value + listOf(com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL)
+                val nearSchoolOrHome = zones.any { z ->
+                    (z.iconName.equals("school", ignoreCase = true) || z.name.contains("school", ignoreCase = true)) &&
+                        com.example.data.GeoUtils.distanceMeters(me.y, me.x, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 200.0
+                } || (homeLat != 0.0 && com.example.data.GeoUtils.distanceMeters(me.y, me.x, homeLat, homeLng) <= (homeRadiusMeters + 150.0))
+
+                if (nearSchoolOrHome) {
+                    _uiEvents.emit("⚠️ Cannot set Work location within 400m of School or Home.")
+                    return@launch
+                }
+
                 workLat = me.y
                 workLng = me.x
                 isWorkCalibrated = true
@@ -876,6 +887,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWorkLocation(lat: Double, lng: Double, radius: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS) {
+        val zones = safeZones.value + listOf(com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL)
+        val nearSchoolOrHome = zones.any { z ->
+            (z.iconName.equals("school", ignoreCase = true) || z.name.contains("school", ignoreCase = true)) &&
+                com.example.data.GeoUtils.distanceMeters(lat, lng, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 200.0
+        } || (homeLat != 0.0 && com.example.data.GeoUtils.distanceMeters(lat, lng, homeLat, homeLng) <= (homeRadiusMeters + 150.0))
+
+        if (nearSchoolOrHome) {
+            viewModelScope.launch {
+                _uiEvents.emit("⚠️ Cannot set Work location within 400m of School or Home.")
+            }
+            return
+        }
+
         workLat = lat
         workLng = lng
         workRadiusMeters = radius

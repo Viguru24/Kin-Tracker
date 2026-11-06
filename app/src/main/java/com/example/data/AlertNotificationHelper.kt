@@ -135,6 +135,11 @@ object AlertNotificationHelper {
         memberId: String = "",
         memberName: String = ""
     ) {
+        // Gatekeeper: Validate through AlertArbiter to prevent rogue alerts, duplicate spam, or child workplace notices
+        if (!AlertArbiter.canEmitAlert(title, message, memberId, memberName)) {
+            return
+        }
+
         // 1. Persist notification to Activity/Notification History database & auto-prune
         scope.launch {
             try {

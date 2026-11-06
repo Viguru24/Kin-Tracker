@@ -138,6 +138,14 @@ object VoiceAnnouncementManager {
             return
         }
 
+        // Hard invariant: never announce workplace alerts for schoolchildren
+        val fullText = rawMessage.lowercase()
+        val isEloiseOrIsabel = fullText.contains("eloise") || fullText.contains("isabel")
+        val isWork = fullText.contains("work") || fullText.contains("at work") || fullText.contains("left work")
+        if (isEloiseOrIsabel && isWork) {
+            return
+        }
+
         val volume = AlertNotificationHelper.getNotificationVolume(context)
         if (volume <= 0) {
             return
