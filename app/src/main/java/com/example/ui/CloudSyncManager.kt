@@ -366,7 +366,13 @@ class CloudSyncManager(
                         uiEvents.emit("Synced common Home coordinates from cloud group!")
                     }
                 }
-                if (payload.isWorkCalibrated && payload.workLat != 0.0 && payload.workLng != 0.0) {
+                val isWorkNearSchool = Math.hypot((payload.workLat - 51.33016) * 111.0, (payload.workLng - (-0.14228)) * 111.0) < 0.6 ||
+                    Math.hypot((payload.workLat - 51.3280) * 111.0, (payload.workLng - (-0.1405)) * 111.0) < 0.6
+                if (isWorkNearSchool) {
+                    if (isWorkCalibrated()) {
+                        setWorkCalibrated(0.0, 0.0)
+                    }
+                } else if (payload.isWorkCalibrated && payload.workLat != 0.0 && payload.workLng != 0.0) {
                     val currentWorkLat = getWorkLat()
                     val currentWorkLng = getWorkLng()
                     val distDiff = Math.hypot((payload.workLng - currentWorkLng) * 111.0, (payload.workLat - currentWorkLat) * 111.0)
@@ -1252,8 +1258,12 @@ class CloudSyncManager(
                     if (response.isSuccessful && response.body()?.circle != null) {
                         val circle = response.body()!!.circle!!
                         if (circle.isHomeCalibrated) setHomeCalibrated(circle.homeLat, circle.homeLng)
-                        if (circle.isWorkCalibrated && circle.workLat != 0.0 && circle.workLng != 0.0) {
+                        val isCircleWorkNearSchool = Math.hypot((circle.workLat - 51.33016) * 111.0, (circle.workLng - (-0.14228)) * 111.0) < 0.6 ||
+                            Math.hypot((circle.workLat - 51.3280) * 111.0, (circle.workLng - (-0.1405)) * 111.0) < 0.6
+                        if (!isCircleWorkNearSchool && circle.isWorkCalibrated && circle.workLat != 0.0 && circle.workLng != 0.0) {
                             setWorkCalibrated(circle.workLat, circle.workLng)
+                        } else if (isCircleWorkNearSchool) {
+                            setWorkCalibrated(0.0, 0.0)
                         }
                         val newMapping = GroupPinMapping(
                             pinCode = circle.inviteCode.ifBlank { cleanCode },
@@ -1310,7 +1320,15 @@ class CloudSyncManager(
                         if (!resolvedToken.isNullOrBlank()) {
                             val groupPayload = getGroupData(resolvedToken)
                             if (groupPayload != null && groupPayload.isHomeCalibrated) setHomeCalibrated(groupPayload.homeLat, groupPayload.homeLng)
-                            if (groupPayload != null && groupPayload.isWorkCalibrated && groupPayload.workLat != 0.0) setWorkCalibrated(groupPayload.workLat, groupPayload.workLng)
+                            val isGroupWorkNearSchool = groupPayload != null && (
+                            Math.hypot((groupPayload.workLat - 51.33016) * 111.0, (groupPayload.workLng - (-0.14228)) * 111.0) < 0.6 ||
+                            Math.hypot((groupPayload.workLat - 51.3280) * 111.0, (groupPayload.workLng - (-0.1405)) * 111.0) < 0.6
+                        )
+                        if (!isGroupWorkNearSchool && groupPayload != null && groupPayload.isWorkCalibrated && groupPayload.workLat != 0.0) {
+                            setWorkCalibrated(groupPayload.workLat, groupPayload.workLng)
+                        } else if (isGroupWorkNearSchool) {
+                            setWorkCalibrated(0.0, 0.0)
+                        }
                             val newMapping = GroupPinMapping(
                                 pinCode = cleanCode, groupToken = resolvedToken, groupName = "Family Circle",
                                 creatorId = creatorId, createdTimestamp = System.currentTimeMillis(),

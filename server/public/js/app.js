@@ -119,6 +119,7 @@
         ringBtnIcon: document.getElementById('ringBtnIcon'),
         ringBtnText: document.getElementById('ringBtnText'),
         ctrlLocateOnMapBtn: document.getElementById('ctrlLocateOnMapBtn'),
+        ctrlGoogleMapsLink: document.getElementById('ctrlGoogleMapsLink'),
         ctrlCallPhoneLink: document.getElementById('ctrlCallPhoneLink'),
         ctrlMemberId: document.getElementById('ctrlMemberId'),
         ctrlMemberName: document.getElementById('ctrlMemberName'),
@@ -1007,6 +1008,9 @@
                         <span>${m.speedMph > 2 ? m.speedMph + ' mph' : 'Stationary'}</span>
                     </div>
                     <div class="map-popup-actions">
+                        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lat)},${encodeURIComponent(lng)}" target="_blank" rel="noopener noreferrer" class="btn btn-xs btn-cyan" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+                            🗺️ Maps
+                        </a>
                         <button class="btn btn-xs ${isAlarm ? 'btn-danger' : 'btn-cyan'}" onclick="window.__kinTrackerRing('${m.id}')">
                             ${isAlarm ? '🔕 Silence' : '🔔 Ring Phone'}
                         </button>
@@ -1055,6 +1059,17 @@
         }
     }
 
+    function openGoogleMapsForMember(m) {
+        if (!m || (!m.y && !m.x) || (m.y === 0 && m.x === 0)) {
+            alert(`No GPS coordinates available for ${m ? m.name : 'this device'}.`);
+            return;
+        }
+        const lat = encodeURIComponent(m.y);
+        const lng = encodeURIComponent(m.x);
+        const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
     // 6. ROSTER RENDERING
     function renderMembersList(members) {
         if (!members || members.length === 0) {
@@ -1081,7 +1096,7 @@
             card.innerHTML = `
                 <div class="member-card-content">
                     <div class="member-main">
-                        <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}">
+                        <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}" title="Click to open ${m.name}'s location in Google Maps">
                             ${getSafeEmoji(m)}
                         </div>
                         <div class="member-name-group">
@@ -1092,8 +1107,12 @@
                                 ${dwellStr ? `<span class="member-dwell-badge" style="color: #00ff88; font-size: 11px; margin-left: 6px; font-weight: 500;">📍 here ${dwellStr}</span>` : ''}
                             </div>
                         </div>
-                    </div>`;
+                    </div>
                     <div class="member-actions-col">
+                        <button class="btn-gmaps" title="Open ${m.name}'s exact location in Google Maps">
+                            <span>🗺️</span>
+                            <span>Maps</span>
+                        </button>
                         <button class="btn-ring-phone ${isRinging ? 'ringing' : ''}" title="Ring ${m.name}'s phone loudly">
                             <span>${isRinging ? '🚨' : '🔔'}</span>
                             <span>${isRinging ? 'Ringing...' : 'Ring Phone'}</span>
@@ -1107,6 +1126,25 @@
                     </div>
                 </div>
             `;
+
+            // Google Maps Button Click
+            const gmapsBtn = card.querySelector('.btn-gmaps');
+            if (gmapsBtn) {
+                gmapsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openGoogleMapsForMember(m);
+                });
+            }
+
+            // Clicking Avatar directly opens Google Maps
+            const avatarEl = card.querySelector('.member-avatar');
+            if (avatarEl) {
+                avatarEl.style.cursor = 'pointer';
+                avatarEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openGoogleMapsForMember(m);
+                });
+            }
 
             // Ring Button Click
             const ringBtn = card.querySelector('.btn-ring-phone');
@@ -1296,6 +1334,16 @@
         if (el.memberModalSubtitle) {
             const rel = getRelativeTime(member.lastActive);
             el.memberModalSubtitle.innerText = `Battery: ${member.batteryPercentage}% ${member.isCharging ? '⚡' : ''} • Last active: ${rel}`;
+        }
+
+        // Google Maps exact location link
+        if (el.ctrlGoogleMapsLink) {
+            if (member.y && member.x && (member.y !== 0 || member.x !== 0)) {
+                el.ctrlGoogleMapsLink.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(member.y)},${encodeURIComponent(member.x)}`;
+                el.ctrlGoogleMapsLink.classList.remove('hidden');
+            } else {
+                el.ctrlGoogleMapsLink.classList.add('hidden');
+            }
         }
 
         // Phone call link

@@ -396,9 +396,19 @@ function processTripLifecycle(token, memberId, out, stored, home, safeZones) {
                 lastAlertTimestamp.set(alertKey, now);
                 const dest = determineDestination(lat, lng, stored?.y || lat, stored?.x || lng, home, safeZones, out.transitMode === 'TRAIN');
                 const modePhrase = out.transitMode === 'TRAIN' ? 'on a train' : (out.transitMode === 'DRIVING' ? 'in a car' : out.transitMode.toLowerCase());
-                const msg = dest 
-                    ? `${out.name} has left ${origin} and is ${modePhrase} heading towards ${dest}!`
-                    : `${out.name} has left ${origin} and is ${modePhrase}!`;
+                const isSchool = (origin || '').toLowerCase().includes('school') || (origin || '').toLowerCase().includes('academy') || (origin || '').toLowerCase().includes('college');
+                const cleanName = (out.name || '').trim();
+                const isEloise = cleanName.toLowerCase().includes('eloise');
+                const isIsabel = cleanName.toLowerCase().includes('isabel');
+
+                let msg;
+                if (isSchool && isEloise) {
+                    msg = `${cleanName} has just left her school!`;
+                } else {
+                    msg = dest 
+                        ? `${out.name} has left ${origin} and is ${modePhrase} heading towards ${dest}!`
+                        : `${out.name} has left ${origin} and is ${modePhrase}!`;
+                }
 
                 alertEvent = {
                     id: `evt_${now}_${memberId}`,

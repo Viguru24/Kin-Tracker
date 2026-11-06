@@ -518,6 +518,8 @@ fun MainScreen(
     var isFeedbackOpen by remember { mutableStateOf(false) }
     var showAddDeviceDialog by remember { mutableStateOf(false) }
     var showNotificationHistory by remember { mutableStateOf(false) }
+    var isCircleDigestOpen by remember { mutableStateOf(false) }
+    var showAddSafeZoneDialog by remember { mutableStateOf(false) }
 
     val shouldOpenFromIntent by shouldOpenNotificationHistoryFlow.collectAsStateWithLifecycle()
     LaunchedEffect(shouldOpenFromIntent) {
@@ -570,11 +572,17 @@ fun MainScreen(
 
 
     // Handle system back gesture / back button to naturally close open panels
-    BackHandler(enabled = isSettingsOpen || isFamilyPopupOpen || showNotificationHistory) {
+    BackHandler(enabled = isSettingsOpen || isFamilyPopupOpen || showNotificationHistory || isCircleDigestOpen || isShoppingListPopupOpen || showAddSafeZoneDialog) {
         if (showNotificationHistory) {
             showNotificationHistory = false
         } else if (isSettingsOpen) {
             isSettingsOpen = false
+        } else if (isCircleDigestOpen) {
+            isCircleDigestOpen = false
+        } else if (isShoppingListPopupOpen) {
+            isShoppingListPopupOpen = false
+        } else if (showAddSafeZoneDialog) {
+            showAddSafeZoneDialog = false
         } else if (isFamilyPopupOpen) {
             isFamilyPopupOpen = false
         }
@@ -625,6 +633,34 @@ fun MainScreen(
             }
         }
 
+        // Google Maps Exact Location Helper
+        val openGoogleMaps = { member: FamilyMember ->
+            if (member.x == 0.0 && member.y == 0.0) {
+                viewModel.triggerUIFeedback("No GPS coordinates available for ${member.name}")
+            } else {
+                viewModel.selectedMemberId.value = member.id
+                val cleanName = member.name.replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+                val gmmIntentUri = android.net.Uri.parse("geo:${member.y},${member.x}?q=${member.y},${member.x}(${android.net.Uri.encode(cleanName)})")
+                val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri).apply {
+                    setPackage("com.google.android.apps.maps")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    context.startActivity(mapIntent)
+                } catch (_: Exception) {
+                    val webUri = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=${member.y},${member.x}")
+                    try {
+                        val webIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(webIntent)
+                    } catch (_: Exception) {
+                        viewModel.triggerUIFeedback("Could not open Google Maps.")
+                    }
+                }
+            }
+        }
+
         // 1. Full Screen Radar Map occupying the background
         RadarMap(
             members = members,
@@ -640,6 +676,7 @@ fun MainScreen(
             onOpenNotificationHistory = { showNotificationHistory = true },
             recentAlertCount = recentAlertCount,
             onOpenWhatsApp = openWhatsApp,
+            onOpenGoogleMaps = openGoogleMaps,
             onUpdateMember = { viewModel.updateFamilyMember(it) },
             onDeleteMember = { viewModel.deleteFamilyMember(it) },
             onTriggerAlarm = { viewModel.toggleFindMyPhone(it) },
@@ -778,8 +815,8 @@ fun MainScreen(
                                     labelText = getMemberLabel(meMember, isMe = true),
                                     isSelected = selectedMemberId == meMember.id
                                 ) {
-                                    viewModel.selectedMemberId.value = meMember.id
                                     isFamilyPopupOpen = false
+                                    openGoogleMaps(meMember)
                                 }
                             }
 
@@ -790,8 +827,8 @@ fun MainScreen(
                                     labelText = getMemberLabel(member, isMe = false),
                                     isSelected = selectedMemberId == member.id
                                 ) {
-                                    viewModel.selectedMemberId.value = member.id
                                     isFamilyPopupOpen = false
+                                    openGoogleMaps(member)
                                 }
                             }
 
@@ -1061,10 +1098,24 @@ fun MainScreen(
                             onDeleteMember = { member -> viewModel.deleteFamilyMember(member.id) },
                             onToggleMemberTracking = { memberId -> viewModel.toggleMemberTracking(memberId) },
                             onUpdateMember = { member -> viewModel.updateFamilyMember(member) },
+                            onOpenGoogleMaps = openGoogleMaps,
                             onSelectTrip = { trip ->
                                 com.example.data.TelemetryWebSocketManager.selectTrip(trip)
                                 isSettingsOpen = false
-                            }
+                            },
+                            onOpenCircleDigest = {
+                                isSettingsOpen = false
+                                isCircleDigestOpen = true
+                            },
+                            onOpenShoppingList = {
+                                isSettingsOpen = false
+                                isShoppingListPopupOpen = true
+                            },
+                            onOpenAddSafeZone = {
+                                isSettingsOpen = false
+                                showAddSafeZoneDialog = true
+                            },
+                            shoppingActiveCount = shoppingItems.count { !it.isChecked }
                         )
                     }
                 }
@@ -1106,6 +1157,116 @@ fun MainScreen(
             )
         }
 
+        if (isCircleDigestOpen) {
+            com.example.ui.CircleDigestDashboard(
+                isReset = isCircleDigestReset,
+                onReset = { viewModel.resetCircleDigest() },
+                onDismiss = { isCircleDigestOpen = false }
+            )
+        }
+
+        if (showAddSafeZoneDialog) {
+            var newZoneName by remember { mutableStateOf("") }
+            var newZoneRadius by remember { mutableStateOf(80f) }
+            var newZoneIcon by remember { mutableStateOf("home") }
+
+            AlertDialog(
+                onDismissRequest = { showAddSafeZoneDialog = false },
+                title = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🛡️", fontSize = 20.sp)
+                        Text(text = "Create Safe Zone", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text(text = "Define a new geofenced alert boundary for your circle.", color = TextSecondary, fontSize = 12.sp)
+
+                        OutlinedTextField(
+                            value = newZoneName,
+                            onValueChange = { newZoneName = it },
+                            label = { Text("Zone Name (e.g. School, Gym, Park)") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedBorderColor = RadarCyan,
+                                unfocusedBorderColor = SlateBorder
+                            ),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Column {
+                            Text(text = "Radius: ${newZoneRadius.toInt()} meters", color = TextPrimary, fontSize = 12.sp)
+                            Slider(
+                                value = newZoneRadius,
+                                onValueChange = { newZoneRadius = it },
+                                valueRange = 30f..250f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = RadarCyan,
+                                    activeTrackColor = RadarCyan
+                                )
+                            )
+                        }
+
+                        Text(text = "Select Zone Icon Type:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("home" to "🏠", "school" to "🏫", "gym" to "💪", "work" to "💼", "shop" to "🛒").forEach { (type, emoji) ->
+                                val isSelected = newZoneIcon == type
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) RadarCyan else Color(0xFFF0F2F6))
+                                        .clickable { newZoneIcon = type }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(text = emoji, fontSize = 16.sp)
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val meLoc = members.firstOrNull { it.id == "me" }
+                            val lat = meLoc?.y ?: homeLat
+                            val lng = meLoc?.x ?: homeLng
+                            viewModel.addSafeZone(
+                                com.example.data.SafeZone(
+                                    id = "zone_" + System.currentTimeMillis(),
+                                    name = newZoneName.ifBlank { "Safe Zone" },
+                                    latitude = lat,
+                                    longitude = lng,
+                                    radiusMeters = newZoneRadius.toDouble(),
+                                    iconName = newZoneIcon
+                                )
+                            )
+                            showAddSafeZoneDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = RadarCyan)
+                    ) {
+                        Text("Save Zone", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddSafeZoneDialog = false }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                },
+                containerColor = CosmicSlateCard,
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
         // Floating Dynamic Alerts Toast HUD Overlay (drawn last = always on top in Box)
         FloatingAlertToast(
             activeAlertMessage = activeAlertMessage,
@@ -1144,7 +1305,7 @@ fun SubFamilyBubble(
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
-            .widthIn(max = 260.dp)
+            .widthIn(max = 280.dp)
             .clickable(onClick = onClick)
             .background(if (isSelected) PrimaryCosmic else CosmicSlateCard, CircleShape)
             .border(1.5.dp, if (isSelected) RadarCyan else SlateBorder, CircleShape)
@@ -1153,14 +1314,34 @@ fun SubFamilyBubble(
         Box(
             modifier = Modifier
                 .size(32.dp)
+                .clip(CircleShape)
                 .background(color, CircleShape)
                 .border(1.dp, androidx.compose.ui.graphics.Color.White, CircleShape),
             contentAlignment = androidx.compose.ui.Alignment.Center
         ) {
-            Text(
-                text = member.avatarEmoji.ifBlank { member.name.take(1).uppercase() },
-                fontSize = 14.sp
-            )
+            if (member.photoPath.isNotBlank() && java.io.File(member.photoPath).exists()) {
+                val bitmap = remember(member.photoPath) {
+                    try { android.graphics.BitmapFactory.decodeFile(member.photoPath) } catch (_: Exception) { null }
+                }
+                if (bitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Profile Photo",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = member.avatarEmoji.ifBlank { member.name.take(1).uppercase() },
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                Text(
+                    text = member.avatarEmoji.ifBlank { member.name.take(1).uppercase() },
+                    fontSize = 14.sp
+                )
+            }
         }
         Text(
             text = labelText,
@@ -1169,7 +1350,12 @@ fun SubFamilyBubble(
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             softWrap = false,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            text = "🗺️",
+            fontSize = 12.sp
         )
     }
 }

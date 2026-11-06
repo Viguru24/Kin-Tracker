@@ -235,7 +235,12 @@ object TripTransitEngine {
         }
 
         // C. Candidate: Work
-        if (workLat != 0.0 && workLng != 0.0) {
+        val isWorkNearSchool = (safeZones + listOf(GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL)).any { z ->
+            (z.iconName.equals("school", ignoreCase = true) || z.name.contains("school", ignoreCase = true)) &&
+                GeoUtils.distanceMeters(workLat, workLng, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 200.0
+        } || Math.hypot((workLat - 51.3280) * 111.0, (workLng - (-0.1405)) * 111.0) < 0.6
+
+        if (workLat != 0.0 && workLng != 0.0 && !isWorkNearSchool) {
             val distCur = GeoUtils.distanceMeters(curLat, curLng, workLat, workLng)
             val distPrev = GeoUtils.distanceMeters(prevLat, prevLng, workLat, workLng)
             if (distCur < distPrev - 15.0 && distCur > 100.0) {
@@ -281,9 +286,12 @@ object TripTransitEngine {
             }
         }
 
-        // General road travel: compass direction
-        val cardinal = bearingToCardinal(travelBearing)
-        return "$cardinal direction"
+        // General road travel: compass direction only when moving at vehicular speed (>= 15 mph)
+        if (speedMph >= 15.0) {
+            val cardinal = bearingToCardinal(travelBearing)
+            return "$cardinal direction"
+        }
+        return null
     }
 
     /**
@@ -368,11 +376,11 @@ object TripTransitEngine {
 
                 if (checks >= 2) {
                     val lastAlert = lastTripAlertTimestamp[cleanId] ?: 0L
-                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
-                        lastTripAlertTimestamp[cleanId] = now
-                        lastStationaryCoords.remove(cleanId)
+                    val personKey = IdentityUtils.getCanonicalPersonKey(member.name, member.id)
+                    val statusPrefs = context.getSharedPreferences("geofence_status_prefs", Context.MODE_PRIVATE)
+                    val globalDep = statusPrefs.getLong("global_dep_$personKey", 0L)
 
-                        val mode = classifyTransitMode(member.speedMph, member.statusText, member.id)
+                    if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS && now - globalDep > AppConfig.GEOFENCE_COOLDOWN_MS) {
                         val originName = resolveOriginName(
                             lat = stationaryCoords.first,
                             lng = stationaryCoords.second,
@@ -382,6 +390,20 @@ object TripTransitEngine {
                             workLat = workLat,
                             workLng = workLng
                         )
+                        // If origin is a geofenced SafeZone or Home, GeofenceMonitor already handles it!
+                        if (originName != "their location") {
+                            lastTripAlertTimestamp[cleanId] = now
+                            lastTripAlertTimestamp[personKey] = now
+                            lastStationaryCoords.remove(cleanId)
+                            return
+                        }
+
+                        lastTripAlertTimestamp[cleanId] = now
+                        lastTripAlertTimestamp[personKey] = now
+                        statusPrefs.edit().putLong("global_dep_$personKey", now).apply()
+                        lastStationaryCoords.remove(cleanId)
+
+                        val mode = classifyTransitMode(member.speedMph, member.statusText, member.id)
                         val destination = determineHeadingDestination(
                             curLat = member.y,
                             curLng = member.x,

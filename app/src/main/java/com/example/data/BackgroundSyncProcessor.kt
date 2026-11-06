@@ -19,7 +19,15 @@ object BackgroundSyncProcessor {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val payloadAdapter = moshi.adapter(CloudGroupPayload::class.java)
 
-    suspend fun processLocationUpdate(context: Context, location: Location) {
+    // Battery Optimization Cache: prevents cellular modem churn when stationary
+    @Volatile private var lastSyncTimestamp = 0L
+    @Volatile private var lastSyncLat = 0.0
+    @Volatile private var lastSyncLng = 0.0
+    @Volatile private var lastSyncBattery = -1
+    @Volatile private var lastSyncCharging: Boolean? = null
+    @Volatile private var lastSyncStatus = ""
+
+    suspend fun processLocationUpdate(context: Context, location: Location, forceSync: Boolean = false) {
         val database = AppDatabase.getDatabase(context.applicationContext)
         val repository = FamilyRepository(database.familyDao())
 
@@ -115,7 +123,7 @@ object BackgroundSyncProcessor {
 
 
         // 3. Sync and merge in background
-        backgroundCloudSync(context, repository, prefs, location, batteryPct, isCharging, speedMph, status)
+        backgroundCloudSync(context, repository, prefs, location, batteryPct, isCharging, speedMph, status, forceSync)
     }
 
     private suspend fun backgroundCloudSync(
@@ -126,7 +134,8 @@ object BackgroundSyncProcessor {
         batteryPct: Int,
         isCharging: Boolean,
         speedMph: Double,
-        status: String
+        status: String,
+        forceSync: Boolean = false
     ) {
         val isCloudSyncEnabled = prefs.getBoolean("isCloudSyncEnabled", true)
         var token = prefs.getString("groupSyncToken", "") ?: ""
@@ -138,6 +147,29 @@ object BackgroundSyncProcessor {
             }
         }
         if (!isCloudSyncEnabled || token.isBlank()) return
+
+        // --- Smart Battery Optimization Throttling ---
+        val now = System.currentTimeMillis()
+        val timeSinceLastSync = now - lastSyncTimestamp
+
+        val distMovedM = if (lastSyncLat != 0.0 && lastSyncLng != 0.0) {
+            val x = (location.longitude - lastSyncLng) * 111000.0 * Math.cos(Math.toRadians(location.latitude))
+            val y = (location.latitude - lastSyncLat) * 111000.0
+            Math.hypot(x, y)
+        } else 999.0
+
+        val hasMovedSignificantly = distMovedM >= 25.0 || speedMph >= 1.5
+        val hasStatusChanged = status != lastSyncStatus
+        val hasBatteryChangedSignificantly = (lastSyncBattery == -1 || Math.abs(batteryPct - lastSyncBattery) >= 3 || isCharging != lastSyncCharging)
+        val isHeartbeatDue = timeSinceLastSync >= 10 * 60 * 1000L // 10 minutes stationary heartbeat
+        val isMovingThrottled = hasMovedSignificantly && timeSinceLastSync < 6000L // 6s throttle window when moving
+
+        if (!forceSync && !hasStatusChanged && !hasBatteryChangedSignificantly && !isHeartbeatDue) {
+            if (!hasMovedSignificantly || isMovingThrottled) {
+                // Skip cellular/Wi-Fi network request to allow modem to sleep
+                return
+            }
+        }
 
         val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
         val myColor = prefs.getString("myDeviceColor", "#AA22FF") ?: "#AA22FF"
@@ -473,6 +505,13 @@ object BackgroundSyncProcessor {
             val payloadJson = payloadAdapter.toJson(newPayload)
             val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
             cloudService.updateGroupData(token, requestBody)
+
+            lastSyncTimestamp = lastActiveTimestamp
+            lastSyncLat = location.latitude
+            lastSyncLng = location.longitude
+            lastSyncBattery = batteryPct
+            lastSyncCharging = isCharging
+            lastSyncStatus = status
 
             // 6. Ingest incoming circle members and evaluate background geofence arrival/departure alerts
             val contactsPrefs = context.getSharedPreferences("kintracker_contacts", Context.MODE_PRIVATE)

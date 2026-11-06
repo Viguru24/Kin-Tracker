@@ -40,6 +40,7 @@ fun MapContextMenu(
     isRinging: Boolean = false,
     onDismiss: () -> Unit,
     onOpenWhatsApp: (FamilyMember) -> Unit,
+    onOpenGoogleMaps: (FamilyMember) -> Unit = {},
     onTriggerSOS: () -> Unit,
     onSendReaction: (memberId: String, reaction: String) -> Unit,
     onTriggerAlarm: (String) -> Unit,
@@ -62,7 +63,13 @@ fun MapContextMenu(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                        .clickable {
+                            onDismiss()
+                            onOpenGoogleMaps(member)
+                        }
                 ) {
                     Box(
                         modifier = Modifier
@@ -208,6 +215,25 @@ fun MapContextMenu(
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
+                    }
+                }
+
+                // Google Maps Exact Location Action
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onOpenGoogleMaps(member)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8)),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🗺️", fontSize = 16.sp)
+                        Text("Open in Google Maps", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
 

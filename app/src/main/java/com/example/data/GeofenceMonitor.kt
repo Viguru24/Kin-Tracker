@@ -54,7 +54,16 @@ object GeofenceMonitor {
         if (homeLat != 0.0 && homeLng != 0.0) {
             rawPlaces.add(MonitoredPlace("place_home", "Home", homeLat, homeLng, homeRadius, "home", isHome = true))
         }
-        if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
+        val isWorkNearSchool = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 && (
+            RemoteConfig.hideWorkZone ||
+            (customZones + listOf(GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL)).any { z ->
+                (z.iconName.equals("school", ignoreCase = true) || z.name.contains("school", ignoreCase = true)) &&
+                    GeoUtils.distanceMeters(workLat, workLng, z.latitude, z.longitude) <= maxOf(z.radiusMeters, 160.0) + 200.0
+            } ||
+            Math.hypot((workLat - 51.3280) * 111.0, (workLng - (-0.1405)) * 111.0) < 0.6
+        )
+
+        if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0 && !isWorkNearSchool) {
             rawPlaces.add(MonitoredPlace("place_work", "Work", workLat, workLng, workRadius, "work", isWork = true))
         }
         customZones.forEach { zone ->
@@ -169,8 +178,16 @@ object GeofenceMonitor {
                 .replace(Regex("('s|s)?\\s*(iPhone|iPad|Tab|Tablet|Phone|Device)", RegexOption.IGNORE_CASE), "")
                 .trim()
             val personKey = IdentityUtils.getCanonicalPersonKey(member.name, member.id)
+            val isChild = personKey == "canonical_eloise" || personKey == "canonical_isabel" ||
+                cleanMemberName.contains("daughter", ignoreCase = true) ||
+                cleanMemberName.contains("son", ignoreCase = true) ||
+                member.name.contains("daughter", ignoreCase = true)
 
             allPlaces.forEach { place ->
+                if (place.isWork && isChild) {
+                    // Schoolchildren never arrive at or depart from Work
+                    return@forEach
+                }
                 val xDist = (member.x - place.longitude) * 111.0 * Math.cos(Math.toRadians(place.latitude))
                 val yDist = (member.y - place.latitude) * 111.0
                 val distMeters = Math.hypot(xDist, yDist) * 1000.0
@@ -289,8 +306,12 @@ object GeofenceMonitor {
                             statusEditor.putInt("outcount_$key", 0)
 
                             val lastAlert = statusPrefs.getLong("alert_dep_$key", 0L)
-                            if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS) {
+                            val lastGlobalPersonDep = statusPrefs.getLong("global_dep_$personKey", 0L)
+                            if (now - lastAlert > AppConfig.GEOFENCE_COOLDOWN_MS && now - lastGlobalPersonDep > AppConfig.GEOFENCE_COOLDOWN_MS) {
                                 statusEditor.putLong("alert_dep_$key", now)
+                                statusEditor.putLong("global_dep_$personKey", now)
+                                TripTransitEngine.lastTripAlertTimestamp[member.id.lowercase().trim()] = now
+                                TripTransitEngine.lastTripAlertTimestamp[personKey] = now
                                 val placeDisplayName = if (place.isHome) "the house" else place.name
                                 val isDepartingWithMe = hasMyGps && distToMeMeters <= 200.0
 
@@ -304,28 +325,44 @@ object GeofenceMonitor {
                                         )
                                     )
                                 } else {
-                                    val isRailway = RailwayTransitDetector.isMemberOnRailway(member.id)
-                                    val transitMode = classifyTransitMode(member.speedMph, member.statusText, member.id)
-                                    val destination = TripTransitEngine.determineHeadingDestination(
-                                        curLat = member.y,
-                                        curLng = member.x,
-                                        prevLat = place.latitude,
-                                        prevLng = place.longitude,
-                                        safeZones = customZones,
-                                        homeLat = homeLat,
-                                        homeLng = homeLng,
-                                        workLat = workLat,
-                                        workLng = workLng,
-                                        speedMph = member.speedMph,
-                                        isRailway = isRailway
+                                    val isSchool = !place.isHome && !place.isWork && (
+                                        place.iconName.equals("school", ignoreCase = true) ||
+                                        place.name.contains("school", ignoreCase = true) ||
+                                        place.name.contains("academy", ignoreCase = true) ||
+                                        place.name.contains("college", ignoreCase = true)
                                     )
-                                    val warningMsg = TripTransitEngine.formatDepartureMessage(
-                                        memberName = cleanMemberName,
-                                        originName = placeDisplayName,
-                                        transitMode = transitMode,
-                                        destinationName = destination,
-                                        speedMph = member.speedMph
-                                    )
+                                    val warningMsg = when {
+                                        isSchool && (personKey == "canonical_eloise" || personKey == "canonical_isabel") -> {
+                                            "$cleanMemberName has just left her school!"
+                                        }
+                                        isSchool && isChild -> {
+                                            "$cleanMemberName has just left their school!"
+                                        }
+                                        else -> {
+                                            val isRailway = RailwayTransitDetector.isMemberOnRailway(member.id)
+                                            val transitMode = classifyTransitMode(member.speedMph, member.statusText, member.id)
+                                            val destination = TripTransitEngine.determineHeadingDestination(
+                                                curLat = member.y,
+                                                curLng = member.x,
+                                                prevLat = place.latitude,
+                                                prevLng = place.longitude,
+                                                safeZones = customZones,
+                                                homeLat = homeLat,
+                                                homeLng = homeLng,
+                                                workLat = if (isWorkNearSchool || isChild) 0.0 else workLat,
+                                                workLng = if (isWorkNearSchool || isChild) 0.0 else workLng,
+                                                speedMph = member.speedMph,
+                                                isRailway = isRailway
+                                            )
+                                            TripTransitEngine.formatDepartureMessage(
+                                                memberName = cleanMemberName,
+                                                originName = placeDisplayName,
+                                                transitMode = transitMode,
+                                                destinationName = destination,
+                                                speedMph = member.speedMph
+                                            )
+                                        }
+                                    }
                                     repository.insertLog(
                                         ActivityLog(
                                             memberId = member.id,
@@ -364,8 +401,8 @@ object GeofenceMonitor {
                 safeZones = customZones,
                 homeLat = homeLat,
                 homeLng = homeLng,
-                workLat = workLat,
-                workLng = workLng,
+                workLat = if (isWorkNearSchool || isChild) 0.0 else workLat,
+                workLng = if (isWorkNearSchool || isChild) 0.0 else workLng,
                 onUiEvent = onUiEvent
             )
         }

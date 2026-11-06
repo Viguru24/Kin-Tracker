@@ -435,6 +435,7 @@ fun RadarMap(
     onSendReaction: (String, String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
     onOpenWhatsApp: (FamilyMember) -> Unit = {},
+    onOpenGoogleMaps: (FamilyMember) -> Unit = {},
     onUpdateMember: (FamilyMember) -> Unit = {},
     onDeleteMember: (String) -> Unit = {},
     onTriggerAlarm: (String) -> Unit = {},
@@ -489,6 +490,14 @@ fun RadarMap(
         })
     val prefs = remember { context.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE) }
     var mapTypeMode by remember { mutableStateOf(prefs.getString("mapTypeMode", "streets").let { if (it == "satellite" || it.isNullOrBlank()) "streets" else it }) }
+    LaunchedEffect(isSettingsOpen) {
+        if (!isSettingsOpen) {
+            val updated = prefs.getString("mapTypeMode", "streets").let { if (it == "satellite" || it.isNullOrBlank()) "streets" else it }
+            if (updated != mapTypeMode) {
+                mapTypeMode = updated
+            }
+        }
+    }
     var showMapStyleMenu by remember { mutableStateOf(false) }
     
     // Popup state for face tapping options
@@ -1392,7 +1401,6 @@ fun RadarMap(
 
         // ----------------- LIFE360 PREMIUM MAP OVERLAY HUD -----------------
         var showCircleSwitcher by remember { mutableStateOf(false) }
-        var showToolsMenu by remember { mutableStateOf(false) }
         var showAddDeviceDialog by remember { mutableStateOf(false) }
         var addDeviceInitialTab by remember { mutableStateOf(0) }
 
@@ -1406,73 +1414,47 @@ fun RadarMap(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 1. FLOATING TOP HUD ACTION BAR — Settings, Digest, Map Theme, Circle Switcher, Offline Badge (All on the same horizontal level!)
-            // 1. FLOATING TOP HUD ACTION BAR — Settings, Live/Paused Tracking Pill, Circle Switcher, Theme, Digest, Offline
+            // 1. FLOATING TOP HUD ACTION BAR — Bell (Left), Circle Switcher (Center), Gear (Right)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp),
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── 1. LEFT: Dedicated Settings Gear Button & Notification History Bell ──
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable {
-                                showCircleSwitcher = false
-                                showToolsMenu = false
-                                onSettingsClick()
-                            }
-                            .testTag("settings_button"),
-                        color = Color(0xF2161A24),
-                        shape = CircleShape,
-                        border = BorderStroke(1.2.dp, Color(0xFF384358)),
-                        shadowElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("⚙️", fontSize = 16.sp)
+                // ── 1. LEFT: Notification History Bell Button ──
+                Surface(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clickable {
+                            showCircleSwitcher = false
+                            onOpenNotificationHistory()
                         }
-                    }
-
-                    Surface(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clickable {
-                                showCircleSwitcher = false
-                                showToolsMenu = false
-                                onOpenNotificationHistory()
-                            }
-                            .testTag("notification_bell_button"),
-                        color = Color(0xF2161A24),
-                        shape = CircleShape,
-                        border = BorderStroke(1.2.dp, if (recentAlertCount > 0) Color(0xFF00E5FF) else Color(0xFF384358)),
-                        shadowElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Text("🔔", fontSize = 16.sp)
-                            if (recentAlertCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 4.dp, end = 4.dp)
-                                        .size(8.dp)
-                                        .background(Color(0xFF00E5FF), CircleShape)
-                                )
-                            }
+                        .testTag("notification_bell_button"),
+                    color = Color(0xF2161A24),
+                    shape = CircleShape,
+                    border = BorderStroke(1.2.dp, if (recentAlertCount > 0) Color(0xFF00E5FF) else Color(0xFF384358)),
+                    shadowElevation = 8.dp
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("🔔", fontSize = 16.sp)
+                        if (recentAlertCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 4.dp, end = 4.dp)
+                                    .size(8.dp)
+                                    .background(Color(0xFF00E5FF), CircleShape)
+                            )
                         }
                     }
                 }
 
-                // ── 2. CENTRE: CIRCLE PULL-DOWN MENU PILL (Flexible weight so it never squishes Left or Right buttons) ──
+                // ── 2. CENTRE: CIRCLE SELECTOR PILL (Wide, roomy, never squashed) ──
                 Box(
                     modifier = Modifier
-                        .weight(1f, fill = false)
-                        .padding(horizontal = 6.dp),
+                        .weight(1f)
+                        .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
@@ -1487,7 +1469,6 @@ fun RadarMap(
                             .height(38.dp)
                             .clickable {
                                 showCircleSwitcher = !showCircleSwitcher
-                                if (showCircleSwitcher) showToolsMenu = false
                             }
                             .testTag("circle_switcher_pill"),
                         color = Color(0xF2161A24),
@@ -1497,10 +1478,10 @@ fun RadarMap(
                     ) {
                         Row(
                             modifier = Modifier
-                                .padding(horizontal = 12.dp)
+                                .padding(horizontal = 14.dp)
                                 .fillMaxHeight(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(text = "👥", fontSize = 13.sp, maxLines = 1, softWrap = false)
                             Text(
@@ -1510,8 +1491,7 @@ fun RadarMap(
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                             Surface(
                                 shape = CircleShape,
@@ -1539,56 +1519,22 @@ fun RadarMap(
                     }
                 }
 
-                // ── 3. TOOLS & VIEWS BUTTON (TOP RIGHT — Fixed non-wrapping width on all phones) ──
+                // ── 3. RIGHT: Dedicated Settings Gear Button (Replaces Tools) ──
                 Surface(
                     modifier = Modifier
-                        .height(38.dp)
-                        .requiredWidthIn(min = 84.dp)
-                        .wrapContentWidth(unbounded = false)
+                        .size(38.dp)
                         .clickable {
-                            showToolsMenu = !showToolsMenu
-                            if (showToolsMenu) showCircleSwitcher = false
+                            showCircleSwitcher = false
+                            onSettingsClick()
                         }
-                        .testTag("tools_menu_button"),
+                        .testTag("settings_button"),
                     color = Color(0xF2161A24),
-                    shape = RoundedCornerShape(19.dp),
-                    border = BorderStroke(1.2.dp, if (showToolsMenu) RadarCyan else Color(0xFF384358)),
+                    shape = CircleShape,
+                    border = BorderStroke(1.2.dp, Color(0xFF384358)),
                     shadowElevation = 8.dp
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .fillMaxHeight()
-                            .wrapContentWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = when (mapTypeMode) {
-                                "hybrid" -> "🌙"
-                                "radar" -> "🟢"
-                                else -> "🗺️"
-                            },
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        Text(
-                            text = "Tools",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        Text(
-                            text = if (showToolsMenu) "▲" else "▼",
-                            color = RadarCyan,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text("⚙️", fontSize = 16.sp)
                     }
                 }
             }
@@ -2077,6 +2023,7 @@ fun RadarMap(
                 isRinging = activeRingingMembers.contains(member.id) || activeRingingMembers.contains(member.name),
                 onDismiss = { memberForContextMenu = null },
                 onOpenWhatsApp = onOpenWhatsApp,
+                onOpenGoogleMaps = onOpenGoogleMaps,
                 onTriggerSOS = onTriggerSOS,
                 onSendReaction = onSendReaction,
                 onTriggerAlarm = onTriggerAlarm,
@@ -2507,267 +2454,7 @@ fun RadarMap(
         }
     }
 
-    // Full-screen floating Tools & Views Overlay (Cleanly separated from top Row, responsive up to 345dp width)
-    if (showToolsMenu) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable { showToolsMenu = false }
-                .zIndex(200f)
-        ) {
-            Surface(
-                modifier = Modifier
-                    .statusBarsPadding()
-                    .padding(top = 54.dp, start = 12.dp, end = 12.dp)
-                    .align(Alignment.TopEnd)
-                    .fillMaxWidth(0.92f)
-                    .widthIn(max = 345.dp)
-                    .heightIn(max = 580.dp)
-                    .clickable(enabled = false) {}, // absorb clicks inside card
-                color = Color(0xF8141822),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.5.dp, Color(0xFF384358)),
-                shadowElevation = 24.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .padding(14.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Header with Title and Close button
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text("🛠️", fontSize = 15.sp)
-                            Text(
-                                text = "Tools & Views",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                        Surface(
-                            modifier = Modifier
-                                .size(24.dp)
-                                .clickable { showToolsMenu = false },
-                            shape = CircleShape,
-                            color = Color(0xFF242A38)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("✕", color = Color(0xFF90A4AE), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
 
-                    Text(
-                        text = "MAP THEME",
-                        color = Color(0xFF78909C),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 2.dp)
-                    )
-
-                    // Map Theme Selector Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            Triple("streets", "🗺️ Streets", "Day"),
-                            Triple("hybrid", "🌙 Dark", "Night"),
-                            Triple("radar", "🟢 Radar", "Tactical")
-                        ).forEach { (mode, label, _) ->
-                            val isSelected = mapTypeMode == mode
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        mapTypeMode = mode
-                                        prefs.edit().putString("mapTypeMode", mode).apply()
-                                    },
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) RadarCyan.copy(alpha = 0.2f) else Color(0xFF1E232F),
-                                border = BorderStroke(1.dp, if (isSelected) RadarCyan else Color(0xFF2E3846))
-                            ) {
-                                Text(
-                                    text = label,
-                                    color = if (isSelected) RadarCyan else Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = Color(0xFF2E3846), modifier = Modifier.padding(vertical = 2.dp))
-
-                    // 1. Circle Weekly Digest
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showToolsMenu = false
-                                isDigestOpen = true
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E232F),
-                        border = BorderStroke(1.dp, Color(0xFF2A3444))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("📊", fontSize = 18.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Weekly Circle Digest", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Travel & safety analytics", color = Color(0xFFA0B0BC), fontSize = 11.sp)
-                            }
-                            Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // 2. Add Safe Zone (Geofence)
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showToolsMenu = false
-                                showAddZoneDialog = true
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E232F),
-                        border = BorderStroke(1.dp, Color(0xFF2A3444))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("🛡️", fontSize = 18.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Add Safe Zone", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Create custom place alert", color = Color(0xFFA0B0BC), fontSize = 11.sp)
-                            }
-                            Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // 3. Shopping & Notes List
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showToolsMenu = false
-                                onOpenShoppingList()
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E232F),
-                        border = BorderStroke(1.dp, Color(0xFF2A3444))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("🛒", fontSize = 18.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Shared Shopping List", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("${shoppingItems.count { !it.isChecked }} active items", color = Color(0xFFA0B0BC), fontSize = 11.sp)
-                            }
-                            Text("›", color = Color(0xFF607286), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // 4. Offline Map Cache Status
-                    var showOfflineInfoDialog by remember { mutableStateOf(false) }
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showOfflineInfoDialog = true
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF1E232F),
-                        border = BorderStroke(1.dp, Color(0xFF2A3444))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text("💾", fontSize = 18.sp)
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Offline Map Storage", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Active (~25 MB cached)", color = Color(0xFF00FF87), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(Color(0xFF00FF87), CircleShape)
-                            )
-                        }
-                    }
-
-                    if (showOfflineInfoDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showOfflineInfoDialog = false },
-                            title = {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("🗺️", fontSize = 18.sp)
-                                    Text(
-                                        text = "Offline Map Storage Active",
-                                        color = TextPrimary,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
-                            text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = "Vector and satellite street map tiles around Home and Circle areas are pre-cached locally on this device.",
-                                        color = TextSecondary,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "• Tiles: ~25 MB cached\n• Works without data or signal\n• Fast rendering",
-                                        color = Color(0xFF00FF87),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(onClick = { showOfflineInfoDialog = false }) {
-                                    Text("OK", color = RadarCyan)
-                                }
-                            },
-                            containerColor = CosmicSlateCard,
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
 
     }
 }

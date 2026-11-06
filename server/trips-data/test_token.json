@@ -66,5 +66,107 @@
     "endLat": 51.32948,
     "endLng": -0.119095,
     "durationMinutes": 1
+  },
+  {
+    "id": "trip_1793979200182_device_test_trip_lifecycle",
+    "memberId": "device_test_trip_lifecycle",
+    "memberName": "Isabel",
+    "transitMode": "DRIVING",
+    "origin": "Woodcote High School",
+    "destination": "Home",
+    "startLat": 51.3298,
+    "startLng": -0.125,
+    "startTime": 1793979200182,
+    "endTime": 1793979200183,
+    "breadcrumbs": [
+      {
+        "lat": 51.3298,
+        "lng": -0.125,
+        "speedMph": 25,
+        "timestamp": 1793979200182
+      },
+      {
+        "lat": 51.3295,
+        "lng": -0.121,
+        "speedMph": 30,
+        "timestamp": 1793979200183
+      }
+    ],
+    "topSpeedMph": 30,
+    "totalDistanceKm": 0.27941975495140986,
+    "harshBrakingCount": 0,
+    "rapidAccelerationCount": 0,
+    "lastBreadcrumbTime": 1793979200183,
+    "endLat": 51.32948,
+    "endLng": -0.119095,
+    "durationMinutes": 1
+  },
+  {
+    "id": "trip_1793979470415_device_test_trip_lifecycle",
+    "memberId": "device_test_trip_lifecycle",
+    "memberName": "Isabel",
+    "transitMode": "DRIVING",
+    "origin": "Woodcote High School",
+    "destination": "Home",
+    "startLat": 51.3298,
+    "startLng": -0.125,
+    "startTime": 1793979470415,
+    "endTime": 1793979470415,
+    "breadcrumbs": [
+      {
+        "lat": 51.3298,
+        "lng": -0.125,
+        "speedMph": 25,
+        "timestamp": 1793979470415
+      },
+      {
+        "lat": 51.3295,
+        "lng": -0.121,
+        "speedMph": 30,
+        "timestamp": 1793979470415
+      }
+    ],
+    "topSpeedMph": 30,
+    "totalDistanceKm": 0.27941975495140986,
+    "harshBrakingCount": 0,
+    "rapidAccelerationCount": 0,
+    "lastBreadcrumbTime": 1793979470415,
+    "endLat": 51.32948,
+    "endLng": -0.119095,
+    "durationMinutes": 1
+  },
+  {
+    "id": "trip_1793979495224_device_test_trip_lifecycle",
+    "memberId": "device_test_trip_lifecycle",
+    "memberName": "Isabel",
+    "transitMode": "DRIVING",
+    "origin": "Woodcote High School",
+    "destination": "Home",
+    "startLat": 51.3298,
+    "startLng": -0.125,
+    "startTime": 1793979495224,
+    "endTime": 1793979495224,
+    "breadcrumbs": [
+      {
+        "lat": 51.3298,
+        "lng": -0.125,
+        "speedMph": 25,
+        "timestamp": 1793979495224
+      },
+      {
+        "lat": 51.3295,
+        "lng": -0.121,
+        "speedMph": 30,
+        "timestamp": 1793979495224
+      }
+    ],
+    "topSpeedMph": 30,
+    "totalDistanceKm": 0.27941975495140986,
+    "harshBrakingCount": 0,
+    "rapidAccelerationCount": 0,
+    "lastBreadcrumbTime": 1793979495224,
+    "endLat": 51.32948,
+    "endLng": -0.119095,
+    "durationMinutes": 1
   }
 ]

@@ -77,4 +77,100 @@ class DepartureWarningTest {
         // Minimum exit speed threshold should require movement >= 0.5 mph
         assertTrue(AppConfig.MIN_EXIT_SPEED_MPH >= 0.5)
     }
+    @Test
+    fun testEloiseLeavingSchoolSaysSheHasJustLeftHerSchool() = kotlinx.coroutines.runBlocking {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        val database = androidx.room.Room.inMemoryDatabaseBuilder(application, com.example.data.AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val repository = com.example.data.FamilyRepository(database.familyDao())
+        val prefs = application.getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("isDepartureAlertsEnabled", true)
+            .putFloat("workLat", 51.3279926f)
+            .putFloat("workLng", -0.1405488f)
+            .putBoolean("isWorkCalibrated", true)
+            .apply()
+
+        // Woodcote High School safe zone
+        val school = com.example.data.SafeZone(
+            id = "zone_woodcote_high_school",
+            name = "Woodcote High School",
+            latitude = 51.3301600,
+            longitude = -0.1422829,
+            radiusMeters = 220.0,
+            iconName = "school"
+        )
+        repository.insertSafeZone(school)
+
+        val eloiseInside = com.example.data.FamilyMember(
+            id = "device_eloise_a9e3d7",
+            name = "Eloise",
+            avatarColorHex = "#FF4081",
+            x = -0.1422829,
+            y = 51.3301600,
+            speedMph = 0.0,
+            statusText = "At Woodcote High School"
+        )
+
+        val capturedEvents = mutableListOf<String>()
+
+        // 1. Initial state inside
+        com.example.data.GeofenceMonitor.evaluateGeofences(
+            context = application,
+            repository = repository,
+            prefs = prefs,
+            members = listOf(eloiseInside),
+            myLocation = null,
+            onUiEvent = { capturedEvents.add(it) }
+        )
+        assertTrue("No alert on initial inside state", capturedEvents.isEmpty())
+
+        // 2. Eloise leaves school grounds walking
+        val eloiseDeparting = eloiseInside.copy(
+            x = -0.140000,
+            y = 51.326500,
+            speedMph = 2.5,
+            statusText = "Walking (2.5 mph)"
+        )
+
+        for (i in 1..com.example.data.AppConfig.DEPARTURE_CONFIRMATION_CHECKS) {
+            com.example.data.GeofenceMonitor.evaluateGeofences(
+                context = application,
+                repository = repository,
+                prefs = prefs,
+                members = listOf(eloiseDeparting),
+                myLocation = null,
+                onUiEvent = { capturedEvents.add(it) }
+            )
+        }
+
+        assertEquals("Exactly one departure alert should be emitted", 1, capturedEvents.size)
+        val alert = capturedEvents.first()
+        assertTrue("Must state: Eloise has just left her school!", alert.contains("Eloise has just left her school!"))
+        assertFalse("Must NOT say arrived at Work", alert.contains("Work", ignoreCase = true))
+
+        // 3. Ensure moving through Work coordinates does not trigger arrival at work or repeated departures
+        capturedEvents.clear()
+        val eloiseNearWork = eloiseInside.copy(
+            x = -0.1405488,
+            y = 51.3279926,
+            speedMph = 2.0,
+            statusText = "Walking (2.0 mph)"
+        )
+
+        for (i in 1..5) {
+            com.example.data.GeofenceMonitor.evaluateGeofences(
+                context = application,
+                repository = repository,
+                prefs = prefs,
+                members = listOf(eloiseNearWork),
+                myLocation = null,
+                onUiEvent = { capturedEvents.add(it) }
+            )
+        }
+        assertTrue("Eloise must NEVER trigger arrival at Work or repeated departures", capturedEvents.isEmpty())
+
+        database.close()
+    }
 }

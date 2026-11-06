@@ -21,6 +21,30 @@ describe('Server TripTransitEngine', () => {
         radiusMeters: 220.0
     };
 
+    it('should format clean departure message when Eloise leaves her school', () => {
+        const memberId = 'device_eloise_test';
+        const startState = {
+            id: memberId,
+            name: 'Eloise',
+            x: -0.1410,
+            y: 51.3290,
+            speedMph: 3.0,
+            transitMode: 'WALKING'
+        };
+        const prevAtSchool = {
+            id: memberId,
+            name: 'Eloise',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            lastStationaryPlace: 'Woodcote High School',
+            speedMph: 0.0,
+            transitMode: 'STATIONARY'
+        };
+        const step1 = processTripLifecycle('test_token_eloise', memberId, startState, prevAtSchool, home, [woodcoteSchool]);
+        assert.ok(step1.alertEvent);
+        assert.strictEqual(step1.alertEvent.message, 'Eloise has just left her school!');
+    });
+
     it('should detect when member is At Home and snap coordinates', () => {
         const incoming = {
             id: 'device_isabel',

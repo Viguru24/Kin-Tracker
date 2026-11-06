@@ -1293,6 +1293,30 @@ body {
     gap: 8px;
 }
 
+.btn-gmaps {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    background: rgba(66, 133, 244, 0.15);
+    border: 1px solid rgba(66, 133, 244, 0.4);
+    color: #4285F4;
+    transition: all 0.2s ease;
+    box-shadow: 0 0 10px rgba(66, 133, 244, 0.1);
+}
+
+.btn-gmaps:hover {
+    background: rgba(66, 133, 244, 0.35);
+    border-color: #4285F4;
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 0 14px rgba(66, 133, 244, 0.4);
+}
+
 .btn-ring-phone {
     display: inline-flex;
     align-items: center;

@@ -60,14 +60,7 @@ if (Test-Path $BuildOutputsJson) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Notes)) {
-    Write-Host ""
-    Write-Host "Release Notes (or press Enter for default 'Bug fixes and school geofence stability'):" -ForegroundColor Cyan
-    $InputNotes = Read-Host
-    if ([string]::IsNullOrWhiteSpace($InputNotes)) {
-        $ReleaseNotes = "Bug fixes, school geofence stability, and performance improvements."
-    } else {
-        $ReleaseNotes = $InputNotes
-    }
+    $ReleaseNotes = "Bug fixes, school geofence stability, and performance improvements."
 } else {
     $ReleaseNotes = $Notes
 }

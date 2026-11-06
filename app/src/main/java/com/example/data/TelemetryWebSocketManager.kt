@@ -179,7 +179,27 @@ object TelemetryWebSocketManager {
                     (myDeviceName.isNotBlank() && alert.memberName.equals(myDeviceName, ignoreCase = true))
             if (isSelf) continue
 
-            if (alert.type == "DEPARTURE" && !isDepartureAlertsEnabled) continue
+            val personKey = IdentityUtils.getCanonicalPersonKey(alert.memberName, alert.memberId)
+            val statusPrefs = context.getSharedPreferences("geofence_status_prefs", Context.MODE_PRIVATE)
+
+            if (alert.type == "DEPARTURE") {
+                if (!isDepartureAlertsEnabled) continue
+                val lastDep = statusPrefs.getLong("global_dep_$personKey", 0L)
+                if (now - lastDep <= AppConfig.GEOFENCE_COOLDOWN_MS) {
+                    // Suppress duplicate departure alert from server when already alerted locally
+                    continue
+                }
+                statusPrefs.edit().putLong("global_dep_$personKey", now).apply()
+                TripTransitEngine.lastTripAlertTimestamp[personKey] = now
+                TripTransitEngine.lastTripAlertTimestamp[alert.memberId.lowercase().trim()] = now
+            } else if (alert.type == "ARRIVAL") {
+                val lastArr = statusPrefs.getLong("global_arr_$personKey", 0L)
+                if (now - lastArr <= AppConfig.GEOFENCE_COOLDOWN_MS) {
+                    // Suppress duplicate arrival alert from server when already alerted locally
+                    continue
+                }
+                statusPrefs.edit().putLong("global_arr_$personKey", now).apply()
+            }
 
             val title = alert.title.ifBlank { "🛰️ Kin-Tracker Notice" }
             val msg = alert.message

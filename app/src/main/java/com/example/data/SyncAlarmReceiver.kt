@@ -56,7 +56,7 @@ class SyncAlarmReceiver : BroadcastReceiver() {
                 }
 
                 if (bestLocation != null) {
-                    BackgroundSyncProcessor.processLocationUpdate(context, bestLocation)
+                    BackgroundSyncProcessor.processLocationUpdate(context, bestLocation, forceSync = true)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

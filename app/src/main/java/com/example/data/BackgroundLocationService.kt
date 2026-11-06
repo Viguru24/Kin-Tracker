@@ -29,6 +29,7 @@ import java.util.Locale
 import android.os.PowerManager
 import android.os.Looper
 import android.os.Bundle
+import android.os.SystemClock
 
 class BackgroundLocationService : Service() {
 
@@ -46,37 +47,35 @@ class BackgroundLocationService : Service() {
 
     private val directLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            acquireWakeLock()
-            
-            // Smart Adaptive movement detection: boost tracking rate when on the move
-            val speedMph = (location.speed * 2.23694f).toDouble()
-            val distM = if (lastObservedLat != 0.0 && lastObservedLng != 0.0) {
-                val x = (location.longitude - lastObservedLng) * 111000.0 * Math.cos(Math.toRadians(location.latitude))
-                val y = (location.latitude - lastObservedLat) * 111000.0
-                Math.hypot(x, y)
-            } else 0.0
+            withWakeLock(15_000L) {
+                // Smart Adaptive movement detection: boost tracking rate when on the move
+                val speedMph = (location.speed * 2.23694f).toDouble()
+                val distM = if (lastObservedLat != 0.0 && lastObservedLng != 0.0) {
+                    val x = (location.longitude - lastObservedLng) * 111000.0 * Math.cos(Math.toRadians(location.latitude))
+                    val y = (location.latitude - lastObservedLat) * 111000.0
+                    Math.hypot(x, y)
+                } else 0.0
 
-            val now = System.currentTimeMillis()
-            val isAccurate = !location.hasAccuracy() || location.accuracy <= 150f
-            if (isAccurate && (speedMph >= 1.0 || distM > 25.0)) {
-                lastMovementTime = now
-                lastObservedLat = location.latitude
-                lastObservedLng = location.longitude
-                if (!isUserMoving && !isAppInForeground) {
-                    isUserMoving = true
-                    restartLocationUpdates()
+                val now = System.currentTimeMillis()
+                val isAccurate = !location.hasAccuracy() || location.accuracy <= 150f
+                if (isAccurate && (speedMph >= 1.5 || distM > 35.0)) {
+                    lastMovementTime = now
+                    lastObservedLat = location.latitude
+                    lastObservedLng = location.longitude
+                    if (!isUserMoving && !isAppInForeground) {
+                        isUserMoving = true
+                        restartLocationUpdates()
+                    }
+                } else if (isUserMoving && (now - lastMovementTime) > 120_000L) {
+                    // 2 minutes of stillness: switch back to power saving
+                    isUserMoving = false
+                    lastObservedLat = location.latitude
+                    lastObservedLng = location.longitude
+                    if (!isAppInForeground) {
+                        restartLocationUpdates()
+                    }
                 }
-            } else if (isUserMoving && (now - lastMovementTime) > 120_000L) {
-                // 2 minutes of stillness: switch back to power saving
-                isUserMoving = false
-                lastObservedLat = location.latitude
-                lastObservedLng = location.longitude
-                if (!isAppInForeground) {
-                    restartLocationUpdates()
-                }
-            }
 
-            serviceScope.launch {
                 BackgroundSyncProcessor.processLocationUpdate(applicationContext, location)
             }
         }
@@ -85,16 +84,31 @@ class BackgroundLocationService : Service() {
         override fun onProviderDisabled(provider: String) {}
     }
 
-    private fun acquireWakeLock() {
-        try {
-            if (wakeLock == null) {
-                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KinTracker:LocationWakeLock").apply {
-                    setReferenceCounted(false)
+    private fun withWakeLock(timeoutMs: Long = 10_000L, block: suspend () -> Unit) {
+        serviceScope.launch {
+            var held = false
+            try {
+                if (wakeLock == null) {
+                    val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KinTracker:LocationWakeLock")?.apply {
+                        setReferenceCounted(false)
+                    }
+                }
+                wakeLock?.acquire(timeoutMs)
+                held = true
+                block()
+            } catch (e: Exception) {
+                // Safe fallback
+            } finally {
+                if (held) {
+                    try {
+                        if (wakeLock?.isHeld == true) {
+                            wakeLock?.release()
+                        }
+                    } catch (e: Exception) {}
                 }
             }
-            wakeLock?.acquire(15 * 60 * 1000L) // 15 min sliding window
-        } catch (e: Exception) {}
+        }
     }
 
     override fun onCreate() {
@@ -103,64 +117,10 @@ class BackgroundLocationService : Service() {
         repository = FamilyRepository(database.familyDao())
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         
-        acquireWakeLock()
         createNotificationChannel()
         startForegroundServiceWithNotification()
         startLocationUpdates()
         scheduleRepeatingSyncAlarm()
-        startContinuousSyncLoop()
-    }
-
-    private fun startContinuousSyncLoop() {
-        serviceScope.launch {
-            while (isActive) {
-                try {
-                    acquireWakeLock()
-                    val hasFine = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    } else true
-                    val hasCoarse = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    } else true
-
-                    if (hasFine || hasCoarse) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasFine) {
-                            try {
-                                locationManager?.getCurrentLocation(
-                                    LocationManager.GPS_PROVIDER,
-                                    null,
-                                    mainExecutor
-                                ) { loc ->
-                                    if (loc != null) {
-                                        serviceScope.launch {
-                                            BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {}
-                        }
-
-                        val gps = if (hasFine) locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
-                        val net = locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                        val best = if (gps != null && net != null) {
-                            if (net.hasAccuracy() && net.accuracy > 150f && (System.currentTimeMillis() - gps.time) < 10 * 60 * 1000L) {
-                                gps
-                            } else if (gps.time > net.time) gps else net
-                        } else gps ?: net
-
-                    best?.let { loc ->
-                            BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
-                        }
-                    }
-                } catch (e: Exception) {}
-                val loopDelay = when {
-                    isAppInForeground -> 4000L
-                    isUserMoving -> 5000L // 5-second polling when actively moving (Smart High Precision)
-                    else -> 25000L // 25-second relaxed polling when stationary (battery saver)
-                }
-                delay(loopDelay)
-            }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -278,27 +238,23 @@ class BackgroundLocationService : Service() {
                 false
             }
 
-            // Adaptive intervals: Highest real-time precision (5s, 0m) when moving or in foreground, 45s when stationary
+            // Smart Adaptive intervals:
+            // Foreground: 2s, 0m (smooth interactive map)
+            // Moving: 10s, 15m (accurate road tracking while conserving power)
+            // Stationary: 120s, 40m (power saving, GPS noise immunity)
             val interval = when {
-                isAppInForeground -> 1000L
-                isUserMoving -> 5000L
-                else -> 45000L
+                isAppInForeground -> 2000L
+                isUserMoving -> 10000L
+                else -> 120000L
             }
             val minDistance = when {
                 isAppInForeground -> 0.0f
-                isUserMoving -> 0.0f
-                else -> 5.0f
+                isUserMoving -> 15.0f
+                else -> 40.0f
             }
-            val pendingIntent = getReceiverPendingIntent()
 
             if (hasFine && isGpsEnabled) {
                 try {
-                    locationManager?.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER,
-                        interval,
-                        minDistance,
-                        pendingIntent
-                    )
                     locationManager?.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER,
                         interval,
@@ -312,16 +268,12 @@ class BackgroundLocationService : Service() {
             }
             if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
+                    val netInterval = if (isAppInForeground) 2000L else if (isUserMoving) 10000L else 60000L
+                    val netDistance = if (isAppInForeground) 0.0f else if (isUserMoving) 15.0f else 40.0f
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
-                        interval,
-                        minDistance,
-                        pendingIntent
-                    )
-                    locationManager?.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER,
-                        interval,
-                        minDistance,
+                        netInterval,
+                        netDistance,
                         directLocationListener,
                         Looper.getMainLooper()
                     )
@@ -355,7 +307,7 @@ class BackgroundLocationService : Service() {
                 lastKnownGps ?: lastKnownNet
             }
             bestLocation?.let { loc ->
-                serviceScope.launch {
+                withWakeLock(10_000L) {
                     BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
                 }
             }
@@ -375,12 +327,13 @@ class BackgroundLocationService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
         )
         
-        val interval = 5 * 60 * 1000L
-        val triggerAt = System.currentTimeMillis() + interval
+        // Relaxed 15-minute inexact alarm interval for stationary check-ins (battery saver)
+        val interval = 15 * 60 * 1000L
+        val triggerAt = SystemClock.elapsedRealtime() + interval
         
         try {
-            alarmManager.setRepeating(
-                android.app.AlarmManager.RTC_WAKEUP,
+            alarmManager.setInexactRepeating(
+                android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
                 triggerAt,
                 interval,
                 pendingIntent

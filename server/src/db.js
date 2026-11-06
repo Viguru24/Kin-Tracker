@@ -29,6 +29,23 @@ function loadDb() {
             const raw = fs.readFileSync(DB_FILE, 'utf8');
             db = JSON.parse(raw);
             console.log(`[DB] Successfully loaded database with ${Object.keys(db.circles || {}).length} circles.`);
+
+            // Auto-heal rogue Work zone saved on top of school / Woodcote Primary legacy coordinate
+            let dbHealed = false;
+            Object.values(db.circles || {}).forEach(circle => {
+                if (circle.workLat && circle.workLng) {
+                    const isLegacyWoodcote = Math.hypot((circle.workLat - 51.3280) * 111.0, (circle.workLng - (-0.1405)) * 111.0) < 0.6;
+                    const isNearWoodcoteHigh = Math.hypot((circle.workLat - 51.33016) * 111.0, (circle.workLng - (-0.14228)) * 111.0) < 0.6;
+                    if (isLegacyWoodcote || isNearWoodcoteHigh) {
+                        console.log(`[DB] Purging rogue Work zone on top of school from circle ${circle.id}`);
+                        circle.workLat = 0.0;
+                        circle.workLng = 0.0;
+                        circle.isWorkCalibrated = false;
+                        dbHealed = true;
+                    }
+                }
+            });
+            if (dbHealed) saveDb();
         } catch (err) {
             console.error('[DB] Error loading DB file, initializing fresh:', err.message);
         }
