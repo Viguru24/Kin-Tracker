@@ -92,6 +92,8 @@ fun computeClusterLayout(
     val unassignedMembers = mutableListOf<FamilyMember>()
 
     activeMembers.forEach { m ->
+        // Hysteresis: a member already locked inside a barrier only leaves once beyond radius + exit buffer.
+        // This stops GPS drift at the boundary from flipping cluster membership (which re-slots every face).
         val prevBarrier = previousBarrierMembership[m.id]
 
         val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
@@ -118,19 +120,26 @@ fun computeClusterLayout(
 
         val inAnyBarrier = isHome || matchedZone != null || isInsideWork
 
+        // Inside a barrier, ignore low GPS-noise speeds; only explicit travel or a real speed breaks the lock.
         val isActivelyMoving = if (inAnyBarrier) {
-            m.speedMph >= barrierBreakoutSpeedMph || statusIndicatesTravel(m)
+            m.isComingHome || (!(atHomeStatus || atSafeZoneStatus) && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
         } else {
-            m.speedMph >= 1.5 || statusIndicatesTravel(m)
+            m.isComingHome || m.speedMph >= 0.6 || statusIndicatesTravel(m) ||
+                classifyTransitMode(m.speedMph, m.statusText, m.id) != TransitMode.STATIONARY
         }
 
-        if (isHome && !isActivelyMoving) {
+        if (isActivelyMoving) {
+            adjustedCoordinates[m.id] = GeoPoint(m.y, m.x)
+            return@forEach
+        }
+
+        if (isHome) {
             homeClusterMembers.add(m.id)
             barrierMembership[m.id] = "home"
-        } else if (matchedZone != null && !isActivelyMoving) {
+        } else if (matchedZone != null) {
             safeZoneClusterMembers.getOrPut(matchedZone.id) { mutableListOf() }.add(m.id)
             barrierMembership[m.id] = "zone:${matchedZone.id}"
-        } else if (isInsideWork && !isActivelyMoving) {
+        } else if (isInsideWork) {
             workClusterMembers.add(m.id)
             barrierMembership[m.id] = "work"
         } else {
@@ -138,71 +147,143 @@ fun computeClusterLayout(
         }
     }
 
-    // Helper: place members in ring around center
-    fun layoutRadialCluster(center: GeoPoint, memberIds: List<String>, clusterKey: String, baseRadiusMeters: Double) {
-        val count = memberIds.size
-        if (count == 0) return
-        clusterAnchorPoints[clusterKey] = center
-        clusters.add(memberIds)
+    // A. Form Home Cluster (a lone member is pinned to the Home centre so GPS drift never moves them)
+    if (homeClusterMembers.size > 1) {
+        clusters.add(homeClusterMembers.sorted())
+    } else if (homeClusterMembers.size == 1) {
+        adjustedCoordinates[homeClusterMembers[0]] = GeoPoint(homeLat, homeLng)
+    }
 
-        val metersPerPx = metersPerPixelAtZoom(center.latitude, zoomLevel)
-        val minRingPx = 48.0 * density
-        val dynamicRadiusMeters = maxOf(baseRadiusMeters, minRingPx * metersPerPx)
-        val cosLat = kotlin.math.cos(Math.toRadians(center.latitude)).coerceAtLeast(0.01)
-
-        val sorted = memberIds.sorted()
-        sorted.forEachIndexed { i, id ->
-            val angle = (2.0 * Math.PI * i) / count - (Math.PI / 2.0)
-            val dLat = (dynamicRadiusMeters * kotlin.math.sin(angle)) / 111139.0
-            val dLng = (dynamicRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
-            adjustedCoordinates[id] = GeoPoint(center.latitude + dLat, center.longitude + dLng)
+    // B. Form Safe Zone Clusters (including default Woodcote school zones)
+    effectiveSafeZones.forEach { zone ->
+        val zoneMembers = safeZoneClusterMembers[zone.id]
+        if (zoneMembers != null) {
+            if (zoneMembers.size > 1) {
+                clusters.add(zoneMembers.sorted())
+            } else if (zoneMembers.size == 1) {
+                adjustedCoordinates[zoneMembers[0]] = GeoPoint(zone.latitude, zone.longitude)
+            }
         }
     }
 
-    if (homeClusterMembers.isNotEmpty()) {
-        layoutRadialCluster(GeoPoint(homeLat, homeLng), homeClusterMembers, "home", maxOf(homeRadiusMeters * 0.55, 60.0))
+    // C. Form Work Cluster
+    if (workClusterMembers.size > 1) {
+        clusters.add(workClusterMembers.sorted())
+    } else if (workClusterMembers.size == 1) {
+        adjustedCoordinates[workClusterMembers[0]] = GeoPoint(workLat, workLng)
     }
 
-    safeZoneClusterMembers.forEach { (zoneId, membersInZone) ->
-        val zone = effectiveSafeZones.first { it.id == zoneId }
-        val effRadius = com.example.data.GeoUtils.effectiveSafeZoneRadiusMeters(zone)
-        layoutRadialCluster(GeoPoint(zone.latitude, zone.longitude), membersInZone, "zone:$zoneId", maxOf(effRadius * 0.55, 50.0))
-    }
+    // D. Form Ad-Hoc Co-Located Clusters for members outside zones
+    val visited = mutableSetOf<String>()
+    val collisionThresholdPx = 60.0 * density
+    val avgLatForAdhoc = if (unassignedMembers.isNotEmpty()) unassignedMembers[0].y else (if (homeLat != 0.0) homeLat else 51.33)
+    val clusterThresholdMeters = maxOf(40.0, collisionThresholdPx * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
 
-    if (workClusterMembers.isNotEmpty()) {
-        layoutRadialCluster(GeoPoint(workLat, workLng), workClusterMembers, "work", maxOf(workRadiusMeters * 0.55, 50.0))
-    }
+    for (i in unassignedMembers.indices) {
+        val m1 = unassignedMembers[i]
+        if (visited.contains(m1.id)) continue
 
-    val assignedProximity = mutableSetOf<String>()
-    val proximityThresholdMeters = 35.0
+        val currentCluster = mutableListOf(m1.id)
+        visited.add(m1.id)
 
-    for (i in 0 until unassignedMembers.size) {
-        val mA = unassignedMembers[i]
-        if (assignedProximity.contains(mA.id)) continue
-
-        val localCluster = mutableListOf(mA)
         for (j in i + 1 until unassignedMembers.size) {
-            val mB = unassignedMembers[j]
-            if (assignedProximity.contains(mB.id)) continue
-            val dist = com.example.data.GeoUtils.distanceMeters(mA.y, mA.x, mB.y, mB.x)
-            if (dist <= proximityThresholdMeters) {
-                localCluster.add(mB)
+            val m2 = unassignedMembers[j]
+            if (visited.contains(m2.id)) continue
+
+            val distM = com.example.data.GeoUtils.distanceMeters(m1.y, m1.x, m2.y, m2.x)
+            if (distM < clusterThresholdMeters) {
+                currentCluster.add(m2.id)
+                visited.add(m2.id)
             }
         }
 
-        if (localCluster.size > 1) {
-            val avgLat = localCluster.map { it.y }.average()
-            val avgLng = localCluster.map { it.x }.average()
-            val center = GeoPoint(avgLat, avgLng)
-            val clusterKey = "peer_${mA.id}"
-            localCluster.forEach { assignedProximity.add(it.id) }
-            layoutRadialCluster(center, localCluster.map { it.id }, clusterKey, 28.0)
+        if (currentCluster.size > 1) {
+            val sortedCluster = currentCluster.sorted()
+            clusters.add(sortedCluster)
+            val clusterKey = "adhoc:${sortedCluster.first()}"
+            sortedCluster.forEach { mId ->
+                barrierMembership[mId] = clusterKey
+            }
         } else {
-            adjustedCoordinates[mA.id] = GeoPoint(mA.y, mA.x)
+            val mId = currentCluster[0]
+            val member = activeMembers.first { it.id == mId }
+            adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
         }
     }
 
-    val minMarkerSeparationPx = 54.0 * density
+    // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor.
+    // Screen-space scaling: radius is specified in DP and scaled by metersPerPixelAtZoom
+    // so faces NEVER overlap no matter how much you zoom in or zoom out!
+    for (cluster in clusters) {
+        val isHomeCluster = cluster.any { homeClusterMembers.contains(it) }
+        val matchedZone = effectiveSafeZones.firstOrNull { zone ->
+            safeZoneClusterMembers[zone.id]?.any { cluster.contains(it) } == true
+        }
+        val isWorkCluster = cluster.any { workClusterMembers.contains(it) }
+
+        val anchorGeo = when {
+            isHomeCluster && homeLat != 0.0 && homeLng != 0.0 -> GeoPoint(homeLat, homeLng)
+            matchedZone != null -> GeoPoint(matchedZone.latitude, matchedZone.longitude)
+            isWorkCluster && workLat != 0.0 && workLng != 0.0 -> GeoPoint(workLat, workLng)
+            else -> {
+                var sumLat = 0.0
+                var sumLng = 0.0
+                for (mId in cluster) {
+                    val member = activeMembers.first { it.id == mId }
+                    sumLat += member.y
+                    sumLng += member.x
+                }
+                GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
+            }
+        }
+
+        // Screen-space radius: 40dp radius at 135 deg / 45 deg angles ensures ~56.6dp separation
+        // With 54dp face bubbles, this leaves an intimate ~2dp gap so faces bounce off each other without overlapping!
+        val radiusDp = when (cluster.size) {
+            2 -> 40.0
+            3 -> 44.0
+            4 -> 48.0
+            else -> maxOf(48.0, 30.0 / kotlin.math.sin(Math.PI / cluster.size))
+        }
+        val radiusPx = radiusDp * density
+        val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
+        val spreadRadiusMeters = radiusPx * metersPerPx
+
+        val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude)).coerceAtLeast(0.01)
+
+        for (idx in cluster.indices) {
+            val mId = cluster[idx]
+            // For 2 members: Idx 0 is angled North-West (135┬░ = 3¤Ç/4), Idx 1 is angled North-East (45┬░ = ¤Ç/4)
+            // Both faces sit side by side bouncing off each other right above the place pin,
+            // creating beautiful angled spoke lines down to the place icon!
+            val angle = when (cluster.size) {
+                2 -> if (idx == 0) (3.0 * Math.PI / 4.0) else (Math.PI / 4.0)
+                3 -> when (idx) {
+                    0 -> Math.PI / 2.0 // North
+                    1 -> -Math.PI / 6.0 // South-East
+                    else -> 7.0 * Math.PI / 6.0 // South-West
+                }
+                4 -> when (idx) {
+                    0 -> 3.0 * Math.PI / 4.0 // North-West
+                    1 -> Math.PI / 4.0 // North-East
+                    2 -> -Math.PI / 4.0 // South-East
+                    else -> -3.0 * Math.PI / 4.0 // South-West
+                }
+                else -> (Math.PI / 2.0) + (idx * 2.0 * Math.PI / cluster.size)
+            }
+
+            val deltaLat = (spreadRadiusMeters * kotlin.math.sin(angle)) / 111139.0
+            val deltaLng = (spreadRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
+
+            val orbitGeo = GeoPoint(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
+            adjustedCoordinates[mId] = orbitGeo
+            clusterAnchorPoints[mId] = anchorGeo
+        }
+    }
+
+    // Universal screen-space deconfliction pass: guarantees that NO TWO active members'
+    // face bubbles ever collide or overlap on screen, maintaining the intimate "bouncing" proximity.
+    val minMarkerSeparationPx = 54.0 * density // Minimum 54dp center-to-center separation
     val activeIds = activeMembers.map { it.id }
     repeat(2) {
         for (i in 0 until activeIds.size) {
@@ -222,10 +303,12 @@ fun computeClusterLayout(
                     val cosLat = kotlin.math.cos(Math.toRadians(avgLat)).coerceAtLeast(0.01)
 
                     if (distM < 0.1) {
+                        // Exactly co-located (e.g. sharing car or identical GPS): spread horizontally (West/East)
                         val shiftLng = neededShiftM / (111139.0 * cosLat)
                         adjustedCoordinates[idA] = GeoPoint(posA.latitude, posA.longitude - shiftLng)
                         adjustedCoordinates[idB] = GeoPoint(posB.latitude, posB.longitude + shiftLng)
                     } else {
+                        // Push apart along their existing separation axis
                         val dLat = posB.latitude - posA.latitude
                         val dLng = (posB.longitude - posA.longitude) * cosLat
                         val angle = kotlin.math.atan2(dLat, dLng)

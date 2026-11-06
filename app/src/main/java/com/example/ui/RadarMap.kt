@@ -1,4 +1,5 @@
 package com.example.ui
+import com.example.ui.map.*
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -101,326 +102,6 @@ private val kinBaseTileSource
     get() = if (com.example.data.RemoteConfig.mapProvider.equals("osm", ignoreCase = true)) TileSourceFactory.MAPNIK else cartoVoyagerTileSource
 
 
-
-data class MemberVisualState(
-    var currentGeo: GeoPoint,
-    var targetGeo: GeoPoint,
-    var speedMph: Double,
-    var bearingDeg: Double,
-    var lastTargetUpdateTime: Long,
-    var isMoving: Boolean,
-    var markerRef: Marker? = null
-)
-
-data class ClusterLayoutResult(
-    val adjustedCoordinates: Map<String, GeoPoint>,
-    val clusterAnchorPoints: Map<String, GeoPoint>,
-    val clusters: List<List<String>>,
-    /** memberId -> barrier key ("home", "zone:<id>", "work") for members locked stationary inside a barrier. */
-    val barrierMembership: Map<String, String> = emptyMap()
-)
-
-/** True when the status text explicitly describes travel (not inferred from noisy GPS speed). */
-private fun statusIndicatesTravel(m: FamilyMember): Boolean {
-    if (classifyTransitMode(0.0, m.statusText, m.id) != TransitMode.STATIONARY) return true
-    val s = m.statusText
-    return s.contains("walk", ignoreCase = true) ||
-        s.contains("moving", ignoreCase = true) ||
-        s.contains("driving", ignoreCase = true) ||
-        s.contains("bike", ignoreCase = true) ||
-        s.contains("transit", ignoreCase = true) ||
-        s.contains("commute", ignoreCase = true)
-}
-
-/**
- * Calculates ground resolution (meters per screen pixel) at a given latitude and map zoom level.
- * Used for dynamic, zoom-adaptive marker deconfliction so faces NEVER overlap at ANY zoom level.
- */
-fun metersPerPixelAtZoom(latitude: Double, zoom: Double): Double {
-    val cosLat = kotlin.math.cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
-    return (156543.03392 * cosLat) / Math.pow(2.0, zoom.coerceIn(2.0, 21.0))
-}
-
-/**
- * Boosts saturation and brightness of member avatar colors so leader spoke lines
- * remain brilliantly vivid and crystal clear across both dark canvas and street map tiles.
- */
-fun getVibrantSpokeColor(hexColor: String): Int {
-    return try {
-        val parsed = android.graphics.Color.parseColor(hexColor)
-        val hsv = FloatArray(3)
-        android.graphics.Color.colorToHSV(parsed, hsv)
-        hsv[1] = maxOf(hsv[1], 0.70f)
-        hsv[2] = maxOf(hsv[2], 0.92f)
-        android.graphics.Color.HSVToColor(hsv)
-    } catch (_: Exception) {
-        android.graphics.Color.parseColor("#00E5FF")
-    }
-}
-
-
-fun computeClusterLayout(
-    members: List<FamilyMember>,
-    safeZones: List<SafeZone>,
-    homeLat: Double,
-    homeLng: Double,
-    homeRadiusMeters: Double,
-    isWorkCalibrated: Boolean,
-    workLat: Double,
-    workLng: Double,
-    workRadiusMeters: Double,
-    previousBarrierMembership: Map<String, String> = emptyMap(),
-    exitBufferMeters: Double = 60.0,
-    barrierBreakoutSpeedMph: Double = 4.0,
-    zoomLevel: Double = 15.5,
-    density: Float = 3.0f
-): ClusterLayoutResult {
-    val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
-    val clusterAnchorPoints = mutableMapOf<String, GeoPoint>()
-    val clusters = mutableListOf<List<String>>()
-    val barrierMembership = mutableMapOf<String, String>()
-
-    val effectiveSafeZones = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
-    val activeMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
-    val homeClusterMembers = mutableListOf<String>()
-    val safeZoneClusterMembers = mutableMapOf<String, MutableList<String>>()
-    val workClusterMembers = mutableListOf<String>()
-    val unassignedMembers = mutableListOf<FamilyMember>()
-
-    activeMembers.forEach { m ->
-        // Hysteresis: a member already locked inside a barrier only leaves once beyond radius + exit buffer.
-        // This stops GPS drift at the boundary from flipping cluster membership (which re-slots every face).
-        val prevBarrier = previousBarrierMembership[m.id]
-
-        val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
-        } else Double.MAX_VALUE
-        val effectiveHomeRadius = maxOf(homeRadiusMeters, 140.0)
-        val homeLimit = if (prevBarrier == "home") effectiveHomeRadius + exitBufferMeters else effectiveHomeRadius
-        val atHomeStatus = m.statusText.contains("At Home", ignoreCase = true)
-        val isHome = (homeLat != 0.0 && homeLng != 0.0) && (distToHome <= homeLimit || atHomeStatus)
-
-        val matchedZone = effectiveSafeZones.filter { zone ->
-            val effRadius = com.example.data.GeoUtils.effectiveSafeZoneRadiusMeters(zone)
-            val atThisZoneStatus = m.statusText.contains("At ${zone.name}", ignoreCase = true)
-            val limit = if (prevBarrier == "zone:${zone.id}" || atThisZoneStatus) effRadius + exitBufferMeters else effRadius + 15.0
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude) <= limit || atThisZoneStatus
-        }.minByOrNull { zone ->
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, zone.latitude, zone.longitude)
-        }
-        val atSafeZoneStatus = matchedZone != null && m.statusText.contains("At ${matchedZone.name}", ignoreCase = true)
-
-        val workLimit = if (prevBarrier == "work") workRadiusMeters + exitBufferMeters else workRadiusMeters
-        val isInsideWork = isWorkCalibrated && workLat != 0.0 && workLng != 0.0 &&
-            com.example.data.GeoUtils.distanceMeters(m.y, m.x, workLat, workLng) <= workLimit
-
-        val inAnyBarrier = isHome || matchedZone != null || isInsideWork
-
-        // Inside a barrier, ignore low GPS-noise speeds; only explicit travel or a real speed breaks the lock.
-        val isActivelyMoving = if (inAnyBarrier) {
-            m.isComingHome || (!(atHomeStatus || atSafeZoneStatus) && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
-        } else {
-            m.isComingHome || m.speedMph >= 0.6 || statusIndicatesTravel(m) ||
-                classifyTransitMode(m.speedMph, m.statusText, m.id) != TransitMode.STATIONARY
-        }
-
-        if (isActivelyMoving) {
-            adjustedCoordinates[m.id] = GeoPoint(m.y, m.x)
-            return@forEach
-        }
-
-        if (isHome) {
-            homeClusterMembers.add(m.id)
-            barrierMembership[m.id] = "home"
-        } else if (matchedZone != null) {
-            safeZoneClusterMembers.getOrPut(matchedZone.id) { mutableListOf() }.add(m.id)
-            barrierMembership[m.id] = "zone:${matchedZone.id}"
-        } else if (isInsideWork) {
-            workClusterMembers.add(m.id)
-            barrierMembership[m.id] = "work"
-        } else {
-            unassignedMembers.add(m)
-        }
-    }
-
-    // A. Form Home Cluster (a lone member is pinned to the Home centre so GPS drift never moves them)
-    if (homeClusterMembers.size > 1) {
-        clusters.add(homeClusterMembers.sorted())
-    } else if (homeClusterMembers.size == 1) {
-        adjustedCoordinates[homeClusterMembers[0]] = GeoPoint(homeLat, homeLng)
-    }
-
-    // B. Form Safe Zone Clusters (including default Woodcote school zones)
-    effectiveSafeZones.forEach { zone ->
-        val zoneMembers = safeZoneClusterMembers[zone.id]
-        if (zoneMembers != null) {
-            if (zoneMembers.size > 1) {
-                clusters.add(zoneMembers.sorted())
-            } else if (zoneMembers.size == 1) {
-                adjustedCoordinates[zoneMembers[0]] = GeoPoint(zone.latitude, zone.longitude)
-            }
-        }
-    }
-
-    // C. Form Work Cluster
-    if (workClusterMembers.size > 1) {
-        clusters.add(workClusterMembers.sorted())
-    } else if (workClusterMembers.size == 1) {
-        adjustedCoordinates[workClusterMembers[0]] = GeoPoint(workLat, workLng)
-    }
-
-    // D. Form Ad-Hoc Co-Located Clusters for members outside zones
-    val visited = mutableSetOf<String>()
-    val collisionThresholdPx = 60.0 * density
-    val avgLatForAdhoc = if (unassignedMembers.isNotEmpty()) unassignedMembers[0].y else (if (homeLat != 0.0) homeLat else 51.33)
-    val clusterThresholdMeters = maxOf(40.0, collisionThresholdPx * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
-
-    for (i in unassignedMembers.indices) {
-        val m1 = unassignedMembers[i]
-        if (visited.contains(m1.id)) continue
-
-        val currentCluster = mutableListOf(m1.id)
-        visited.add(m1.id)
-
-        for (j in i + 1 until unassignedMembers.size) {
-            val m2 = unassignedMembers[j]
-            if (visited.contains(m2.id)) continue
-
-            val distM = com.example.data.GeoUtils.distanceMeters(m1.y, m1.x, m2.y, m2.x)
-            if (distM < clusterThresholdMeters) {
-                currentCluster.add(m2.id)
-                visited.add(m2.id)
-            }
-        }
-
-        if (currentCluster.size > 1) {
-            val sortedCluster = currentCluster.sorted()
-            clusters.add(sortedCluster)
-            val clusterKey = "adhoc:${sortedCluster.first()}"
-            sortedCluster.forEach { mId ->
-                barrierMembership[mId] = clusterKey
-            }
-        } else {
-            val mId = currentCluster[0]
-            val member = activeMembers.first { it.id == mId }
-            adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
-        }
-    }
-
-    // Lay out each cluster in a static, peaceful radial orbit around the barrier anchor.
-    // Screen-space scaling: radius is specified in DP and scaled by metersPerPixelAtZoom
-    // so faces NEVER overlap no matter how much you zoom in or zoom out!
-    for (cluster in clusters) {
-        val isHomeCluster = cluster.any { homeClusterMembers.contains(it) }
-        val matchedZone = effectiveSafeZones.firstOrNull { zone ->
-            safeZoneClusterMembers[zone.id]?.any { cluster.contains(it) } == true
-        }
-        val isWorkCluster = cluster.any { workClusterMembers.contains(it) }
-
-        val anchorGeo = when {
-            isHomeCluster && homeLat != 0.0 && homeLng != 0.0 -> GeoPoint(homeLat, homeLng)
-            matchedZone != null -> GeoPoint(matchedZone.latitude, matchedZone.longitude)
-            isWorkCluster && workLat != 0.0 && workLng != 0.0 -> GeoPoint(workLat, workLng)
-            else -> {
-                var sumLat = 0.0
-                var sumLng = 0.0
-                for (mId in cluster) {
-                    val member = activeMembers.first { it.id == mId }
-                    sumLat += member.y
-                    sumLng += member.x
-                }
-                GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
-            }
-        }
-
-        // Screen-space radius: 40dp radius at 135 deg / 45 deg angles ensures ~56.6dp separation
-        // With 54dp face bubbles, this leaves an intimate ~2dp gap so faces bounce off each other without overlapping!
-        val radiusDp = when (cluster.size) {
-            2 -> 40.0
-            3 -> 44.0
-            4 -> 48.0
-            else -> maxOf(48.0, 30.0 / kotlin.math.sin(Math.PI / cluster.size))
-        }
-        val radiusPx = radiusDp * density
-        val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
-        val spreadRadiusMeters = radiusPx * metersPerPx
-
-        val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude)).coerceAtLeast(0.01)
-
-        for (idx in cluster.indices) {
-            val mId = cluster[idx]
-            // For 2 members: Idx 0 is angled North-West (135° = 3π/4), Idx 1 is angled North-East (45° = π/4)
-            // Both faces sit side by side bouncing off each other right above the place pin,
-            // creating beautiful angled spoke lines down to the place icon!
-            val angle = when (cluster.size) {
-                2 -> if (idx == 0) (3.0 * Math.PI / 4.0) else (Math.PI / 4.0)
-                3 -> when (idx) {
-                    0 -> Math.PI / 2.0 // North
-                    1 -> -Math.PI / 6.0 // South-East
-                    else -> 7.0 * Math.PI / 6.0 // South-West
-                }
-                4 -> when (idx) {
-                    0 -> 3.0 * Math.PI / 4.0 // North-West
-                    1 -> Math.PI / 4.0 // North-East
-                    2 -> -Math.PI / 4.0 // South-East
-                    else -> -3.0 * Math.PI / 4.0 // South-West
-                }
-                else -> (Math.PI / 2.0) + (idx * 2.0 * Math.PI / cluster.size)
-            }
-
-            val deltaLat = (spreadRadiusMeters * kotlin.math.sin(angle)) / 111139.0
-            val deltaLng = (spreadRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
-
-            val orbitGeo = GeoPoint(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
-            adjustedCoordinates[mId] = orbitGeo
-            clusterAnchorPoints[mId] = anchorGeo
-        }
-    }
-
-    // Universal screen-space deconfliction pass: guarantees that NO TWO active members'
-    // face bubbles ever collide or overlap on screen, maintaining the intimate "bouncing" proximity.
-    val minMarkerSeparationPx = 54.0 * density // Minimum 54dp center-to-center separation
-    val activeIds = activeMembers.map { it.id }
-    repeat(2) {
-        for (i in 0 until activeIds.size) {
-            val idA = activeIds[i]
-            val posA = adjustedCoordinates[idA] ?: continue
-            for (j in i + 1 until activeIds.size) {
-                val idB = activeIds[j]
-                val posB = adjustedCoordinates[idB] ?: continue
-
-                val avgLat = (posA.latitude + posB.latitude) / 2.0
-                val metersPerPx = metersPerPixelAtZoom(avgLat, zoomLevel)
-                val minSeparationMeters = minMarkerSeparationPx * metersPerPx
-                val distM = com.example.data.GeoUtils.distanceMeters(posA.latitude, posA.longitude, posB.latitude, posB.longitude)
-
-                if (distM < minSeparationMeters) {
-                    val neededShiftM = (minSeparationMeters - distM) / 2.0 + 1.0
-                    val cosLat = kotlin.math.cos(Math.toRadians(avgLat)).coerceAtLeast(0.01)
-
-                    if (distM < 0.1) {
-                        // Exactly co-located (e.g. sharing car or identical GPS): spread horizontally (West/East)
-                        val shiftLng = neededShiftM / (111139.0 * cosLat)
-                        adjustedCoordinates[idA] = GeoPoint(posA.latitude, posA.longitude - shiftLng)
-                        adjustedCoordinates[idB] = GeoPoint(posB.latitude, posB.longitude + shiftLng)
-                    } else {
-                        // Push apart along their existing separation axis
-                        val dLat = posB.latitude - posA.latitude
-                        val dLng = (posB.longitude - posA.longitude) * cosLat
-                        val angle = kotlin.math.atan2(dLat, dLng)
-                        val shiftLat = (neededShiftM * kotlin.math.sin(angle)) / 111139.0
-                        val shiftLng = (neededShiftM * kotlin.math.cos(angle)) / (111139.0 * cosLat)
-
-                        adjustedCoordinates[idA] = GeoPoint(posA.latitude - shiftLat, posA.longitude - shiftLng)
-                        adjustedCoordinates[idB] = GeoPoint(posB.latitude + shiftLat, posB.longitude + shiftLng)
-                    }
-                }
-            }
-        }
-    }
-
-    return ClusterLayoutResult(adjustedCoordinates, clusterAnchorPoints, clusters, barrierMembership)
-}
 
 @Composable
 fun RadarMap(
@@ -1414,439 +1095,42 @@ fun RadarMap(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 1. FLOATING TOP HUD ACTION BAR — Bell (Left), Circle Switcher (Center), Gear (Right)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // ── 1. LEFT: Notification History Bell Button ──
-                Surface(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clickable {
-                            showCircleSwitcher = false
-                            onOpenNotificationHistory()
-                        }
-                        .testTag("notification_bell_button"),
-                    color = Color(0xF2161A24),
-                    shape = CircleShape,
-                    border = BorderStroke(1.2.dp, if (recentAlertCount > 0) Color(0xFF00E5FF) else Color(0xFF384358)),
-                    shadowElevation = 8.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("🔔", fontSize = 16.sp)
-                        if (recentAlertCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(top = 4.dp, end = 4.dp)
-                                    .size(8.dp)
-                                    .background(Color(0xFF00E5FF), CircleShape)
-                            )
-                        }
-                    }
+            MapTopHudBar(
+                recentAlertCount = recentAlertCount,
+                onOpenNotificationHistory = onOpenNotificationHistory,
+                activeGroupPinCode = activeGroupPinCode,
+                groupPinMappings = groupPinMappings,
+                memberCount = members.size,
+                isCircleSwitcherOpen = showCircleSwitcher,
+                onToggleCircleSwitcher = { showCircleSwitcher = !showCircleSwitcher },
+                onSettingsClick = {
+                    showCircleSwitcher = false
+                    onSettingsClick()
                 }
-
-                // ── 2. CENTRE: CIRCLE SELECTOR PILL (Wide, roomy, never squashed) ──
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
-                        val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
-                        active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
-                    } else if (groupPinMappings.isNotEmpty()) {
-                        groupPinMappings.first().groupName.ifBlank { "Family Circle" }
-                    } else "Family Circle"
-
-                    Surface(
-                        modifier = Modifier
-                            .height(38.dp)
-                            .clickable {
-                                showCircleSwitcher = !showCircleSwitcher
-                            }
-                            .testTag("circle_switcher_pill"),
-                        color = Color(0xF2161A24),
-                        shape = RoundedCornerShape(19.dp),
-                        border = BorderStroke(1.2.dp, if (showCircleSwitcher) RadarCyan else Color(0xFF384358)),
-                        shadowElevation = 8.dp
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 14.dp)
-                                .fillMaxHeight(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(text = "👥", fontSize = 13.sp, maxLines = 1, softWrap = false)
-                            Text(
-                                text = activeCircleName,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0x3300E5FF)
-                            ) {
-                                Text(
-                                    text = "${members.size}",
-                                    color = RadarCyan,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                            Text(
-                                text = if (showCircleSwitcher) "▲" else "▼",
-                                color = RadarCyan,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false
-                            )
-                        }
-                    }
-                }
-
-                // ── 3. RIGHT: Dedicated Settings Gear Button (Replaces Tools) ──
-                Surface(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clickable {
-                            showCircleSwitcher = false
-                            onSettingsClick()
-                        }
-                        .testTag("settings_button"),
-                    color = Color(0xF2161A24),
-                    shape = CircleShape,
-                    border = BorderStroke(1.2.dp, Color(0xFF384358)),
-                    shadowElevation = 8.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text("⚙️", fontSize = 16.sp)
-                    }
-                }
-            }
-
-            // ── 1.5 TRIP PLAYBACK HUD CARD (When inspecting trip from History) ──
-            AnimatedVisibility(
-                visible = selectedTrip != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                selectedTrip?.let { trip ->
-                    val isTrain = trip.transitMode.equals("TRAIN", ignoreCase = true)
-                    val modeEmoji = when (trip.transitMode.uppercase()) {
-                        "TRAIN" -> "🚆"
-                        "DRIVING" -> "🚗"
-                        "CYCLING" -> "🚲"
-                        "WALKING" -> "👣"
-                        else -> "🚗"
-                    }
-                    val accentColor = if (isTrain) Color(0xFFBA68C8) else RadarCyan
-
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 6.dp),
-                        color = Color(0xF2161A24),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.2.dp, accentColor.copy(alpha = 0.8f)),
-                        shadowElevation = 10.dp
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Surface(
-                                        color = accentColor.copy(alpha = 0.2f),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(modeEmoji, fontSize = 16.sp)
-                                        }
-                                    }
-                                    Column {
-                                        Text(
-                                            text = "${trip.memberName}'s Journey",
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "${trip.origin} → ${trip.destination ?: "Destination"}",
-                                            color = Color(0xFF90A4AE),
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-
-                                Surface(
-                                    modifier = Modifier
-                                        .clickable { com.example.data.TelemetryWebSocketManager.selectTrip(null) }
-                                        .padding(4.dp),
-                                    color = Color(0xFF263238),
-                                    shape = CircleShape
-                                ) {
-                                    Text(
-                                        text = "✕",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-
-                            // Stat Pills Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    color = Color(0xFF1E2638),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text("Duration", fontSize = 9.sp, color = Color(0xFF78909C))
-                                        Text("${trip.durationMinutes} min", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    }
-                                }
-                                Surface(
-                                    color = Color(0xFF1E2638),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text("Distance", fontSize = 9.sp, color = Color(0xFF78909C))
-                                        Text("${String.format(java.util.Locale.US, "%.1f", trip.totalDistanceKm)} km", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    }
-                                }
-                                Surface(
-                                    color = Color(0xFF1E2638),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        Text("Top Speed", fontSize = 9.sp, color = Color(0xFF78909C))
-                                        Text("${trip.topSpeedMph.toInt()} mph", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = accentColor)
-                                    }
-                                }
-                                if (trip.harshBrakingCount > 0) {
-                                    Surface(
-                                        color = Color(0xFF3E2723),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(vertical = 4.dp, horizontal = 6.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text("Harsh Brakes", fontSize = 9.sp, color = Color(0xFFFFAB91), maxLines = 1, softWrap = false)
-                                            Text("${trip.harshBrakingCount}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF5252), maxLines = 1, softWrap = false)
-                                        }
-                                    }
-                                }
+            )
+            TripPlaybackCard(selectedTrip = selectedTrip)
+            MemberFollowTrailHud(
+                selectedMember = selectedMember,
+                isLocationPaused = isLocationPaused,
+                isFollowingSelectedMember = isFollowingSelectedMember,
+                onFollowMember = {
+                    isFollowingSelectedMember = true
+                    if (selectedMember != null && selectedMember.x != 0.0 && selectedMember.y != 0.0) {
+                        mapViewRef?.let { map ->
+                            val targetGeo = visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
+                            map.controller.animateTo(targetGeo)
+                            if (map.zoomLevelDouble < 12.0) {
+                                map.controller.setZoom(16.0)
                             }
                         }
                     }
-                }
-            }
-
-            val pausedMembers = members.filter {
-                it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true)
-            }
-
-            // 2. LIVE MEMBER FOLLOW & ROUTE TRAIL HUD (Cleanly stacked below action bar without any overlap)
-            AnimatedVisibility(
-                visible = selectedMember != null && !pausedMembers.any { it.id == selectedMember.id },
-
-                enter = fadeIn() + slideInVertically(),
-                exit = fadeOut() + slideOutVertically()
-            ) {
-                if (selectedMember != null) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Live Follow Pill — Box with weight(1f) in RowScope, Surface fills it
-                            Box(modifier = Modifier.weight(1f)) {
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable {
-                                            isFollowingSelectedMember = true
-                                            if (selectedMember.x != 0.0 && selectedMember.y != 0.0) {
-                                                mapViewRef?.let { map ->
-                                                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                                                    map.controller.animateTo(targetGeo)
-                                                    if (map.zoomLevelDouble < 12.0) {
-                                                        map.controller.setZoom(16.0)
-                                                    }
-                                                }
-                                            }
-                                        },
-                                    color = Color(0xF012121A),
-                                    shape = RoundedCornerShape(20.dp),
-                                    border = BorderStroke(1.2.dp, if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300)),
-                                    shadowElevation = 8.dp
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .background(if (isFollowingSelectedMember) RadarCyan else Color(0xFFFFB300), CircleShape)
-                                        )
-                                        val transitMode = classifyTransitMode(selectedMember.speedMph, selectedMember.statusText, selectedMember.id)
-                                        val transitBadge = formatTransitBadge(selectedMember.speedMph, selectedMember.statusText, selectedMember.locationSince, selectedMember.id)
-                                        if (transitMode != TransitMode.STATIONARY) {
-                                            AnimatedTransitIcon(mode = transitMode, size = 12.dp)
-                                        }
-                                        val detailsText = if (transitBadge.isNotBlank()) {
-                                            if (transitMode != TransitMode.STATIONARY) " • ${transitBadge.drop(2).trim()}" else " • $transitBadge"
-                                        } else ""
-                                        Text(
-                                            text = if (isFollowingSelectedMember) "🎯 Following ${selectedMember.name}$detailsText" else "🎯 Re-center on ${selectedMember.name}",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Surface(
-                                            modifier = Modifier
-                                                .size(20.dp)
-                                                .clip(CircleShape)
-                                                .clickable { onSelectMember(null) },
-                                            color = Color(0x33FFFFFF),
-                                            shape = CircleShape
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                                Text("✕", color = Color(0xFFECEFF1), fontSize = 10.sp, fontWeight = FontWeight.Black)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Route Trail Button — compact, no weight needed
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable { isRouteTrailEnabled = !isRouteTrailEnabled },
-                                color = if (isRouteTrailEnabled) PrimaryCosmic else Color(0xF01E1E28),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, if (isRouteTrailEnabled) RadarCyan else SlateBorder),
-                                shadowElevation = 6.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Text("🛤️", fontSize = 12.sp, maxLines = 1, softWrap = false)
-                                    Text(
-                                        text = if (isRouteTrailEnabled) "Trail: ON" else "Trail: OFF",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        softWrap = false
-                                    )
-                                }
-                            }
-                        }
-
-                        // Time window filter chips: Today, 7 Days, 30 Days (when trail is active)
-                        if (isRouteTrailEnabled) {
-                            Surface(
-                                color = Color(0xF0161622),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.6f)),
-                                shadowElevation = 4.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(3.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    listOf(
-                                        Pair("today", "Today"),
-                                        Pair("7days", "7 Days"),
-                                        Pair("30days", "30 Days")
-                                    ).forEach { (filterKey, label) ->
-                                        val isSelectedFilter = routeTimeFilter == filterKey
-                                        Surface(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .clickable { onSelectRouteTimeFilter(filterKey) },
-                                            color = if (isSelectedFilter) RadarCyan.copy(alpha = 0.25f) else Color.Transparent,
-                                            border = if (isSelectedFilter) BorderStroke(1.dp, RadarCyan) else null,
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                color = if (isSelectedFilter) RadarCyan else TextSecondary,
-                                                fontSize = 10.sp,
-                                                fontWeight = if (isSelectedFilter) FontWeight.Bold else FontWeight.Medium,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+                },
+                onDismissMemberSelection = { onSelectMember(null) },
+                isRouteTrailEnabled = isRouteTrailEnabled,
+                onToggleRouteTrail = { isRouteTrailEnabled = !isRouteTrailEnabled },
+                routeTimeFilter = routeTimeFilter,
+                onSelectRouteTimeFilter = onSelectRouteTimeFilter
+            )
             // 3. LIVE WEATHER STATUS PILL (Floats cleanly below action bar and follow banner)
             WeatherHudOverlay(
                 members = members,
@@ -1893,124 +1177,54 @@ fun RadarMap(
             }
         }
 
-
-
-
-
-        // 5. COHESIVE MAP CONTROLS FLOATING CONTAINER (BottomEnd - Zoom controls & Recenter GPS)
-        Column(
-            modifier = Modifier
-                .navigationBarsPadding()
-                .padding(end = 16.dp, bottom = 24.dp)
-                .align(Alignment.BottomEnd)
-                .zIndex(75f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.End
-        ) {
-            // ZOOM IN (+) FAB
-            Surface(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clickable {
-                        mapViewRef?.let { map ->
-                            map.controller.zoomIn()
-                            mapZoomLevel = map.zoomLevelDouble + 1.0
-                            val target = if (isFollowingSelectedMember && selectedMember != null) {
-                                visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                            } else if (isCameraFollowingMe && me != null) {
-                                GeoPoint(me.y, me.x)
-                            } else null
-                            if (target != null) {
-                                map.controller.setCenter(target)
-                            }
-                        }
-                    },
-                color = CosmicSlateCard,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Zoom In",
-                        tint = RadarCyan,
-                        modifier = Modifier.size(20.dp)
-                    )
+        MapControlsOverlay(
+            isCameraFollowingMe = isCameraFollowingMe,
+            onZoomIn = {
+                mapViewRef?.let { map ->
+                    map.controller.zoomIn()
+                    mapZoomLevel = map.zoomLevelDouble + 1.0
+                    val target = if (isFollowingSelectedMember && selectedMember != null) {
+                        visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
+                    } else if (isCameraFollowingMe && me != null) {
+                        org.osmdroid.util.GeoPoint(me.y, me.x)
+                    } else null
+                    if (target != null) {
+                        map.controller.setCenter(target)
+                    }
                 }
-            }
-
-            // ZOOM OUT (-) FAB
-            Surface(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clickable {
-                        mapViewRef?.let { map ->
-                            map.controller.zoomOut()
-                            mapZoomLevel = (map.zoomLevelDouble - 1.0).coerceAtLeast(2.0)
-                            val target = if (isFollowingSelectedMember && selectedMember != null) {
-                                visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                            } else if (isCameraFollowingMe && me != null) {
-                                GeoPoint(me.y, me.x)
-                            } else null
-                            if (target != null) {
-                                map.controller.setCenter(target)
-                            }
-                        }
-                    },
-                color = CosmicSlateCard,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = Icons.Default.Remove,
-                        contentDescription = "Zoom Out",
-                        tint = RadarCyan,
-                        modifier = Modifier.size(20.dp)
-                    )
+            },
+            onZoomOut = {
+                mapViewRef?.let { map ->
+                    map.controller.zoomOut()
+                    mapZoomLevel = (map.zoomLevelDouble - 1.0).coerceAtLeast(2.0)
+                    val target = if (isFollowingSelectedMember && selectedMember != null) {
+                        visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
+                    } else if (isCameraFollowingMe && me != null) {
+                        org.osmdroid.util.GeoPoint(me.y, me.x)
+                    } else null
+                    if (target != null) {
+                        map.controller.setCenter(target)
+                    }
                 }
-            }
-
-            // 1. WHERE AM I NOW (FIND ME ON MAP) FAB
-            Surface(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clickable {
-                        val meLoc = members.firstOrNull { it.id == "me" }
-                        if (meLoc != null && meLoc.y != 0.0 && meLoc.x != 0.0) {
-                            onSelectMember("me") // Focus selection
-                            isCameraFollowingMe = !isCameraFollowingMe // Toggle follow mode
-                            if (isCameraFollowingMe) {
-                                isFollowingSelectedMember = true
-                            }
-                            mapViewRef?.let {
-                                it.controller.animateTo(GeoPoint(meLoc.y, meLoc.x))
-                                if (it.zoomLevelDouble < 12.0) {
-                                    it.controller.setZoom(15.5)
-                                }
-                            }
+            },
+            onWhereAmINow = {
+                val meLoc = members.firstOrNull { it.id == "me" }
+                if (meLoc != null && meLoc.y != 0.0 && meLoc.x != 0.0) {
+                    onSelectMember("me")
+                    isCameraFollowingMe = !isCameraFollowingMe
+                    if (isCameraFollowingMe) {
+                        isFollowingSelectedMember = true
+                    }
+                    mapViewRef?.let {
+                        it.controller.animateTo(org.osmdroid.util.GeoPoint(meLoc.y, meLoc.x))
+                        if (it.zoomLevelDouble < 12.0) {
+                            it.controller.setZoom(15.5)
                         }
-                    },
-                color = if (isCameraFollowingMe) Color(0xFF1B5E20) else CosmicSlateCard,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, if (isCameraFollowingMe) Color(0xFF00FF87) else SlateBorder),
-                shadowElevation = 6.dp
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = "Where am I now",
-                        tint = if (isCameraFollowingMe) Color.White else RadarCyan,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    }
                 }
-            }
-        }
+            },
+            modifier = Modifier.align(Alignment.BottomEnd)
+        )
 
         // --- CONTEXT MENU DIALOG OVERLAY FOR MAP MARKER TAP ---
         memberForContextMenu?.let { member ->
@@ -2062,133 +1276,20 @@ fun RadarMap(
         )
     }
 
-    // Delete Zone Confirmation Dialog
-    zoneToDelete?.let { zone ->
-        AlertDialog(
-            onDismissRequest = { zoneToDelete = null },
-            title = {
-                Text(text = "Delete Safe Zone", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text(text = "Are you sure you want to delete the safe zone \"${zone.name}\"?", color = TextSecondary, fontSize = 13.sp)
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteSafeZone(zone)
-                        zoneToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
-                ) {
-                    Text("Delete", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { zoneToDelete = null }) {
-                    Text("Cancel", color = SecondarySlate)
-                }
-            },
-            containerColor = CosmicSlateCard,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 6.dp
-        )
-    }
+    DeleteSafeZoneDialog(
+        zone = zoneToDelete,
+        onDismiss = { zoneToDelete = null },
+        onConfirmDelete = { onDeleteSafeZone(it) }
+    )
 
-    // Add Safe Zone Dialog
-    if (showAddZoneDialog) {
-        AlertDialog(
-            onDismissRequest = { showAddZoneDialog = false },
-            title = {
-                Text(text = "Create Safe Zone", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Text(text = "Define a new premium geofence radius on the map.", color = TextSecondary, fontSize = 12.sp)
-                    
-                    OutlinedTextField(
-                        value = newZoneName,
-                        onValueChange = { newZoneName = it },
-                        label = { Text("Zone Name (e.g. School)") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedBorderColor = PrimaryCosmic,
-                            unfocusedBorderColor = SlateBorder
-                        ),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    
-                    Column {
-                        Text(text = "Radius: ${newZoneRadius.toInt()} meters", color = TextPrimary, fontSize = 12.sp)
-                        Slider(
-                            value = newZoneRadius,
-                            onValueChange = { newZoneRadius = it },
-                            valueRange = 2f..10f,
-                            colors = SliderDefaults.colors(
-                                thumbColor = PrimaryCosmic,
-                                activeTrackColor = PrimaryCosmic
-                            )
-                        )
-                    }
-                    
-                    Text(text = "Select Zone Icon Type:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        listOf("home" to "🏠", "school" to "🏫", "gym" to "💪", "work" to "💼", "shop" to "🛒").forEach { (type, emoji) ->
-                            val isSelected = newZoneIcon == type
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) PrimaryCosmic else SlateBorder)
-                                    .clickable { newZoneIcon = type }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(text = emoji, fontSize = 16.sp)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val meLoc = members.firstOrNull { it.id == "me" }
-                        val lat = meLoc?.y ?: homeLat
-                        val lng = meLoc?.x ?: homeLng
-                        onAddSafeZone(
-                            SafeZone(
-                                id = "zone_" + System.currentTimeMillis(),
-                                name = newZoneName.ifBlank { "Safe Zone" },
-                                latitude = lat,
-                                longitude = lng,
-                                radiusMeters = newZoneRadius.toDouble(),
-                                iconName = newZoneIcon
-                            )
-                        )
-                        showAddZoneDialog = false
-                        newZoneName = ""
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryCosmic)
-                ) {
-                    Text("Save Zone", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddZoneDialog = false }) {
-                    Text("Cancel", color = SecondarySlate)
-                }
-            },
-            containerColor = CosmicSlateCard,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 6.dp
-        )
-    }
-
+    AddSafeZoneDialog(
+        visible = showAddZoneDialog,
+        onDismiss = { showAddZoneDialog = false },
+        onAddSafeZone = onAddSafeZone,
+        members = members,
+        homeLat = homeLat,
+        homeLng = homeLng
+    )
     // Weekly Circle Digest Dashboard Sheet
     if (isDigestOpen) {
         CircleDigestDashboard(
@@ -2213,272 +1314,19 @@ fun RadarMap(
             onDismiss = { showAddDeviceDialog = false }
         )
     }
-
-    // Full-screen floating Circle Switcher Overlay (Cleanly separated from top Row so it never squishes header pills on any phone)
-    if (showCircleSwitcher) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable { showCircleSwitcher = false }
-                .zIndex(200f)
-        ) {
-            Surface(
-                modifier = Modifier
-                    .statusBarsPadding()
-                    .padding(top = 54.dp, start = 12.dp, end = 12.dp)
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth(0.92f)
-                    .widthIn(max = 340.dp)
-                    .heightIn(max = 520.dp)
-                    .clickable(enabled = false) {}, // absorb clicks inside card
-                color = Color(0xFF1E232F),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.5.dp, Color(0xFF384358)),
-                shadowElevation = 24.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .padding(14.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (groupPinMappings.isNotEmpty()) {
-                        groupPinMappings.forEach { circle ->
-                            val isActive = circle.pinCode == activeGroupPinCode
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        onSwitchCircle(circle.pinCode)
-                                        showCircleSwitcher = false
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isActive) Color(0xFF2A3447) else Color(0xFF161922),
-                                border = BorderStroke(1.dp, if (isActive) Color(0xFF00E5FF) else Color(0xFF2B3342))
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                        Text(
-                                            text = circle.groupName.ifBlank { "Family Circle" },
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "PIN: ${circle.pinCode}",
-                                            color = Color(0xFFB0BEC5),
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1
-                                        )
-                                    }
-                                    if (isActive) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = Color(0xFF00E5FF).copy(alpha = 0.15f)
-                                        ) {
-                                            Text(
-                                                text = "ACTIVE",
-                                                color = Color(0xFF00E5FF),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Black,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        HorizontalDivider(color = Color(0xFF323B4D), modifier = Modifier.padding(vertical = 2.dp))
-                    }
-
-                    // 👥 Join a Circle
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showCircleSwitcher = false
-                                addDeviceInitialTab = 0
-                                showAddDeviceDialog = true
-                            },
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF161922),
-                        border = BorderStroke(1.dp, Color(0xFF2D3545))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("👥", fontSize = 16.sp)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Join a Circle",
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Enter 4-digit PIN or 6-char code",
-                                    color = Color(0xFF90A4AE),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    // ➕ Invite to This Circle
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showCircleSwitcher = false
-                                addDeviceInitialTab = 1
-                                showAddDeviceDialog = true
-                            },
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF161922),
-                        border = BorderStroke(1.dp, Color(0xFF2D3545))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF00E676).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("➕", fontSize = 16.sp)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Invite to This Circle",
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Share PIN ${activeGroupPinCode.ifBlank { "4666" }}",
-                                    color = Color(0xFF00E676),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    // 🗑️ Delete from Circle
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showCircleSwitcher = false
-                                addDeviceInitialTab = 2
-                                showAddDeviceDialog = true
-                            },
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF161922),
-                        border = BorderStroke(1.dp, Color(0xFF2D3545))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFF5252).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("🗑️", fontSize = 16.sp)
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Delete from Circle",
-                                    color = Color(0xFFFF5252),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Remove devices or members",
-                                    color = Color(0xFF90A4AE),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+    CircleSwitcherOverlay(
+        visible = showCircleSwitcher,
+        onDismiss = { showCircleSwitcher = false },
+        groupPinMappings = groupPinMappings,
+        activeGroupPinCode = activeGroupPinCode,
+        onSwitchCircle = onSwitchCircle,
+        onOpenAddDeviceTab = { tab ->
+            addDeviceInitialTab = tab
+            showAddDeviceDialog = true
         }
-    }
+    )
 
 
 
     }
 }
-
-@Composable
-fun AnimatedTransitIcon(
-    mode: com.example.data.TransitMode,
-    modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 14.dp
-) {
-    val emoji = when (mode) {
-        com.example.data.TransitMode.WALKING -> "👣"
-        com.example.data.TransitMode.CYCLING -> "🚲"
-        com.example.data.TransitMode.DRIVING -> "🚗"
-        com.example.data.TransitMode.TRAIN -> "🚆"
-        com.example.data.TransitMode.STATIONARY -> "📍"
-    }
-    Box(
-        modifier = modifier.size(size),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(emoji, fontSize = (size.value * 0.9f).sp)
-    }
-}
-
-
-
