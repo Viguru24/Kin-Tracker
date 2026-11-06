@@ -8,13 +8,21 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Enforces strict family safety invariants:
  * 1. CHILD WORKPLACE IMMUNITY: Schoolchildren (Eloise, Isabel) can NEVER trigger or receive "Work" alerts.
- * 2. STATE MACHINE (NO BACK-TO-BACK DEPARTURES): A member who has "left" cannot emit another departure warning until they arrive somewhere.
+ * 2. STATE MACHINE (NO BACK-TO-BACK DEPARTURES): A member who has "left" cannot emit another departure warning
+ *    until they arrive somewhere or until the 45-minute journey window expires.
  * 3. GLOBAL RATE LIMITING: Enforces minimum cooldown per person per event type across all places.
+ * 4. HOME ARRIVAL ISOLATION: Arriving at Home is never suppressed by earlier transient arrivals.
+ * 5. CRITICAL PASS-THROUGH: SOS and Battery alerts bypass transit latches entirely.
  */
 object AlertArbiter {
 
     private val lastAlertTimestamp = ConcurrentHashMap<String, Long>()
     private val lastMemberState = ConcurrentHashMap<String, String>() // "DEPARTED" or "ARRIVED"
+
+    private val WORK_WORD_REGEX = Regex("\\b(work|at work|left work|arrived at work|working)\\b", RegexOption.IGNORE_CASE)
+    private val DEPARTURE_WORD_REGEX = Regex("\\b(departure|departed|departing|has left|just left|left the house|left)\\b", RegexOption.IGNORE_CASE)
+    private val ARRIVAL_WORD_REGEX = Regex("\\b(arrival|arrived|arriving|has reached|just reached)\\b", RegexOption.IGNORE_CASE)
+    private val UNGEOFENCED_TRANSIT_TIMEOUT_MS = 45 * 60 * 1000L // 45 minutes
 
     fun canEmitAlert(
         title: String,
@@ -25,9 +33,19 @@ object AlertArbiter {
     ): Boolean {
         val fullText = "$title $message $memberName".lowercase()
 
-        // 1. INVARIANT: Children can NEVER trigger Work alerts
+        // 1. SOS and Battery warnings must ALWAYS pass through immediately and never touch travel latches
+        val isCriticalOrStatus = title.contains("SOS", ignoreCase = true) ||
+                title.contains("Emergency", ignoreCase = true) ||
+                title.contains("Battery", ignoreCase = true) ||
+                message.contains("battery", ignoreCase = true) ||
+                message.contains("SOS", ignoreCase = true)
+        if (isCriticalOrStatus) {
+            return true
+        }
+
+        // 2. INVARIANT: Children can NEVER trigger Work alerts
         val isEloiseOrIsabel = fullText.contains("eloise") || fullText.contains("isabel")
-        val isWork = fullText.contains("work") || fullText.contains("at work") || fullText.contains("left work")
+        val isWork = WORK_WORD_REGEX.containsMatchIn(fullText)
         if (isEloiseOrIsabel && isWork) {
             return false // HARD DROP: Child cannot have a Work alert
         }
@@ -44,38 +62,42 @@ object AlertArbiter {
         val isDeparture = title.contains("Departure", ignoreCase = true) ||
                 title.contains("Journey", ignoreCase = true) ||
                 title.contains("Trip", ignoreCase = true) ||
-                message.contains("left", ignoreCase = true) ||
-                message.contains("departed", ignoreCase = true)
+                DEPARTURE_WORD_REGEX.containsMatchIn(message)
 
         val isArrival = title.contains("Arrival", ignoreCase = true) ||
-                message.contains("arrived", ignoreCase = true)
+                ARRIVAL_WORD_REGEX.containsMatchIn(message)
 
         if (isDeparture) {
-            val key = "${personKey}_DEPARTURE"
-            val lastTime = lastAlertTimestamp[key] ?: 0L
+            val depKey = "${personKey}_DEPARTURE"
+            val lastTime = lastAlertTimestamp[depKey] ?: 0L
             if (lastTime > 0L && now - lastTime < AppConfig.GEOFENCE_COOLDOWN_MS) {
                 return false // RATE LIMIT: Max 1 departure every 15 min per person
             }
 
-            // STATE MACHINE: Cannot depart twice in a row without arriving somewhere first
+            // STATE MACHINE: Cannot depart twice in a row without arriving somewhere first,
+            // UNLESS 45 minutes have elapsed (e.g. member stopped at an un-geofenced location).
             val lastState = lastMemberState[personKey]
             if (lastState == "DEPARTED") {
-                return false // Already in transit / departed
+                val timeSinceDep = if (lastTime > 0L) now - lastTime else 0L
+                if (timeSinceDep in 1 until UNGEOFENCED_TRANSIT_TIMEOUT_MS) {
+                    return false // Still actively in transit
+                }
             }
 
-            lastAlertTimestamp[key] = now
+            lastAlertTimestamp[depKey] = now
             lastMemberState[personKey] = "DEPARTED"
             return true
         }
 
         if (isArrival) {
-            val key = "${personKey}_ARRIVAL"
-            val lastTime = lastAlertTimestamp[key] ?: 0L
+            val isHomeArrival = fullText.contains("home")
+            val arrKey = if (isHomeArrival) "${personKey}_ARRIVAL_HOME" else "${personKey}_ARRIVAL"
+            val lastTime = lastAlertTimestamp[arrKey] ?: 0L
             if (lastTime > 0L && now - lastTime < AppConfig.GEOFENCE_COOLDOWN_MS) {
-                return false // RATE LIMIT: Max 1 arrival every 15 min per person
+                return false // RATE LIMIT: Max 1 arrival every 15 min per person for this category
             }
 
-            lastAlertTimestamp[key] = now
+            lastAlertTimestamp[arrKey] = now
             lastMemberState[personKey] = "ARRIVED"
             return true
         }

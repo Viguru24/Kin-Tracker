@@ -228,4 +228,60 @@ class DepartureWarningTest {
         )
         assertFalse("Duplicate / back-to-back departure must be blocked by AlertArbiter", secondDeparture)
     }
+
+    @Test
+    fun testAlertArbiterCriticalAlertsAndEdgeCases() {
+        com.example.data.AlertArbiter.reset()
+
+        // 1. Battery alert must pass through immediately
+        val batteryAllowed = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🔋 Low Battery Warning",
+            message = "Eloise has 15% battery left",
+            memberName = "Eloise"
+        )
+        assertTrue("Battery warnings must always pass through", batteryAllowed)
+
+        // 2. SOS alert must pass through immediately
+        val sosAllowed = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚨 Emergency SOS",
+            message = "Isabel triggered SOS alert!",
+            memberName = "Isabel"
+        )
+        assertTrue("SOS warnings must always pass through", sosAllowed)
+
+        // 3. Isolated Home Arrival: Shop arrival followed by Home arrival within 5 minutes
+        val shopArrival = com.example.data.AlertArbiter.canEmitAlert(
+            title = "📍 Arrival Notice",
+            message = "Eloise has arrived at Tesco Express",
+            memberName = "Eloise",
+            now = 1000L
+        )
+        assertTrue("Shop arrival allowed", shopArrival)
+
+        val homeArrival = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🏠 Arrival Notice",
+            message = "Eloise has arrived at Home",
+            memberName = "Eloise",
+            now = 1000L + 5 * 60 * 1000L // 5 mins later
+        )
+        assertTrue("Home arrival must NOT be blocked by recent non-home arrival", homeArrival)
+
+        // 4. Departure timeout (45 mins): Un-geofenced stop departure allowed after 50 minutes
+        com.example.data.AlertArbiter.reset()
+        val dep1 = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚪 Departure Warning",
+            message = "Eloise has just left her school!",
+            memberName = "Eloise",
+            now = 1000L
+        )
+        assertTrue("Initial departure allowed", dep1)
+
+        val depAfterUngeofencedStop = com.example.data.AlertArbiter.canEmitAlert(
+            title = "🚪 Departure Warning",
+            message = "Eloise is departing on a new journey",
+            memberName = "Eloise",
+            now = 1000L + 50 * 60 * 1000L // 50 mins later without geofenced arrival
+        )
+        assertTrue("Departure after 45-min un-geofenced stop must be allowed", depAfterUngeofencedStop)
+    }
 }
