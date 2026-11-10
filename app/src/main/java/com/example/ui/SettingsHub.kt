@@ -93,6 +93,7 @@ fun SettingsHub(
     onOpenShoppingList: (() -> Unit)? = null,
     onOpenAddSafeZone: (() -> Unit)? = null,
     shoppingActiveCount: Int = 0,
+    onLoadTrips: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(SettingsTab.CIRCLE) }
@@ -216,7 +217,8 @@ fun SettingsHub(
                     onOpenFeedback = onOpenFeedback,
                     onSelectTrip = onSelectTrip,
                     serverUrl = serverUrl,
-                    onUpdateServerUrl = onUpdateServerUrl
+                    onUpdateServerUrl = onUpdateServerUrl,
+                    onLoadTrips = onLoadTrips
                 )
             }
         }

@@ -1668,21 +1668,34 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val memberWeather = MutableStateFlow<Map<String, String>>(emptyMap())
     private val memberWeatherCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val lastWeatherCheckCoords = java.util.concurrent.ConcurrentHashMap<String, Pair<Double, Double>>()
+    private val lastWeatherCheckTime = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     private fun setupWeatherTracking() {
         viewModelScope.launch {
             familyMembers.collect { membersList ->
                 if (membersList.isEmpty()) return@collect
+                val now = System.currentTimeMillis()
                 membersList.forEach { m ->
                     if (m.x == 0.0 && m.y == 0.0) return@forEach
                     val last = lastWeatherCheckCoords[m.id]
-                    if (last == null || hypot(m.x - last.second, m.y - last.first) > 0.003) {
+                    val lastTime = lastWeatherCheckTime[m.id] ?: 0L
+                    val distDeg = if (last != null) hypot(m.x - last.second, m.y - last.first) else 999.0
+                    // Throttle weather queries to at most once per hour, or > 5km movement after 15 minutes
+                    val shouldFetch = last == null ||
+                            (now - lastTime >= 60 * 60 * 1000L) ||
+                            (distDeg > 0.045 && now - lastTime >= 15 * 60 * 1000L)
+                    if (shouldFetch) {
                         lastWeatherCheckCoords[m.id] = Pair(m.y, m.x)
+                        lastWeatherCheckTime[m.id] = now
                         fetchWeatherForCoordinates(m.id, m.y, m.x)
                     }
                 }
             }
         }
+    }
+
+    fun loadCompletedTripsOnDemand() {
+        cloudSyncManager.fetchCompletedTripsNow()
     }
 
     fun fetchWeatherForCoordinates(memberId: String, lat: Double, lng: Double) {

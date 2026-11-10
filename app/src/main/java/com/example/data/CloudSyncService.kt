@@ -18,7 +18,10 @@ import java.util.concurrent.TimeUnit
 interface CloudSyncService {
 
     @GET("{token}")
-    suspend fun getGroupData(@Path(value = "token", encoded = true) token: String): Response<ResponseBody>
+    suspend fun getGroupData(
+        @Path(value = "token", encoded = true) token: String,
+        @Query("includeTrips") includeTrips: Boolean? = null
+    ): Response<ResponseBody>
 
     @PUT("{token}")
     @Headers("Content-Type: application/json")

@@ -700,7 +700,8 @@ fun MainScreen(
                             },
                             shoppingActiveCount = shoppingItems.count { !it.isChecked },
                             serverUrl = serverUrl,
-                            onUpdateServerUrl = { newUrl -> viewModel.updateServerUrl(newUrl) }
+                            onUpdateServerUrl = { newUrl -> viewModel.updateServerUrl(newUrl) },
+                            onLoadTrips = { viewModel.loadCompletedTripsOnDemand() }
                         )
                     }
                 }

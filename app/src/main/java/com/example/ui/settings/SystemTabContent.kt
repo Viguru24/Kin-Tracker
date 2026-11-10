@@ -28,7 +28,8 @@ fun SystemTabContent(
     onOpenFeedback: () -> Unit,
     onSelectTrip: ((com.example.data.CloudCompletedTrip) -> Unit)? = null,
     serverUrl: String = "",
-    onUpdateServerUrl: ((String) -> Unit)? = null
+    onUpdateServerUrl: ((String) -> Unit)? = null,
+    onLoadTrips: (() -> Unit)? = null
 ) {
     var showServerDialog by remember { mutableStateOf(false) }
     var currentServerInput by remember(serverUrl) { mutableStateOf(if (serverUrl.isBlank()) "https://api.cosmowhisper.com" else serverUrl) }
@@ -262,7 +263,60 @@ fun SystemTabContent(
             }
         }
 
+        // Mobile Data Conservation & Metered Protection Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CosmicSlateCard),
+            border = BorderStroke(1.dp, SlateBorder),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🛡️", fontSize = 16.sp)
+                        Text(
+                            text = "Smart Low Data Mode",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+                    Surface(
+                        color = Color(0xFF064E3B).copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, GlowingEmerald.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "ACTIVE",
+                            color = GlowingEmerald,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "Bandwidth optimized: Gzip compression enabled, trip history loaded on-demand, and GPS pings throttled to preserve monthly cellular data allowances.",
+                    fontSize = 11.sp,
+                    color = SecondarySlate,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+
         val completedTrips by com.example.data.TelemetryWebSocketManager.completedTrips.collectAsState()
+        LaunchedEffect(Unit) {
+            if (completedTrips.isEmpty()) {
+                onLoadTrips?.invoke()
+            }
+        }
         TimelineLogs(
             logs = activityLogs,
             onClearLogs = onClearLogs,

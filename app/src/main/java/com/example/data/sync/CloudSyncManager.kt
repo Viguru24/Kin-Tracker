@@ -64,8 +64,8 @@ class CloudSyncManager(
 
     fun triggerSyncNow() {
         val now = System.currentTimeMillis()
-        // Throttle triggers to at most once every 3 seconds to prevent recursive WebSocket feedback loops
-        if (now - lastTriggerSyncTime < 3000L) {
+        // Throttle triggers to at most once every 10 seconds to prevent recursive WebSocket feedback loops
+        if (now - lastTriggerSyncTime < 10000L) {
             return
         }
         lastTriggerSyncTime = now
@@ -73,6 +73,27 @@ class CloudSyncManager(
             if (isCloudSyncEnabled.value && groupSyncToken.value.isNotBlank()) {
                 performCloudSyncTick()
             }
+        }
+    }
+
+    fun fetchCompletedTripsNow() {
+        val token = groupSyncToken.value
+        if (token.isBlank()) return
+        scope.launch {
+            try {
+                val response = cloudService.getGroupData(token, includeTrips = true)
+                if (response.isSuccessful) {
+                    val jsonString = response.body()?.string() ?: ""
+                    if (jsonString.isNotBlank() && jsonString != "null" && jsonString != "{}") {
+                        val p = payloadAdapter.fromJson(jsonString)
+                        p?.completedTrips?.let { trips ->
+                            if (trips.isNotEmpty()) {
+                                com.example.data.TelemetryWebSocketManager.updateCompletedTrips(trips)
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -94,7 +115,7 @@ class CloudSyncManager(
                     )
                     performCloudSyncTick()
                 }
-                delay(5000)
+                delay(30000) // Relaxed 30-second fallback polling (telemetry streams via WebSocket)
             }
         }
     }
@@ -470,7 +491,8 @@ class CloudSyncManager(
                     lastUpdated = lastActiveTimestamp,
                     members = updatedMembers,
                     shoppingItems = finalShoppingList,
-                    deletedShoppingItems = mergedDeletions
+                    deletedShoppingItems = mergedDeletions,
+                    completedTrips = emptyList() // CRITICAL: Never re-upload 90KB completed trip breadcrumbs
                 )
             } else {
                 CloudGroupPayload(
@@ -485,7 +507,8 @@ class CloudSyncManager(
                     lastUpdated = lastActiveTimestamp,
                     members = mapOf(myCloudId to myCloudMember),
                     shoppingItems = finalShoppingList,
-                    deletedShoppingItems = mergedDeletions
+                    deletedShoppingItems = mergedDeletions,
+                    completedTrips = emptyList()
                 )
             }
 

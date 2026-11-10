@@ -148,7 +148,7 @@ object BackgroundSyncProcessor {
         }
         if (!isCloudSyncEnabled || token.isBlank()) return
 
-        // --- Smart Battery Optimization Throttling ---
+        // --- Smart Battery & Mobile Data Optimization Throttling ---
         val now = System.currentTimeMillis()
         val timeSinceLastSync = now - lastSyncTimestamp
 
@@ -158,15 +158,42 @@ object BackgroundSyncProcessor {
             Math.hypot(x, y)
         } else 999.0
 
-        val hasMovedSignificantly = distMovedM >= 25.0 || speedMph >= 1.5
-        val hasStatusChanged = status != lastSyncStatus
-        val hasBatteryChangedSignificantly = (lastSyncBattery == -1 || Math.abs(batteryPct - lastSyncBattery) >= 3 || isCharging != lastSyncCharging)
-        val isHeartbeatDue = timeSinceLastSync >= 10 * 60 * 1000L // 10 minutes stationary heartbeat
-        val isMovingThrottled = hasMovedSignificantly && timeSinceLastSync < 6000L // 6s throttle window when moving
+        val isMetered = try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            cm?.isActiveNetworkMetered == true
+        } catch (_: Exception) {
+            false
+        }
 
-        if (!forceSync && !hasStatusChanged && !hasBatteryChangedSignificantly && !isHeartbeatDue) {
+        fun extractStatusCategory(s: String): String {
+            return when {
+                s.startsWith("At Home") -> "HOME"
+                s.startsWith("At ") -> s
+                s.startsWith("Live GPS tracking") -> "TRANSIT"
+                s.contains("Paused") -> "PAUSED"
+                s.contains("ALARM") -> "ALARM"
+                else -> s
+            }
+        }
+
+        val hasStatusCategoryChanged = extractStatusCategory(status) != extractStatusCategory(lastSyncStatus)
+        val isUserMovingFast = speedMph >= 1.5 || distMovedM >= 60.0
+
+        // Adaptive moving interval: 30s on Wi-Fi, 45s on cellular data to preserve mobile data caps
+        val minMovingInterval = if (isMetered) 45_000L else 30_000L
+        val isMovingThrottled = isUserMovingFast && timeSinceLastSync < minMovingInterval
+
+        // Stationary threshold: ignore minor indoor GPS drift under 60m (80m on metered cellular)
+        val minStationaryDist = if (isMetered) 80.0 else 60.0
+        val hasMovedSignificantly = if (isUserMovingFast) distMovedM >= 25.0 else distMovedM >= minStationaryDist
+
+        // Battery threshold: only wake network on >= 5% change or charging toggle
+        val hasBatteryChangedSignificantly = (lastSyncBattery == -1 || Math.abs(batteryPct - lastSyncBattery) >= 5 || isCharging != lastSyncCharging)
+        val isHeartbeatDue = timeSinceLastSync >= 15 * 60 * 1000L // 15-minute relaxed stationary heartbeat
+
+        if (!forceSync && !hasStatusCategoryChanged && !hasBatteryChangedSignificantly && !isHeartbeatDue) {
             if (!hasMovedSignificantly || isMovingThrottled) {
-                // Skip cellular/Wi-Fi network request to allow modem to sleep
+                // Skip network request to conserve cellular data and battery modem power
                 return
             }
         }
@@ -487,7 +514,8 @@ object BackgroundSyncProcessor {
                     lastUpdated = lastActiveTimestamp,
                     members = updatedMembers,
                     shoppingItems = finalShoppingList,
-                    deletedShoppingItems = mergedDeletions
+                    deletedShoppingItems = mergedDeletions,
+                    completedTrips = emptyList() // CRITICAL: Never re-upload 90KB completed trip breadcrumbs
                 )
             } else {
                 CloudGroupPayload(
@@ -497,7 +525,8 @@ object BackgroundSyncProcessor {
                     lastUpdated = lastActiveTimestamp,
                     members = mapOf(myCloudId to myCloudMember),
                     shoppingItems = finalShoppingList,
-                    deletedShoppingItems = mergedDeletions
+                    deletedShoppingItems = mergedDeletions,
+                    completedTrips = emptyList()
                 )
             }
 

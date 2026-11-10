@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const Busboy = require('busboy');
 const { WebSocketServer } = require('ws');
 const { enrichMemberState, processTripLifecycle, loadCompletedTrips } = require('./tripTransitEngine');
@@ -195,10 +196,43 @@ function loadGroupConfig(token) {
     try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
 }
 
-// Save group config (strip members ? they live in member-data)
+// Gzip-compressed JSON response helper
+function sendJsonResponse(req, res, statusCode, data) {
+    const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
+    const acceptEncoding = (req && req.headers && req.headers['accept-encoding']) || '';
+
+    const headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, x-admin-key, x-group-token'
+    };
+
+    if (acceptEncoding.includes('gzip') && jsonStr.length > 512) {
+        zlib.gzip(Buffer.from(jsonStr, 'utf8'), (err, compressed) => {
+            if (!err && compressed) {
+                headers['Content-Encoding'] = 'gzip';
+                headers['Content-Length'] = compressed.length;
+                res.writeHead(statusCode, headers);
+                res.end(compressed);
+                return;
+            }
+            headers['Content-Length'] = Buffer.byteLength(jsonStr);
+            res.writeHead(statusCode, headers);
+            res.end(jsonStr);
+        });
+    } else {
+        headers['Content-Length'] = Buffer.byteLength(jsonStr);
+        res.writeHead(statusCode, headers);
+        res.end(jsonStr);
+    }
+}
+
+// Save group config (strip members and trip history)
 function saveGroupConfig(token, payload) {
     const config = { ...payload };
-    delete config.members; // stored separately
+    delete config.members; // stored separately in member-data
+    delete config.completedTrips; // trip history lives separately in trips-data
     const file = path.join(DATA_DIR, `${safeKey(token)}.json`);
     fs.writeFileSync(file, JSON.stringify(config), 'utf8');
 }
@@ -215,35 +249,37 @@ function handleSmartPut(token, incoming, res, req) {
     const allMembers = loadAllMembers(token);
 
     const merged = { ...incoming, members: allMembers, lastUpdated: Date.now() };
+    delete merged.completedTrips; // Keep config lightweight
     const file = path.join(DATA_DIR, `${safeKey(token)}.json`);
     fs.writeFileSync(file, JSON.stringify(merged), 'utf8');
 
     const details = Object.values(incomingMembers).map(m => `${m.id}(${m.name}, bat=${m.batteryPercentage}%, act=${m.lastActive})`).join('; ');
     console.log(`[${new Date().toISOString()}] PUT ${token} from ${(req.headers['x-forwarded-for'] || req.socket.remoteAddress)} | incoming details: [${details}]`);
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true }));
+    sendJsonResponse(req, res, 200, { success: true });
 }
 
-// GET: serve merged payload (always fresh with trips and alerts)
-function handleGet(token, res) {
+// GET: serve merged payload (always fresh with alerts, lightweight without 90KB trip breadcrumbs unless requested)
+function handleGet(token, res, req) {
     const config = loadGroupConfig(token);
     if (!config) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Not found' }));
+        sendJsonResponse(req, res, 404, { error: 'Not found' });
         return;
     }
     const allMembers = loadAllMembers(token);
-    const completedTrips = loadCompletedTrips(token);
     const alerts = recentAlertsMap.get(token) || [];
+
+    const url = req ? (req.url || '') : '';
+    const includeTrips = url.includes('includeTrips=true');
+    const completedTrips = includeTrips ? loadCompletedTrips(token).slice(-30) : [];
+
     const payload = {
         ...config,
         members: allMembers,
-        completedTrips: completedTrips.slice(-30),
+        completedTrips: completedTrips,
         recentAlerts: alerts.slice(-10)
     };
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(payload));
+    sendJsonResponse(req, res, 200, payload);
 }
 
 // Migrate existing kv-data blobs and purge rogue foreign intruder files
@@ -716,20 +752,21 @@ const server = http.createServer((req, res) => {
     if (req.url.startsWith('/trips/')) {
         const token = req.url.slice(7).split('?')[0];
         const trips = loadCompletedTrips(token);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, trips }));
+        sendJsonResponse(req, res, 200, { success: true, trips });
         return;
     }
 
-    const key = req.url.slice(1).split('?')[0];
+    let key = req.url.slice(1).split('?')[0];
+    if (key.startsWith('sync/')) {
+        key = key.slice(5);
+    }
     if (!key || key.length > 255) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid key' }));
+        sendJsonResponse(req, res, 400, { error: 'Invalid key' });
         return;
     }
 
     if (req.method === 'GET') {
-        handleGet(key, res);
+        handleGet(key, res, req);
     } else if (req.method === 'PUT') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
@@ -782,10 +819,9 @@ wss.on('connection', (ws, request, token) => {
     if (!circleSockets.has(token)) circleSockets.set(token, new Set());
     circleSockets.get(token).add(ws);
 
-    // Send immediate snapshot on connect
+    // Send immediate snapshot on connect (compact: omit 90KB trip breadcrumbs)
     const config = loadGroupConfig(token) || {};
     const allMembers = loadAllMembers(token);
-    const completedTrips = loadCompletedTrips(token);
     const alerts = recentAlertsMap.get(token) || [];
 
     try {
@@ -794,7 +830,7 @@ wss.on('connection', (ws, request, token) => {
             token,
             config,
             members: allMembers,
-            completedTrips: completedTrips.slice(-30),
+            completedTrips: [],
             recentAlerts: alerts.slice(-10)
         }));
     } catch (_) {}
