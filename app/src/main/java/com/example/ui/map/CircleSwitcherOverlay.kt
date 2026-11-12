@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -29,10 +30,23 @@ fun CircleSwitcherOverlay(
     onDismiss: () -> Unit,
     groupPinMappings: List<GroupPinMapping>,
     activeGroupPinCode: String,
+    memberCount: Int = 0,
     onSwitchCircle: (String) -> Unit,
     onOpenAddDeviceTab: (Int) -> Unit
 ) {
     if (!visible) return
+
+    val activeMapping = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+        ?: groupPinMappings.firstOrNull { it.isActive }
+    val resolvedPin = activeGroupPinCode.ifBlank { activeMapping?.pinCode.orEmpty() }
+    val isInCircle = resolvedPin.isNotBlank()
+    val resolvedName = when {
+        activeMapping != null && activeMapping.groupName.isNotBlank() -> activeMapping.groupName
+        resolvedPin == "4666" -> "Family Circle"
+        isInCircle -> "Circle $resolvedPin"
+        else -> "No Active Circle"
+    }
+    val otherCircles = groupPinMappings.filter { it.pinCode != resolvedPin }
 
     Box(
         modifier = Modifier
@@ -49,9 +63,9 @@ fun CircleSwitcherOverlay(
                 .widthIn(max = 340.dp)
                 .heightIn(max = 520.dp)
                 .clickable(enabled = false) {},
-            color = Color(0xFF1E232F),
+            color = Color(0xFF121215),
             shape = RoundedCornerShape(20.dp),
-            border = BorderStroke(1.5.dp, Color(0xFF384358)),
+            border = BorderStroke(1.5.dp, Color(0xFF27272A)),
             shadowElevation = 24.dp
         ) {
             Column(
@@ -60,9 +74,112 @@ fun CircleSwitcherOverlay(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (groupPinMappings.isNotEmpty()) {
-                    groupPinMappings.forEach { circle ->
-                        val isActive = circle.pinCode == activeGroupPinCode
+                // ── CURRENT CIRCLE HERO CARD (Always visible) ──
+                Text(
+                    text = "CURRENT CIRCLE",
+                    color = Color(0xFFA1A1AA),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF18181B),
+                    border = BorderStroke(
+                        1.2.dp,
+                        if (isInCircle) Color(0xFF00E5FF) else Color(0xFF3F3F46)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isInCircle) Color(0xFF10B981) else Color(0xFFF59E0B))
+                                )
+                                Text(
+                                    text = resolvedName,
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(3.dp))
+                            if (isInCircle) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "PIN: $resolvedPin",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = "• $memberCount ${if (memberCount == 1) "member" else "members"}",
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 12.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "Join a circle below or create one",
+                                    color = Color(0xFFA1A1AA),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (isInCircle) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.16f)
+                            ) {
+                                Text(
+                                    text = "ACTIVE",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── OTHER CIRCLES (Switchable) ──
+                if (otherCircles.isNotEmpty()) {
+                    Text(
+                        text = "SWITCH CIRCLE",
+                        color = Color(0xFFA1A1AA),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp)
+                    )
+                    otherCircles.forEach { circle ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -71,8 +188,8 @@ fun CircleSwitcherOverlay(
                                     onDismiss()
                                 },
                             shape = RoundedCornerShape(12.dp),
-                            color = if (isActive) Color(0xFF2A3447) else Color(0xFF161922),
-                            border = BorderStroke(1.dp, if (isActive) Color(0xFF00E5FF) else Color(0xFF2B3342))
+                            color = Color(0xFF18181B),
+                            border = BorderStroke(1.dp, Color(0xFF27272A))
                         ) {
                             Row(
                                 modifier = Modifier
@@ -83,42 +200,45 @@ fun CircleSwitcherOverlay(
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                     Text(
-                                        text = circle.groupName.ifBlank { "Family Circle" },
+                                        text = circle.groupName.ifBlank { "Circle ${circle.pinCode}" },
                                         color = Color.White,
-                                        fontSize = 15.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "PIN: ${circle.pinCode}",
-                                        color = Color(0xFFB0BEC5),
-                                        fontSize = 13.sp,
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Medium,
                                         maxLines = 1
                                     )
                                 }
-                                if (isActive) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF00E5FF).copy(alpha = 0.15f)
-                                    ) {
-                                        Text(
-                                            text = "ACTIVE",
-                                            color = Color(0xFF00E5FF),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Black,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "Switch →",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
                             }
                         }
                     }
-                    HorizontalDivider(color = Color(0xFF323B4D), modifier = Modifier.padding(vertical = 2.dp))
                 }
+
+                HorizontalDivider(color = Color(0xFF27272A), modifier = Modifier.padding(vertical = 2.dp))
+
+                Text(
+                    text = "CIRCLE ACTIONS",
+                    color = Color(0xFFA1A1AA),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
 
                 // 👥 Join a Circle
                 Surface(
@@ -129,8 +249,8 @@ fun CircleSwitcherOverlay(
                             onOpenAddDeviceTab(0)
                         },
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF161922),
-                    border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    color = Color(0xFF18181B),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
                 ) {
                     Row(
                         modifier = Modifier
@@ -177,8 +297,8 @@ fun CircleSwitcherOverlay(
                             onOpenAddDeviceTab(1)
                         },
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF161922),
-                    border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    color = Color(0xFF18181B),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
                 ) {
                     Row(
                         modifier = Modifier
@@ -206,8 +326,8 @@ fun CircleSwitcherOverlay(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Share PIN ${activeGroupPinCode.ifBlank { "4666" }}",
-                                color = Color(0xFF00E676),
+                                text = if (isInCircle) "Share PIN $resolvedPin" else "Join or create a circle first",
+                                color = if (isInCircle) Color(0xFF10B981) else Color(0xFFA1A1AA),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
@@ -226,8 +346,8 @@ fun CircleSwitcherOverlay(
                             onOpenAddDeviceTab(2)
                         },
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF161922),
-                    border = BorderStroke(1.dp, Color(0xFF2D3545))
+                    color = Color(0xFF18181B),
+                    border = BorderStroke(1.dp, Color(0xFF27272A))
                 ) {
                     Row(
                         modifier = Modifier

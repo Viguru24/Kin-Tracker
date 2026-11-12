@@ -1339,8 +1339,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 entry.key == memberId || m.id == memberId ||
                 m.name.equals(memberId, ignoreCase = true) ||
                 m.name.equals(targetName, ignoreCase = true) ||
-                (cleanTarget.isNotBlank() && (cleanEntryName == cleanTarget || cleanEntryName.contains(cleanTarget) || cleanTarget.contains(cleanEntryName))) ||
-                (cleanId.isNotBlank() && (cleanEntryId == cleanId || cleanEntryId.contains(cleanId) || cleanId.contains(cleanEntryId)))
+                (cleanTarget.isNotBlank() && cleanEntryName == cleanTarget) ||
+                (cleanId.isNotBlank() && cleanEntryId == cleanId)
             }
             if (targetEntry != null) {
                 val targetKey = targetEntry.key
@@ -1378,8 +1378,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 entry.key == memberId || m.id == memberId ||
                 m.name.equals(memberId, ignoreCase = true) ||
                 m.name.equals(targetName, ignoreCase = true) ||
-                (cleanTarget.isNotBlank() && (cleanEntryName == cleanTarget || cleanEntryName.contains(cleanTarget) || cleanTarget.contains(cleanEntryName))) ||
-                (cleanId.isNotBlank() && (cleanEntryId == cleanId || cleanEntryId.contains(cleanId) || cleanId.contains(cleanEntryId)))
+                (cleanTarget.isNotBlank() && cleanEntryName == cleanTarget) ||
+                (cleanId.isNotBlank() && cleanEntryId == cleanId)
             }
             if (targetEntry != null) {
                 val targetKey = targetEntry.key
@@ -1403,6 +1403,28 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             stopFindMyPhone(memberId)
         } else {
             triggerFindMyPhone(memberId)
+        }
+    }
+
+    fun stopLocalAlarm() {
+        com.example.data.AlarmHelper.stopAlarm()
+        val token = groupSyncToken.value
+        if (token.isBlank() || token == "00000000_") return
+        viewModelScope.launch {
+            val myUuid = myDeviceUUID.value
+            val myName = myDeviceName.value.trim()
+            cloudSyncManager.getGroupData(token)?.let { payload ->
+                val updatedMembers = payload.members.toMutableMap()
+                val myEntry = updatedMembers.entries.firstOrNull { entry ->
+                    (myUuid.length >= 4 && (entry.key.endsWith("_$myUuid") || entry.value.id.endsWith("_$myUuid"))) ||
+                    entry.value.name.trim().equals(myName, ignoreCase = true)
+                }
+                if (myEntry != null && (myEntry.value.statusText == "🚨 ALARM" || myEntry.value.alarmRequestedAt > 0L)) {
+                    val now = System.currentTimeMillis()
+                    updatedMembers[myEntry.key] = myEntry.value.copy(statusText = "Stationary", alarmRequestedAt = 0L, lastActive = now)
+                    cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = now, members = updatedMembers))
+                }
+            }
         }
     }
 

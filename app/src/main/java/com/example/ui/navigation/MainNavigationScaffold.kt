@@ -69,6 +69,7 @@ fun MainScreen(
     val notificationVolume by viewModel.notificationVolume.collectAsStateWithLifecycle()
     val proximityAlertDistanceMeters by viewModel.proximityAlertDistanceMeters.collectAsStateWithLifecycle()
     val activeRingingMembers by viewModel.activeRingingMembers.collectAsStateWithLifecycle()
+    val isThisDeviceRinging by com.example.data.AlarmHelper.isRingingFlow.collectAsStateWithLifecycle()
 
     val isCloudSyncEnabled by viewModel.isCloudSyncEnabled.collectAsStateWithLifecycle()
     val isLocationPaused by viewModel.isLocationPaused.collectAsStateWithLifecycle()
@@ -294,6 +295,67 @@ fun MainScreen(
             bottomPadding = 0.dp,
             modifier = Modifier.fillMaxSize()
         )
+
+        // Big STOP Overlay on the phone/tablet that is currently ringing
+        if (isThisDeviceRinging) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xD909090B))
+                    .zIndex(250f)
+                    .clickable(enabled = true) {},
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.88f)
+                        .widthIn(max = 360.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF121215),
+                    border = BorderStroke(2.dp, Color(0xFFEF4444)),
+                    shadowElevation = 24.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text("🚨", fontSize = 48.sp)
+                        Text(
+                            text = "FIND MY PHONE",
+                            color = Color(0xFFEF4444),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.5.sp
+                        )
+                        Text(
+                            text = "This device is ringing!",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Button(
+                            onClick = { viewModel.stopLocalAlarm() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEF4444),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(72.dp)
+                        ) {
+                            Text(
+                                text = "STOP",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 2.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // Top Floating HUD Banner when Find My Phone Alarm is active
         if (activeRingingMembers.isNotEmpty()) {

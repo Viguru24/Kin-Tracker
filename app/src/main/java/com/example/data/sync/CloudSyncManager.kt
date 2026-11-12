@@ -148,9 +148,18 @@ class CloudSyncManager(
             return
         }
         val token = groupSyncToken.value
+        if (token.isBlank() || token == "00000000_") {
+            cloudStatusText.value = "Not in a circle"
+            isSyncTickInProgress.set(false)
+            return
+        }
         val myName = myDeviceName.value
         val myColor = myDeviceColor.value
-        val meMember = familyMembers.value.firstOrNull { it.id == "me" } ?: return
+        val meMember = familyMembers.value.firstOrNull { it.id == "me" }
+        if (meMember == null) {
+            isSyncTickInProgress.set(false)
+            return
+        }
 
         // Synchronize RoomAudioStreamManager with active circle token and device name
         com.example.data.RoomAudioStreamManager.setCircleContext(
@@ -220,18 +229,14 @@ class CloudSyncManager(
                 }
             }
             
-            val myNameClean = myName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
             val matchesMe = payload?.members?.values?.any { member ->
-                val memberNameClean = member.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-                val isSamePerson = member.id == myCloudId ||
+                val isSameDevice = member.id == myCloudId ||
                     (myDeviceUUID.value.length >= 4 && member.id.endsWith("_" + myDeviceUUID.value)) ||
-                    member.id.contains(myDeviceUUID.value) ||
-                    member.name.trim().equals(myName.trim(), ignoreCase = true) ||
-                    (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
-                
+                    member.name.trim().equals(myName.trim(), ignoreCase = true)
+
                 val isAlarmActive = member.statusText == "🚨 ALARM" ||
                     (member.alarmRequestedAt > 0L && (lastActiveTimestamp - member.alarmRequestedAt) in 0L..60_000L)
-                isSamePerson && isAlarmActive
+                isSameDevice && isAlarmActive
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(application)
@@ -1009,6 +1014,7 @@ class CloudSyncManager(
 
     fun convertToValidToken(input: String): String {
         val cleaned = input.replace("/", "_").trim()
+        if (cleaned.isBlank() || cleaned == "00000000_") return ""
         if (cleaned.contains("_")) return cleaned
         val hash = Integer.toHexString(input.hashCode()).padStart(8, '0').take(8)
         val sanitizedKey = input.lowercase().replace("[^a-z0-9]".toRegex(), "")

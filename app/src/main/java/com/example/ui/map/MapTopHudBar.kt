@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,29 +72,33 @@ fun MapTopHudBar(
                 .padding(horizontal = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            val activeCircleName = if (activeGroupPinCode.isNotBlank()) {
-                val active = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
-                active?.groupName?.ifBlank { "Circle $activeGroupPinCode" } ?: "Circle $activeGroupPinCode"
-            } else if (groupPinMappings.isNotEmpty()) {
-                groupPinMappings.first().groupName.ifBlank { "Family Circle" }
-            } else "Family Circle"
+            val activeMapping = groupPinMappings.firstOrNull { it.pinCode == activeGroupPinCode }
+                ?: groupPinMappings.firstOrNull { it.isActive }
+                ?: groupPinMappings.firstOrNull()
+            val resolvedPin = activeGroupPinCode.ifBlank { activeMapping?.pinCode.orEmpty() }
+            val activeCircleName = when {
+                activeMapping != null && activeMapping.groupName.isNotBlank() -> activeMapping.groupName
+                resolvedPin == "4666" -> "Family Circle"
+                resolvedPin.isNotBlank() -> "Circle $resolvedPin"
+                else -> "No Circle"
+            }
 
             Surface(
                 modifier = Modifier
                     .height(38.dp)
                     .clickable { onToggleCircleSwitcher() }
                     .testTag("circle_switcher_pill"),
-                color = Color(0xF2161A24),
+                color = Color(0xF2121215),
                 shape = RoundedCornerShape(19.dp),
-                border = BorderStroke(1.2.dp, if (isCircleSwitcherOpen) RadarCyan else Color(0xFF384358)),
+                border = BorderStroke(1.2.dp, if (isCircleSwitcherOpen) RadarCyan else Color(0xFF27272A)),
                 shadowElevation = 8.dp
             ) {
                 Row(
                     modifier = Modifier
-                        .padding(horizontal = 14.dp)
+                        .padding(horizontal = 12.dp)
                         .fillMaxHeight(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(text = "👥", fontSize = 13.sp, maxLines = 1, softWrap = false)
                     Text(
@@ -103,8 +108,20 @@ fun MapTopHudBar(
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+                    if (resolvedPin.isNotBlank()) {
+                        Text(
+                            text = "#$resolvedPin",
+                            color = Color(0xFFA1A1AA),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                     Surface(
                         shape = CircleShape,
                         color = Color(0x3300E5FF)

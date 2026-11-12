@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,14 +28,16 @@ object TelemetryWebSocketManager {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val client = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
+        .pingInterval(45, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
     private var webSocket: WebSocket? = null
     private var activeToken: String = ""
-    private var isConnected = false
+    @Volatile private var isConnected = false
+    @Volatile private var reconnectAttempts = 0
+    private var reconnectJob: Job? = null
 
     // Deduplication set for server-generated alert IDs
     private val processedAlertIds = ConcurrentHashMap.newKeySet<String>()
@@ -64,7 +67,7 @@ object TelemetryWebSocketManager {
         if (token.isBlank() || AppConfig.isTestEnvironment) return
         if (isConnected && activeToken == token && webSocket != null) return
 
-        disconnect()
+        disconnect(resetBackoff = false)
         activeToken = token
 
         val baseWs = AppConfig.getWebSocketBaseUrl(context).trimEnd('/')
@@ -74,6 +77,8 @@ object TelemetryWebSocketManager {
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 isConnected = true
+                reconnectAttempts = 0
+                reconnectJob?.cancel()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -130,8 +135,12 @@ object TelemetryWebSocketManager {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 isConnected = false
-                scope.launch {
-                    delay(8000)
+                reconnectJob?.cancel()
+                val attempt = reconnectAttempts
+                reconnectAttempts = minOf(attempt + 1, 6)
+                val backoffMs = minOf(300_000L, 8_000L * (1L shl minOf(attempt, 5)))
+                reconnectJob = scope.launch {
+                    delay(backoffMs)
                     if (activeToken.isNotBlank() && !isConnected) {
                         connect(context, repository, activeToken, myDeviceName, myDeviceUUID, onUiEvent)
                     }
@@ -140,7 +149,10 @@ object TelemetryWebSocketManager {
         })
     }
 
-    fun disconnect() {
+    fun disconnect(resetBackoff: Boolean = true) {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        if (resetBackoff) reconnectAttempts = 0
         try {
             webSocket?.close(1000, "Reconnecting or stopping")
         } catch (_: Exception) {}

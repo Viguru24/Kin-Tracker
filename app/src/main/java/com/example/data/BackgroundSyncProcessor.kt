@@ -232,18 +232,14 @@ object BackgroundSyncProcessor {
             if (!fetchSuccess) return
 
             // 2. Check alarm
-            val myNameClean = myName.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
             val matchesMe = payload?.members?.values?.any { member ->
-                val memberNameClean = member.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter|Sister|Son|Mom|Mother|Father|Other Device)\\)", RegexOption.IGNORE_CASE), "").trim()
-                val isSamePerson = member.id == myCloudId ||
+                val isSameDevice = member.id == myCloudId ||
                     (dUuid.length >= 4 && member.id.endsWith("_$dUuid")) ||
-                    member.id.contains(dUuid) ||
-                    member.name.trim().equals(myName.trim(), ignoreCase = true) ||
-                    (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
-                
+                    member.name.trim().equals(myName.trim(), ignoreCase = true)
+
                 val isAlarmActive = member.statusText == "🚨 ALARM" ||
                     (member.alarmRequestedAt > 0L && (lastActiveTimestamp - member.alarmRequestedAt) in 0L..60_000L)
-                isSamePerson && isAlarmActive
+                isSameDevice && isAlarmActive
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(context)

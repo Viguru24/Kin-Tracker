@@ -11,6 +11,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Vibrator
 import android.os.VibratorManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 object AlarmHelper {
     private var mediaPlayer: MediaPlayer? = null
@@ -19,6 +21,9 @@ object AlarmHelper {
     private var screenStateReceiver: android.content.BroadcastReceiver? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var vibrator: Vibrator? = null
+
+    private val _isRingingFlow = MutableStateFlow(false)
+    val isRingingFlow: StateFlow<Boolean> = _isRingingFlow
 
     val isRinging: Boolean
         get() = (mediaPlayer?.isPlaying == true || fallbackRingtone?.isPlaying == true)
@@ -122,6 +127,7 @@ object AlarmHelper {
                 prepare()
                 start()
             }
+            _isRingingFlow.value = true
 
             // Automatically stop after 12 seconds (rings a few times loudly then shuts off)
             Handler(Looper.getMainLooper()).postDelayed({
@@ -136,6 +142,7 @@ object AlarmHelper {
                 val ringtone = RingtoneManager.getRingtone(context, alarmUri)
                 fallbackRingtone = ringtone
                 ringtone?.play()
+                _isRingingFlow.value = true
                 Handler(Looper.getMainLooper()).postDelayed({
                     stopAlarm()
                 }, 12000)
@@ -146,6 +153,7 @@ object AlarmHelper {
     }
 
     fun stopAlarm() {
+        _isRingingFlow.value = false
         try {
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.stop()

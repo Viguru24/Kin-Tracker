@@ -1319,6 +1319,7 @@ fun RadarMap(
         onDismiss = { showCircleSwitcher = false },
         groupPinMappings = groupPinMappings,
         activeGroupPinCode = activeGroupPinCode,
+        memberCount = members.size,
         onSwitchCircle = onSwitchCircle,
         onOpenAddDeviceTab = { tab ->
             addDeviceInitialTab = tab

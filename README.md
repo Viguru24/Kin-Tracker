@@ -12,18 +12,19 @@
 [![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Privacy First](https://img.shields.io/badge/Privacy-100%25%20No%20Data%20Brokers-00ff88?style=for-the-badge&logo=shield)](https://github.com/Viguru24/Kin-Tracker)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Latest Release](https://img.shields.io/badge/Release-v2.8.1_Latest-10B981?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
+[![Latest Release](https://img.shields.io/badge/Release-v2.8.2_Latest-10B981?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
 
 <br/>
 
 <p align="center">
-  <a href="https://github.com/Viguru24/Kin-Tracker/releases/download/v2.8.1/KinTracker-v2.8.1.apk">
-    <img src="https://img.shields.io/badge/📥_Download_APK-v2.8.1_Stable-00E676?style=for-the-badge&logo=android&logoColor=black" alt="Download APK" height="42" />
+  <a href="https://github.com/Viguru24/Kin-Tracker/releases/latest">
+    <img src="https://img.shields.io/badge/📥_Download_APK-v2.8.2_Stable-00E676?style=for-the-badge&logo=android&logoColor=black" alt="Download APK" height="42" />
   </a>
 </p>
 
 <p align="center">
   <a href="#-why-kin-tracker">🌟 <b>Why Kin-Tracker</b></a> •
+  <a href="#-whats-new-in-v282">✨ <b>What's New</b></a> •
   <a href="#-feature-comparison">📊 <b>Comparison</b></a> •
   <a href="#-key-features">🚀 <b>Features</b></a> •
   <a href="#-download--installation">📥 <b>Download & Install</b></a> •
@@ -43,6 +44,18 @@ Commercial family trackers (like Life360) have faced severe backlash for selling
 1. **🛡️ 100% Privacy-First:** No location data brokers, no user telemetry, and no accounts required — data is encrypted and shared strictly within your private family circle.
 2. **⚡ Bulletproof Screen-Off Background GPS:** Intelligent hardware `WakeLock` cycling and foreground service prioritization ensure continuous 24/7 location streaming without being killed by Android Doze mode.
 3. **💸 Free & Sovereign Forever:** No paywalled geofences, no driving reports subscription fees, and zero ads.
+
+---
+
+## ✨ What's New in v2.8.2
+
+Kin-Tracker **v2.8.2** is a major reliability, efficiency, and UI polish release built for 24/7 everyday family safety:
+
+- **🚨 Find My Phone Full-Screen `STOP` Overlay & Precision Ringing:** Ring a misplaced family phone or tablet remotely even when it's on silent. A bold full-screen `STOP` overlay appears on the ringing device to silence it in one tap and automatically clear the cloud alarm state, backed by strict device-UUID matching so alarms only trigger on the intended device.
+- **📶 Smart Low-Data Mode & Gzip Compression:** Drastically reduces background mobile data consumption with gzip-compressed sync payloads, automatic trip breadcrumb stripping during background polling, and exponential backoff on WebSocket reconnects (`45s` ping interval with smart backoff up to `300s`).
+- **👥 Redesigned Circle Switcher & Live `#PIN` HUD:** Sleek obsidian-dark Circle Switcher overlay featuring a Current Circle hero card, live member count, an instant `#PIN` badge right in the top HUD bar, and one-tap circle switching or invite sharing.
+- **🌐 Configurable Sovereign VPS & Self-Hosting:** Point Kin-Tracker directly to your own private VPS from the onboarding screen or Settings—complete control over your family's data with zero vendor lock-in.
+- **🎨 Obsidian & Emerald UI + Modular Architecture:** Refined `#09090b` / `#121215` dark-mode styling with crisp emerald and cyan accents, backed by a cleanly modularized Jetpack Compose & sync architecture (`CloudSyncManager`, `RadarMap`, `MainNavigationScaffold`, and `SettingsHub`).
 
 ---
 
@@ -95,7 +108,7 @@ Download the pre-compiled Android package directly to your phone:
 
 <div align="center">
 
-[![Download Kin-Tracker APK](https://img.shields.io/badge/Download-KinTracker_APK_(v2.8.1)-00E676?style=for-the-badge&logo=android&logoColor=black)](https://github.com/Viguru24/Kin-Tracker/releases/download/v2.8.1/KinTracker-v2.8.1.apk)
+[![Download Kin-Tracker APK](https://img.shields.io/badge/Download-KinTracker_APK_(v2.8.2)-00E676?style=for-the-badge&logo=android&logoColor=black)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
 [![GitHub Releases](https://img.shields.io/badge/All_Releases-GitHub-27272a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases)
 
 </div>
