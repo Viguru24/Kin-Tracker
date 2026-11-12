@@ -55,23 +55,32 @@ class CloudSyncManager(
 
     private var lastTriggerSyncTime = 0L
     private val isSyncTickInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var lastPutTimestamp = 0L
+    @Volatile private var lastPutLat = 0.0
+    @Volatile private var lastPutLng = 0.0
+    @Volatile private var lastPutSignature = ""
 
     init {
         com.example.data.RoomAudioStreamManager.onTransmitterToggled = {
-            triggerSyncNow()
+            triggerSyncNow(pullOnly = false)
         }
     }
 
-    fun triggerSyncNow() {
+    fun triggerSyncNow(pullOnly: Boolean = false, bypassThrottle: Boolean = false) {
         val now = System.currentTimeMillis()
-        // Throttle triggers to at most once every 10 seconds to prevent recursive WebSocket feedback loops
-        if (now - lastTriggerSyncTime < 10000L) {
+        // Ignore WebSocket MEMBER_UPDATE echoes caused by our own recent PUT
+        if (pullOnly && now - lastPutTimestamp < 2500L) {
+            return
+        }
+        // Throttle triggers to at most once every 10 seconds (2s for real-time WebSocket updates)
+        val minInterval = if (bypassThrottle) 2000L else 10000L
+        if (now - lastTriggerSyncTime < minInterval) {
             return
         }
         lastTriggerSyncTime = now
         scope.launch {
             if (isCloudSyncEnabled.value && groupSyncToken.value.isNotBlank()) {
-                performCloudSyncTick()
+                performCloudSyncTick(pullOnly = pullOnly)
             }
         }
     }
@@ -100,7 +109,7 @@ class CloudSyncManager(
     fun startCloudSyncLoop() {
         cloudSyncJob?.cancel()
         com.example.data.TelemetryWebSocketManager.onRealtimeMemberUpdated = {
-            triggerSyncNow()
+            triggerSyncNow(pullOnly = true, bypassThrottle = true)
         }
         cloudSyncJob = scope.launch {
             while (isActive) {
@@ -113,9 +122,18 @@ class CloudSyncManager(
                         myDeviceUUID = myDeviceUUID.value,
                         onUiEvent = { event -> scope.launch { uiEvents.emit(event) } }
                     )
-                    performCloudSyncTick()
+                    performCloudSyncTick(pullOnly = !com.example.data.BackgroundLocationService.isInForeground)
                 }
-                delay(30000) // Relaxed 30-second fallback polling (telemetry streams via WebSocket)
+                // Poll every 30s when app is visible; in background, BackgroundLocationService handles
+                // location sync so only run a 5-minute fallback check (waking early if foregrounded).
+                if (com.example.data.BackgroundLocationService.isInForeground) {
+                    delay(30_000L)
+                } else {
+                    for (i in 0 until 10) {
+                        delay(30_000L)
+                        if (com.example.data.BackgroundLocationService.isInForeground) break
+                    }
+                }
             }
         }
     }
@@ -125,7 +143,7 @@ class CloudSyncManager(
         com.example.data.TelemetryWebSocketManager.disconnect()
     }
 
-    private suspend fun performCloudSyncTick() {
+    private suspend fun performCloudSyncTick(pullOnly: Boolean = false) {
         if (!isSyncTickInProgress.compareAndSet(false, true)) {
             return
         }
@@ -211,7 +229,9 @@ class CloudSyncManager(
                     member.name.trim().equals(myName.trim(), ignoreCase = true) ||
                     (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
                 
-                isSamePerson && member.statusText == "🚨 ALARM"
+                val isAlarmActive = member.statusText == "🚨 ALARM" ||
+                    (member.alarmRequestedAt > 0L && (lastActiveTimestamp - member.alarmRequestedAt) in 0L..60_000L)
+                isSamePerson && isAlarmActive
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(application)
@@ -465,6 +485,8 @@ class CloudSyncManager(
                 val existingLocalBeforePut = repository.getFamilyMembersOnce()
                 for ((k, cloudM) in updatedMembers) {
                     if (k != myCloudId) {
+                        // Never overwrite an active Find My Phone alarm on another family member
+                        if (cloudM.statusText == "🚨 ALARM" || cloudM.alarmRequestedAt > 0L) continue
                         val localM = existingLocalBeforePut.firstOrNull { it.id == k }
                         if (localM != null && localM.lastActive > cloudM.lastActive && localM.x != 0.0 && localM.y != 0.0) {
                             updatedMembers[k] = cloudM.copy(
@@ -513,12 +535,47 @@ class CloudSyncManager(
             }
 
             val payloadJson = payloadAdapter.toJson(newPayload)
-            var putSuccessful = false
-            try {
-                val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
-                val putResponse = cloudService.updateGroupData(token, requestBody)
-                if (putResponse.isSuccessful) putSuccessful = true
-            } catch (e: Exception) {}
+            val distMovedM = if (lastPutLat != 0.0 || lastPutLng != 0.0) {
+                val dx = (myCloudMember.x - lastPutLng) * 111000.0 * Math.cos(Math.toRadians(myCloudMember.y))
+                val dy = (myCloudMember.y - lastPutLat) * 111000.0
+                Math.hypot(dx, dy)
+            } else 999.0
+            val currentSignature = listOf(
+                myCloudMember.name,
+                myCloudMember.avatarColorHex,
+                myCloudMember.avatarEmoji,
+                myCloudMember.batteryPercentage / 5,
+                myCloudMember.isCharging,
+                myCloudMember.statusText,
+                myCloudMember.isComingHome,
+                myCloudMember.isLocationPaused,
+                myCloudMember.isAudioTransmitter,
+                myCloudMember.localIp,
+                finalShoppingList.size,
+                mergedDeletions.size
+            ).joinToString("|")
+            val shouldPut = !pullOnly && (
+                payload == null ||
+                !hasSuccessfullySyncedThisSession ||
+                (lastActiveTimestamp - lastPutTimestamp) >= 15 * 60 * 1000L ||
+                distMovedM >= 20.0 ||
+                currentSignature != lastPutSignature
+            )
+
+            var putSuccessful = !shouldPut && fetchSuccess
+            if (shouldPut) {
+                try {
+                    val requestBody = payloadJson.toRequestBody("application/json".toMediaTypeOrNull())
+                    val putResponse = cloudService.updateGroupData(token, requestBody)
+                    if (putResponse.isSuccessful) {
+                        putSuccessful = true
+                        lastPutTimestamp = lastActiveTimestamp
+                        lastPutLat = myCloudMember.y
+                        lastPutLng = myCloudMember.x
+                        lastPutSignature = currentSignature
+                    }
+                } catch (e: Exception) {}
+            }
 
             localMockCloudData[token] = payloadJson
 

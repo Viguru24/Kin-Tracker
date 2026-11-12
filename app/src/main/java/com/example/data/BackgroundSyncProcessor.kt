@@ -241,7 +241,9 @@ object BackgroundSyncProcessor {
                     member.name.trim().equals(myName.trim(), ignoreCase = true) ||
                     (myNameClean.isNotBlank() && memberNameClean.isNotBlank() && (myNameClean == memberNameClean || myNameClean.contains(memberNameClean) || memberNameClean.contains(myNameClean)))
                 
-                isSamePerson && member.statusText == "🚨 ALARM"
+                val isAlarmActive = member.statusText == "🚨 ALARM" ||
+                    (member.alarmRequestedAt > 0L && (lastActiveTimestamp - member.alarmRequestedAt) in 0L..60_000L)
+                isSamePerson && isAlarmActive
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(context)

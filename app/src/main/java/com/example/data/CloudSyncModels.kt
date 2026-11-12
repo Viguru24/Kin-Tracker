@@ -94,7 +94,8 @@ data class CloudMember(
     val locationSince: Long = 0L, // Timestamp of arrival at current location
     val localIp: String = "",
     val isAudioTransmitter: Boolean = false,
-    val isLocationPaused: Boolean = false
+    val isLocationPaused: Boolean = false,
+    val alarmRequestedAt: Long = 0L
 )
 
 // ============================================================================

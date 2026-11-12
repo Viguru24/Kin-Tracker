@@ -134,12 +134,14 @@ class BackgroundLocationService : Service() {
         intent?.action?.let { action ->
             when (action) {
                 "ACTION_FOREGROUND" -> {
+                    Companion.isInForeground = true
                     if (!isAppInForeground) {
                         isAppInForeground = true
                         restartLocationUpdates()
                     }
                 }
                 "ACTION_BACKGROUND" -> {
+                    Companion.isInForeground = false
                     if (isAppInForeground) {
                         isAppInForeground = false
                         restartLocationUpdates()
@@ -441,6 +443,10 @@ class BackgroundLocationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile
+        var isInForeground: Boolean = false
+            private set
+
         fun stopService(context: Context) {
             try {
                 val intent = Intent(context, BackgroundLocationService::class.java).apply {

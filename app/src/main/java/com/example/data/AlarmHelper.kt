@@ -51,17 +51,26 @@ object AlarmHelper {
 
             // Register screen state receiver to stop alarm when power button is pressed (screen toggled)
             if (screenStateReceiver == null) {
-                val receiver = object : android.content.BroadcastReceiver() {
-                    override fun onReceive(c: Context?, intent: android.content.Intent?) {
-                        stopAlarm()
+                try {
+                    val receiver = object : android.content.BroadcastReceiver() {
+                        override fun onReceive(c: Context?, intent: android.content.Intent?) {
+                            stopAlarm()
+                        }
                     }
+                    screenStateReceiver = receiver
+                    val filter = android.content.IntentFilter().apply {
+                        addAction(android.content.Intent.ACTION_SCREEN_OFF)
+                        addAction(android.content.Intent.ACTION_SCREEN_ON)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        context.applicationContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                    } else {
+                        @Suppress("UnspecifiedRegisterReceiverFlag")
+                        context.applicationContext.registerReceiver(receiver, filter)
+                    }
+                } catch (_: Exception) {
+                    screenStateReceiver = null
                 }
-                screenStateReceiver = receiver
-                val filter = android.content.IntentFilter().apply {
-                    addAction(android.content.Intent.ACTION_SCREEN_OFF)
-                    addAction(android.content.Intent.ACTION_SCREEN_ON)
-                }
-                context.applicationContext.registerReceiver(receiver, filter)
             }
 
             // Start vibration pattern

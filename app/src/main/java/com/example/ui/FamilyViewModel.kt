@@ -1345,7 +1345,7 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             if (targetEntry != null) {
                 val targetKey = targetEntry.key
                 val target = targetEntry.value
-                updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM", lastActive = System.currentTimeMillis())
+                val now = System.currentTimeMillis(); updatedMembers[targetKey] = target.copy(statusText = "🚨 ALARM", alarmRequestedAt = now, lastActive = now)
                 cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
                 activeRingingMembers.value = activeRingingMembers.value + target.id + target.name + targetKey
             }
@@ -1385,8 +1385,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                 val targetKey = targetEntry.key
                 val target = targetEntry.value
                 activeRingingMembers.value = activeRingingMembers.value - target.id - target.name - targetKey
-                if (target.statusText == "🚨 ALARM") {
-                    updatedMembers[targetKey] = target.copy(statusText = "Stationary", lastActive = System.currentTimeMillis())
+                if (target.statusText == "🚨 ALARM" || target.alarmRequestedAt > 0L) {
+                    val now = System.currentTimeMillis()
+                    updatedMembers[targetKey] = target.copy(statusText = "Stationary", alarmRequestedAt = 0L, lastActive = now)
                     cloudSyncManager.updateGroupData(token, payload.copy(lastUpdated = System.currentTimeMillis(), members = updatedMembers))
                 }
                 if (!isAutoTimeout) {
