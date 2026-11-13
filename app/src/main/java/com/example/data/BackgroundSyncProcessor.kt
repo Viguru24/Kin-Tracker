@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
+import com.example.data.sync.SyncResolutionHelper
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -147,7 +148,7 @@ object BackgroundSyncProcessor {
                 prefs.edit().putString("groupSyncToken", token).putString("activeGroupPinCode", activeGroup.pinCode).apply()
             }
         }
-        if (!isCloudSyncEnabled || token.isBlank()) return
+        if (!isCloudSyncEnabled || !SyncResolutionHelper.isValidSyncToken(token)) return
 
         // --- Smart Battery & Mobile Data Optimization Throttling ---
         val now = System.currentTimeMillis()
@@ -210,7 +211,7 @@ object BackgroundSyncProcessor {
 
         try {
             val lastActiveTimestamp = System.currentTimeMillis()
-            val myCloudId = "device_" + myName.lowercase().replace("\\s".toRegex(), "") + "_" + dUuid
+            val myCloudId = SyncResolutionHelper.buildMyCloudId(myName, dUuid)
 
             // 1. GET Current Group Data
             val response = cloudService.getGroupData(token)
@@ -233,14 +234,14 @@ object BackgroundSyncProcessor {
             if (!fetchSuccess) return
 
             // 2. Check alarm
-            val matchesMe = payload?.members?.values?.any { member ->
-                val isSameDevice = member.id == myCloudId ||
-                    (dUuid.length >= 4 && member.id.endsWith("_$dUuid")) ||
-                    member.name.trim().equals(myName.trim(), ignoreCase = true)
-
-                val isAlarmActive = member.statusText == "🚨 ALARM" ||
-                    (member.alarmRequestedAt > 0L && (lastActiveTimestamp - member.alarmRequestedAt) in 0L..60_000L)
-                isSameDevice && isAlarmActive
+            val matchesMe = payload?.members?.values?.let { members ->
+                SyncResolutionHelper.shouldTriggerLocalAlarm(
+                    members = members,
+                    myCloudId = myCloudId,
+                    myDeviceUuid = dUuid,
+                    myDeviceName = myName,
+                    nowMs = lastActiveTimestamp
+                )
             } ?: false
             if (matchesMe) {
                 AlarmHelper.triggerAlarm(context)
@@ -249,7 +250,7 @@ object BackgroundSyncProcessor {
             }
 
             val myEntry = payload?.members?.values?.firstOrNull {
-                it.id == myCloudId || (dUuid.length >= 4 && it.id.endsWith("_$dUuid")) || it.name.trim().equals(myName.trim(), ignoreCase = true)
+                SyncResolutionHelper.isMyCloudEntry(it, myCloudId, dUuid, myName)
             }
             if (myEntry != null && myEntry.name.isNotBlank() && !myEntry.name.trim().equals(myName.trim(), ignoreCase = false)) {
                 val newSyncedName = myEntry.name.trim()
@@ -365,104 +366,15 @@ object BackgroundSyncProcessor {
             )
 
             // 3. Sync and Merge Shopping items in background with cloud tombstones
-            val localShoppingItems = repository.getShoppingItemsOnce()
             val deletionPrefs = context.getSharedPreferences("shopping_deletions", Context.MODE_PRIVATE)
-            val incomingShoppingItems = payload?.shoppingItems ?: emptyList()
-            val incomingDeletions = payload?.deletedShoppingItems ?: emptyMap()
-
-            val mergedDeletions = mutableMapOf<String, Long>()
-            val nowMs = System.currentTimeMillis()
-            val cutoff = nowMs - (30L * 24 * 60 * 60 * 1000L) // 30 days retention
-
-            for ((k, v) in deletionPrefs.all) {
-                if (v is Long && v > cutoff) {
-                    mergedDeletions[k] = v
-                }
-            }
-            for ((k, v) in incomingDeletions) {
-                if (v > cutoff) {
-                    val existing = mergedDeletions[k] ?: 0L
-                    if (v > existing) {
-                        mergedDeletions[k] = v
-                    }
-                }
-            }
-            val delEditor = deletionPrefs.edit()
-            for ((k, v) in mergedDeletions) {
-                delEditor.putLong(k, v)
-            }
-            delEditor.apply()
-
-            fun getDeletionTimestamp(name: String): Long {
-                val normKey = name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
-                val rawKey = name.lowercase().trim()
-                return maxOf(mergedDeletions[normKey] ?: 0L, mergedDeletions[rawKey] ?: 0L)
-            }
-
-            val mergedShoppingMap = LinkedHashMap<String, CloudShoppingItem>()
-
-            for (localItem in localShoppingItems) {
-                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
-                if (normKey.isBlank()) continue
-                val delTime = getDeletionTimestamp(localItem.name)
-                if (delTime == 0L || localItem.timestamp > delTime) {
-                    val existing = mergedShoppingMap[normKey]
-                    if (existing == null || localItem.timestamp > existing.timestamp) {
-                        mergedShoppingMap[normKey] = CloudShoppingItem(
-                            name = localItem.name,
-                            isChecked = localItem.isChecked,
-                            addedByMemberId = localItem.addedByMemberId,
-                            addedByMemberName = localItem.addedByMemberName,
-                            timestamp = localItem.timestamp
-                        )
-                    }
-                }
-            }
-
-            for (cloudItem in incomingShoppingItems) {
-                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
-                if (normKey.isBlank()) continue
-                val delTime = getDeletionTimestamp(cloudItem.name)
-                if (delTime > 0L && cloudItem.timestamp <= delTime) {
-                    mergedShoppingMap.remove(normKey)
-                } else if (delTime == 0L || cloudItem.timestamp > delTime) {
-                    val localMatch = mergedShoppingMap[normKey]
-                    if (localMatch == null || cloudItem.timestamp > localMatch.timestamp) {
-                        mergedShoppingMap[normKey] = cloudItem
-                    }
-                }
-            }
-
-            val finalShoppingList = mergedShoppingMap.values.toList()
-            val seenKeys = mutableSetOf<String>()
-
-            for (localItem in localShoppingItems) {
-                val normKey = localItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
-                val matchedCloud = mergedShoppingMap[normKey]
-                if (matchedCloud == null || seenKeys.contains(normKey)) {
-                    repository.deleteShoppingItem(localItem)
-                } else {
-                    seenKeys.add(normKey)
-                    if (localItem.isChecked != matchedCloud.isChecked && matchedCloud.timestamp > localItem.timestamp) {
-                        repository.updateShoppingItem(localItem.copy(isChecked = matchedCloud.isChecked, timestamp = matchedCloud.timestamp))
-                    }
-                }
-            }
-
-            for (cloudItem in finalShoppingList) {
-                val normKey = cloudItem.name.lowercase().replace("[^a-z0-9]".toRegex(), "").trim()
-                if (!seenKeys.contains(normKey)) {
-                    repository.insertShoppingItem(
-                        ShoppingItem(
-                            name = cloudItem.name,
-                            isChecked = cloudItem.isChecked,
-                            addedByMemberId = cloudItem.addedByMemberId,
-                            addedByMemberName = cloudItem.addedByMemberName,
-                            timestamp = cloudItem.timestamp
-                        )
-                    )
-                }
-            }
+            val shoppingSyncResult = SyncResolutionHelper.syncShoppingListWithDatabase(
+                repository = repository,
+                deletionPrefs = deletionPrefs,
+                incomingShoppingItems = payload?.shoppingItems ?: emptyList(),
+                incomingDeletions = payload?.deletedShoppingItems ?: emptyMap()
+            )
+            val finalShoppingList = shoppingSyncResult.finalItems
+            val mergedDeletions = shoppingSyncResult.mergedDeletions
 
             // 4. Clean up stale / duplicate devices in cloud payload
             val updatedMembers = payload?.members?.toMutableMap() ?: mutableMapOf()

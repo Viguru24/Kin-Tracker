@@ -5,14 +5,12 @@ const db = require('../db');
 const { getAudioRelayStats } = require('../audioRelay');
 const { generateInviteCode } = require('../utils/codeGenerator');
 const { ringMemberPhone, stopRingMemberPhone } = require('../syncBridge');
-
-// Configurable Admin Key (default to 4666 or process.env.ADMIN_KEY)
-const ADMIN_KEY = process.env.ADMIN_KEY || '4666';
+const { isValidAdminKey } = require('../config');
 
 // Admin Authentication Middleware
 function requireAdmin(req, res, next) {
     const key = req.headers['x-admin-key'] || req.query.adminKey || req.body?.adminKey;
-    if (!key || key !== ADMIN_KEY) {
+    if (!key || !isValidAdminKey(key)) {
         return res.status(401).json({ success: false, error: 'Unauthorized: Invalid Admin Key' });
     }
     next();
@@ -21,7 +19,7 @@ function requireAdmin(req, res, next) {
 // 1. LOGIN / AUTH CHECK
 router.post('/login', (req, res) => {
     const { key } = req.body;
-    if (key === ADMIN_KEY) {
+    if (isValidAdminKey(key)) {
         db.logEvent('ADMIN', 'Admin logged in to VPS Dashboard');
         return res.json({ success: true, token: key, message: 'Authentication successful' });
     }

@@ -2,10 +2,10 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { isValidAdminKey } = require('../config');
 
 const router = express.Router();
 const UPDATE_DIR = path.join(__dirname, '../../updates');
-const ADMIN_KEY = process.env.ADMIN_KEY || "test_secret_4666";
 
 // Ensure base update directory exists
 if (!fs.existsSync(UPDATE_DIR)) {
@@ -92,7 +92,7 @@ const validateGroupOrAdminToken = (req, res, next) => {
     const groupToken = req.headers['x-group-token'] || req.query.token;
     const adminKey = req.headers['x-admin-key'];
     
-    if (adminKey && adminKey === ADMIN_KEY) return next();
+    if (adminKey && isValidAdminKey(adminKey)) return next();
 
     const clean = String(groupToken || '').toLowerCase().replace(/[\s\-_]/g, '');
     const isKnown = clean.includes('81e5632c') || 
@@ -208,7 +208,7 @@ router.get('/:appId/app-latest.apk', validateGroupOrAdminToken, handleApkDownloa
 // 3. Upload a new build
 function handleUpload(req, res) {
     const adminKey = req.headers['x-admin-key'];
-    if (adminKey !== ADMIN_KEY) {
+    if (!isValidAdminKey(adminKey)) {
         return res.status(403).json({ error: 'Forbidden: Invalid Admin Key' });
     }
 

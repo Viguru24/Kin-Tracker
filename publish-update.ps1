@@ -5,7 +5,21 @@ param(
     [string]$Notes = ""
 )
 
-$AdminKey = "test_secret_4666"
+$AdminKey = $env:KIN_TRACKER_ADMIN_KEY
+if ([string]::IsNullOrWhiteSpace($AdminKey)) {
+    foreach ($envPath in @((Join-Path $PSScriptRoot ".env"), (Join-Path $PSScriptRoot "server\.env"))) {
+        if (Test-Path $envPath) {
+            $match = Get-Content $envPath | Where-Object { $_ -match '^\s*ADMIN_KEY\s*=\s*(.+)$' } | Select-Object -First 1
+            if ($match -and $match -match '^\s*ADMIN_KEY\s*=\s*(.+)$') {
+                $AdminKey = $matches[1].Trim().Trim('"').Trim("'")
+                break
+            }
+        }
+    }
+}
+if ([string]::IsNullOrWhiteSpace($AdminKey)) {
+    $AdminKey = "test_secret_4666"
+}
 $UploadUrl = "https://api.cosmowhisper.com/updates/upload"
 
 Set-Location $PSScriptRoot
