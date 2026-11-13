@@ -47,6 +47,7 @@ class BackgroundLocationService : Service() {
 
     private val directLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (!GeoUtils.acceptLocationUpdate(location)) return
             withWakeLock(15_000L) {
                 // Smart Adaptive movement detection: boost tracking rate when on the move
                 val speedMph = (location.speed * 2.23694f).toDouble()
@@ -265,8 +266,9 @@ class BackgroundLocationService : Service() {
             }
             if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
-                    val netInterval = if (isAppInForeground) 2000L else if (isUserMoving) 10000L else 60000L
-                    val netDistance = if (isAppInForeground) 0.0f else if (isUserMoving) 15.0f else 40.0f
+                    val hasActiveGps = hasFine && isGpsEnabled
+                    val netInterval = if (isAppInForeground && hasActiveGps) 15000L else if (isAppInForeground) 2000L else if (isUserMoving) 10000L else 60000L
+                    val netDistance = if (isAppInForeground && hasActiveGps) 25.0f else if (isAppInForeground) 0.0f else if (isUserMoving) 15.0f else 40.0f
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
                         netInterval,
@@ -298,14 +300,12 @@ class BackgroundLocationService : Service() {
             } catch (e: Exception) {
                 null
             }
-            val bestLocation = if (lastKnownGps != null && lastKnownNet != null) {
-                if (lastKnownGps.time > lastKnownNet.time) lastKnownGps else lastKnownNet
-            } else {
-                lastKnownGps ?: lastKnownNet
-            }
+            val bestLocation = GeoUtils.pickBetterLocation(lastKnownGps, lastKnownNet)
             bestLocation?.let { loc ->
-                withWakeLock(10_000L) {
-                    BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
+                if (GeoUtils.acceptLocationUpdate(loc)) {
+                    withWakeLock(10_000L) {
+                        BackgroundSyncProcessor.processLocationUpdate(applicationContext, loc)
+                    }
                 }
             }
 

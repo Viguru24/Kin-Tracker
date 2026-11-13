@@ -68,11 +68,16 @@ object BackgroundSyncProcessor {
         val distanceTotalKm = Math.hypot(xDistanceKm, yDistanceKm)
         val distanceMeters = distanceTotalKm * 1000.0
         val accuracyMeters = if (location.hasAccuracy()) location.accuracy.toDouble() else 20.0
-        val homeRadiusSetting = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
-        val effectiveHomeBoundary = maxOf(120.0, homeRadiusSetting)
-        val isAtHome = (distanceMeters - minOf(accuracyMeters * 0.5, 50.0)) <= effectiveHomeBoundary
-
         val speedMph = Math.round((location.speed * 2.23694f) * 10.0) / 10.0
+        val homeRadiusSetting = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
+        val wasAtHome = me.statusText.contains("At Home", ignoreCase = true)
+        val isAtHome = (homeLat != 0.0 || homeLng != 0.0) && GeoUtils.isDistanceWithinHomeGeofence(
+            distanceMeters = distanceMeters,
+            homeRadiusMeters = homeRadiusSetting,
+            wasAlreadyAtHome = wasAtHome,
+            speedMph = speedMph,
+            accuracyMeters = accuracyMeters
+        )
         val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
         val matchedSelfZone = if (!isAtHome) {
             GeoUtils.matchSafeZone(
@@ -271,10 +276,17 @@ object BackgroundSyncProcessor {
 
             val prefsHomeLat = prefs.getFloat("homeLat", AppConfig.DEFAULT_HOME_LAT.toFloat()).toDouble()
             val prefsHomeLng = prefs.getFloat("homeLng", AppConfig.DEFAULT_HOME_LNG.toFloat()).toDouble()
-            val xDist = (location.longitude - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat))
-            val yDist = (location.latitude - prefsHomeLat) * 111.0
-            val distTotal = Math.hypot(xDist, yDist)
-            val isAtHome = distTotal <= 0.15 // 150 meters residential geofence
+            val distMeters = GeoUtils.distanceMeters(location.latitude, location.longitude, prefsHomeLat, prefsHomeLng)
+            val distTotal = distMeters / 1000.0
+            val homeRadiusSetting = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
+            val accuracyMeters = if (location.hasAccuracy()) location.accuracy.toDouble() else 20.0
+            val isAtHome = (prefsHomeLat != 0.0 || prefsHomeLng != 0.0) && GeoUtils.isDistanceWithinHomeGeofence(
+                distanceMeters = distMeters,
+                homeRadiusMeters = homeRadiusSetting,
+                wasAlreadyAtHome = status.contains("At Home", ignoreCase = true),
+                speedMph = speedMph,
+                accuracyMeters = accuracyMeters
+            )
 
             val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }
             val matchedSelfZone = if (!isAtHome) {
@@ -498,12 +510,23 @@ object BackgroundSyncProcessor {
                 val effY = if (hasNewerLocal) matchingLocal!!.y else cloudM.y
                 val effLastActive = if (hasNewerLocal) matchingLocal!!.lastActive else cloudM.lastActive
 
+                val homeRadiusSetting = prefs.getFloat("homeRadiusMeters", AppConfig.DEFAULT_HOME_RADIUS_METERS.toFloat()).toDouble()
                 val distToHomeKm = if (prefsHomeLat != 0.0 && prefsHomeLng != 0.0 && effX != 0.0 && effY != 0.0) {
-                    Math.hypot((effX - prefsHomeLng) * 111.0 * Math.cos(Math.toRadians(prefsHomeLat)), (effY - prefsHomeLat) * 111.0)
+                    GeoUtils.fastDistanceKm(effY, effX, prefsHomeLat, prefsHomeLng)
                 } else 999.0
                 val wasMemberAtHome = matchingLocal?.statusText?.contains("At Home", ignoreCase = true) == true
-                val homeLimitKm = if (wasMemberAtHome) 0.21 else 0.15
-                val isMemberAtHome = distToHomeKm <= homeLimitKm || cloudM.statusText.contains("At Home", ignoreCase = true)
+                val effSpeed = if (hasNewerLocal) matchingLocal!!.speedMph else cloudM.speedMph
+                val effStatus = if (hasNewerLocal) matchingLocal!!.statusText else cloudM.statusText
+                val isMemberAtHome = GeoUtils.isMemberConsideredAtHome(
+                    lat = effY,
+                    lng = effX,
+                    homeLat = prefsHomeLat,
+                    homeLng = prefsHomeLng,
+                    homeRadiusMeters = homeRadiusSetting,
+                    wasAlreadyAtHome = wasMemberAtHome,
+                    incomingStatusText = effStatus,
+                    speedMph = effSpeed
+                )
 
                 val prevOrCurrentStatus = if (matchingLocal?.statusText?.startsWith("At ", ignoreCase = true) == true) {
                     matchingLocal.statusText

@@ -159,7 +159,13 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
             { homeLat }, { homeLng }, { isHomeCalibrated }, { lat, lng -> homeLat = lat; homeLng = lng; isHomeCalibrated = true; savePreferences() },
             isSimulationModeEnabled, { getMyActiveStatusText(it) }, { savePreferences() },
             { workLat }, { workLng }, { isWorkCalibrated }, { lat, lng -> workLat = lat; workLng = lng; isWorkCalibrated = true; savePreferences() },
-            { homeRadiusMeters }, { workRadiusMeters }
+            { homeRadiusMeters }, { workRadiusMeters },
+            { radius ->
+                if (System.currentTimeMillis() - lastLocalHomeRadiusUpdateMs > 15_000L) {
+                    homeRadiusMeters = radius
+                    savePreferences()
+                }
+            }
         )
 
         simulationEngine = SimulationEngine(
@@ -923,7 +929,11 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    @Volatile
+    private var lastLocalHomeRadiusUpdateMs: Long = 0L
+
     fun updateHomeRadius(radiusMeters: Double) {
+        lastLocalHomeRadiusUpdateMs = System.currentTimeMillis()
         homeRadiusMeters = radiusMeters
         savePreferences()
     }
@@ -1439,13 +1449,19 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateUserLocation(lat: Double, lng: Double, speed: Float, batteryLevel: Int, isCharging: Boolean) {
         viewModelScope.launch {
-            val me = familyMembers.value.firstOrNull { it.id == "me" } ?: return@launch
-            val xDistKm = (lng - homeLng) * 111.0 * Math.cos(Math.toRadians(homeLat))
-            val yDistKm = (lat - homeLat) * 111.0
-            val distTotalKm = Math.hypot(xDistKm, yDistKm)
-            val isAtHome = distTotalKm <= 0.15 // 150 meters residential geofence
-
+            val me = repository.getFamilyMembersOnce().firstOrNull { it.id == "me" } ?: familyMembers.value.firstOrNull { it.id == "me" } ?: return@launch
+            val distTotalKm = com.example.data.GeoUtils.fastDistanceKm(lat, lng, homeLat, homeLng)
             val currentSpeedMph = Math.round((speed * 2.23694f) * 10.0) / 10.0
+            val isAtHome = com.example.data.GeoUtils.isWithinHomeGeofence(
+                lat = lat,
+                lng = lng,
+                homeLat = homeLat,
+                homeLng = homeLng,
+                homeRadiusMeters = homeRadiusMeters,
+                wasAlreadyAtHome = me.statusText.contains("At Home", ignoreCase = true),
+                speedMph = currentSpeedMph
+            )
+
             val matchedSafeZone = if (!isAtHome) {
                 com.example.data.GeoUtils.matchSafeZone(
                     lat = lat,

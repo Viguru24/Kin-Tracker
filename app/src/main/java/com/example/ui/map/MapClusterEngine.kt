@@ -99,10 +99,15 @@ fun computeClusterLayout(
         val distToHome = if (homeLat != 0.0 && homeLng != 0.0) {
             com.example.data.GeoUtils.distanceMeters(m.y, m.x, homeLat, homeLng)
         } else Double.MAX_VALUE
-        val effectiveHomeRadius = maxOf(homeRadiusMeters, 140.0)
-        val homeLimit = if (prevBarrier == "home") effectiveHomeRadius + exitBufferMeters else effectiveHomeRadius
+        val effectiveHomeRadius = com.example.data.GeoUtils.effectiveHomeRadiusMeters(homeRadiusMeters)
+        val scaledHomeExitBuffer = com.example.data.GeoUtils.homeExitBufferMeters(homeRadiusMeters, exitBufferMeters)
+        val isMovingFromHome = m.speedMph >= com.example.data.AppConfig.MIN_EXIT_SPEED_MPH || statusIndicatesTravel(m)
+        val homeLimit = if (prevBarrier == "home" && !isMovingFromHome) effectiveHomeRadius + scaledHomeExitBuffer else effectiveHomeRadius
         val atHomeStatus = m.statusText.contains("At Home", ignoreCase = true)
-        val isHome = (homeLat != 0.0 && homeLng != 0.0) && (distToHome <= homeLimit || atHomeStatus)
+        val isHome = (homeLat != 0.0 && homeLng != 0.0) && (
+            distToHome <= homeLimit ||
+                (atHomeStatus && !isMovingFromHome && distToHome <= effectiveHomeRadius + scaledHomeExitBuffer + 40.0)
+            )
 
         val matchedZone = effectiveSafeZones.filter { zone ->
             val effRadius = com.example.data.GeoUtils.effectiveSafeZoneRadiusMeters(zone)

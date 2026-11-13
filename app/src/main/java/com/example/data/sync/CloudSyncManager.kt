@@ -41,7 +41,8 @@ class CloudSyncManager(
     private val isWorkCalibrated: () -> Boolean = { false },
     private val setWorkCalibrated: (Double, Double) -> Unit = { _, _ -> },
     private val getHomeRadius: () -> Double = { AppConfig.DEFAULT_HOME_RADIUS_METERS },
-    private val getWorkRadius: () -> Double = { AppConfig.DEFAULT_WORK_RADIUS_METERS }
+    private val getWorkRadius: () -> Double = { AppConfig.DEFAULT_WORK_RADIUS_METERS },
+    private val setHomeRadius: (Double) -> Unit = {}
 ) {
     private val cloudService = CloudSyncService.create()
     private val apiService = KinTrackerApiService.create()
@@ -316,6 +317,9 @@ class CloudSyncManager(
                         setHomeCalibrated(payload.homeLat, payload.homeLng)
                         uiEvents.emit("Synced common Home coordinates from cloud group!")
                     }
+                }
+                if (payload.homeRadiusMeters in 35.0..500.0 && kotlin.math.abs(payload.homeRadiusMeters - getHomeRadius()) >= 1.0) {
+                    setHomeRadius(payload.homeRadiusMeters)
                 }
                 val isWorkNearSchool = Math.hypot((payload.workLat - 51.33016) * 111.0, (payload.workLng - (-0.14228)) * 111.0) < 0.6 ||
                     Math.hypot((payload.workLat - 51.3280) * 111.0, (payload.workLng - (-0.1405)) * 111.0) < 0.6
@@ -672,8 +676,18 @@ class CloudSyncManager(
                 } else 999.0
 
                 val wasMemberAtHome = matchingLocal?.statusText?.contains("At Home", ignoreCase = true) == true
-                val homeLimitKm = if (wasMemberAtHome) 0.21 else 0.15
-                val isMemberAtHome = distToHomeKm <= homeLimitKm || cloudM.statusText.contains("At Home", ignoreCase = true) || cloudM.statusText.contains("at Home")
+                val effSpeed = if (hasNewerLocalData) matchingLocal!!.speedMph else cloudM.speedMph
+                val effStatus = if (hasNewerLocalData) matchingLocal!!.statusText else cloudM.statusText
+                val isMemberAtHome = com.example.data.GeoUtils.isMemberConsideredAtHome(
+                    lat = targetMemberY,
+                    lng = targetMemberX,
+                    homeLat = homeLat,
+                    homeLng = homeLng,
+                    homeRadiusMeters = getHomeRadius(),
+                    wasAlreadyAtHome = wasMemberAtHome,
+                    incomingStatusText = effStatus,
+                    speedMph = effSpeed
+                )
 
                 // Check if member is inside a designated Safe Zone (e.g. Woodcote High School) with campus radius + hysteresis
                 val customSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { emptyList() }

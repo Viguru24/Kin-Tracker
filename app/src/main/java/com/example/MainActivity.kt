@@ -106,6 +106,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateUserPosition(location: Location) {
+        if (!com.example.data.GeoUtils.acceptLocationUpdate(location)) return
         var batteryPct = 85
         var isCharging = false
         try {
@@ -216,28 +217,20 @@ class MainActivity : ComponentActivity() {
             }
             
             // 1. Fetch best historical last-known locations from both sources instantly during startup
-            var bestLastLocation: Location? = null
-            if (hasFine && isGpsEnabled) {
+            val lastKnownGps = if (hasFine && isGpsEnabled) {
                 try {
-                    locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { loc ->
-                        if (bestLastLocation == null || loc.time > bestLastLocation!!.time) {
-                            bestLastLocation = loc
-                        }
-                    }
-                } catch (e: Exception) { /* Handled safely */ }
-            }
-            if ((hasFine || hasCoarse) && isNetworkEnabled) {
+                    locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                } catch (e: Exception) { null }
+            } else null
+            val lastKnownNet = if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
-                    locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let { loc ->
-                        if (bestLastLocation == null || loc.time > bestLastLocation!!.time) {
-                            bestLastLocation = loc
-                        }
-                    }
-                } catch (e: Exception) { /* Handled safely */ }
-            }
+                    locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                } catch (e: Exception) { null }
+            } else null
+            val bestLastLocation = com.example.data.GeoUtils.pickBetterLocation(lastKnownGps, lastKnownNet)
             bestLastLocation?.let { updateUserPosition(it) }
 
-            // 2. Register for ultra-low latency updates (1 second update cycles, 0 meters delta threshold)
+            // 2. Register for ultra-low latency GPS updates while throttling fallback NETWORK fixes
             if (hasFine && isGpsEnabled) {
                 try {
                     locationManager?.requestLocationUpdates(
@@ -253,10 +246,12 @@ class MainActivity : ComponentActivity() {
             }
             if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
+                    val netInterval = if (hasFine && isGpsEnabled) 15000L else 1000L
+                    val netDistance = if (hasFine && isGpsEnabled) 25.0f else 0.0f
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
-                        1000L,
-                        0.0f,
+                        netInterval,
+                        netDistance,
                         locationListener,
                         android.os.Looper.getMainLooper()
                     )

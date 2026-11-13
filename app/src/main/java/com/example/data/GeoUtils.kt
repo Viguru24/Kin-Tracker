@@ -194,4 +194,263 @@ object GeoUtils {
             distanceMeters(lat, lng, zone.latitude, zone.longitude)
         }
     }
+
+    // --- Home Geofence Evaluation (Single Source of Truth) ---
+
+    /**
+     * Computes the effective residential Home radius in meters from the circle's configured
+     * setting, respecting user-configured radii down to 35m instead of overriding with a
+     * fixed 120m-150m residential limit.
+     */
+    fun effectiveHomeRadiusMeters(homeRadiusMeters: Double): Double {
+        return maxOf(homeRadiusMeters, 35.0)
+    }
+
+    /**
+     * Computes stationary Home exit hysteresis scaled proportionally to the configured Home radius
+     * so small home perimeters (e.g. 60m) do not swallow nearby streets or buildings.
+     */
+    fun homeExitBufferMeters(
+        homeRadiusMeters: Double,
+        maxBufferMeters: Double = AppConfig.EXIT_HYSTERESIS_METERS
+    ): Double {
+        val effectiveRadius = effectiveHomeRadiusMeters(homeRadiusMeters)
+        return minOf(maxBufferMeters, maxOf(25.0, effectiveRadius * 0.6))
+    }
+
+    /**
+     * Evaluates whether a distance (in meters) from Home falls within the configured Home geofence,
+     * applying stationary exit hysteresis only when the member was already at Home and not moving.
+     */
+    fun isDistanceWithinHomeGeofence(
+        distanceMeters: Double,
+        homeRadiusMeters: Double,
+        wasAlreadyAtHome: Boolean = false,
+        speedMph: Double = 0.0,
+        accuracyMeters: Double = 0.0
+    ): Boolean {
+        val baseRadius = effectiveHomeRadiusMeters(homeRadiusMeters)
+        val isStationaryInside = wasAlreadyAtHome && speedMph < AppConfig.MIN_EXIT_SPEED_MPH
+        val limitMeters = if (isStationaryInside) {
+            val accuracyAllowance = if (accuracyMeters in 1.0..50.0) minOf(accuracyMeters * 0.25, 15.0) else 0.0
+            baseRadius + homeExitBufferMeters(baseRadius) + accuracyAllowance
+        } else {
+            baseRadius
+        }
+        return distanceMeters <= limitMeters
+    }
+
+    /**
+     * Evaluates whether a coordinate is inside the configured Home geofence.
+     */
+    fun isWithinHomeGeofence(
+        lat: Double,
+        lng: Double,
+        homeLat: Double,
+        homeLng: Double,
+        homeRadiusMeters: Double,
+        wasAlreadyAtHome: Boolean = false,
+        speedMph: Double = 0.0,
+        accuracyMeters: Double = 0.0
+    ): Boolean {
+        if ((lat == 0.0 && lng == 0.0) || (homeLat == 0.0 && homeLng == 0.0)) return false
+        val distMeters = distanceMeters(lat, lng, homeLat, homeLng)
+        return isDistanceWithinHomeGeofence(
+            distanceMeters = distMeters,
+            homeRadiusMeters = homeRadiusMeters,
+            wasAlreadyAtHome = wasAlreadyAtHome,
+            speedMph = speedMph,
+            accuracyMeters = accuracyMeters
+        )
+    }
+
+    /**
+     * Evaluates incoming member coordinates alongside optional status text so stale remote status
+     * never locks a member at Home once they have moved clearly past the Home exit boundary.
+     */
+    fun isMemberConsideredAtHome(
+        lat: Double,
+        lng: Double,
+        homeLat: Double,
+        homeLng: Double,
+        homeRadiusMeters: Double,
+        wasAlreadyAtHome: Boolean,
+        incomingStatusText: String,
+        speedMph: Double
+    ): Boolean {
+        if ((lat == 0.0 && lng == 0.0) || (homeLat == 0.0 && homeLng == 0.0)) return false
+        val distMeters = distanceMeters(lat, lng, homeLat, homeLng)
+        if (isDistanceWithinHomeGeofence(distMeters, homeRadiusMeters, wasAlreadyAtHome, speedMph)) {
+            return true
+        }
+        val baseRadius = effectiveHomeRadiusMeters(homeRadiusMeters)
+        val maxStatusTolerance = baseRadius + homeExitBufferMeters(baseRadius)
+        val hasAtHomeStatus = incomingStatusText.contains("At Home", ignoreCase = true)
+        return hasAtHomeStatus && speedMph < AppConfig.MIN_EXIT_SPEED_MPH && distMeters <= maxStatusTolerance
+    }
+
+    // --- Location Quality & Provider Arbitration ---
+
+    data class LocationSampleMeta(
+        val provider: String,
+        val accuracyMeters: Float,
+        val hasAccuracy: Boolean,
+        val timestampMs: Long,
+        val latitude: Double = 0.0,
+        val longitude: Double = 0.0,
+        val elapsedNanos: Long = 0L
+    )
+
+    private const val LOCATION_MAX_ACCEPTED_ACCURACY_M = 150f
+    private const val LOCATION_MAX_INITIAL_ACCURACY_M = 250f
+    private const val LOCATION_NETWORK_MAX_ACCURACY_M = 100f
+    private const val LOCATION_NETWORK_INDOOR_FALLBACK_ACCURACY_M = 65f
+    private const val LOCATION_GPS_OWNERSHIP_WINDOW_MS = 45_000L
+    private const val LOCATION_NETWORK_COARSE_SUPPRESSION_MS = 120_000L
+
+    @Volatile
+    private var lastAcceptedLocationMeta: LocationSampleMeta? = null
+    private val locationArbiterLock = Any()
+
+    fun resetLocationArbiterForTests() {
+        synchronized(locationArbiterLock) {
+            lastAcceptedLocationMeta = null
+        }
+    }
+
+    private fun android.location.Location.toSampleMeta(): LocationSampleMeta {
+        return LocationSampleMeta(
+            provider = provider ?: "",
+            accuracyMeters = accuracy,
+            hasAccuracy = hasAccuracy(),
+            timestampMs = time,
+            latitude = latitude,
+            longitude = longitude,
+            elapsedNanos = elapsedRealtimeNanos
+        )
+    }
+
+    private fun timeDeltaBetweenSamplesMs(
+        candidate: LocationSampleMeta,
+        currentBest: LocationSampleMeta
+    ): Long {
+        return if (candidate.elapsedNanos > 0L && currentBest.elapsedNanos > 0L) {
+            (candidate.elapsedNanos - currentBest.elapsedNanos) / 1_000_000L
+        } else {
+            candidate.timestampMs - currentBest.timestampMs
+        }
+    }
+
+    /**
+     * Pure arbitration rule deciding whether a newly reported location fix should advance
+     * the currently active fix. Prevents coarse or stale Wi-Fi/cell NETWORK_PROVIDER fixes
+     * from dragging a freshly acquired GPS position back to a nearby mast or Home router.
+     */
+    fun shouldAcceptLocationUpdate(
+        candidate: LocationSampleMeta,
+        currentBest: LocationSampleMeta?
+    ): Boolean {
+        if (!candidate.latitude.isFinite() || !candidate.longitude.isFinite()) return false
+        if (candidate.latitude == 0.0 && candidate.longitude == 0.0) return false
+
+        val acc = if (candidate.hasAccuracy) candidate.accuracyMeters else 20f
+        if (!acc.isFinite() || acc <= 0f) return false
+
+        val isNet = candidate.provider.equals("network", ignoreCase = true)
+        val isGps = candidate.provider.equals("gps", ignoreCase = true) ||
+            candidate.provider.equals("fused", ignoreCase = true)
+
+        if (currentBest == null) {
+            val initialLimit = if (isNet) LOCATION_NETWORK_MAX_ACCURACY_M else LOCATION_MAX_INITIAL_ACCURACY_M
+            return acc <= initialLimit
+        }
+
+        if (acc > LOCATION_MAX_ACCEPTED_ACCURACY_M) return false
+        if (isNet && acc > LOCATION_NETWORK_MAX_ACCURACY_M) return false
+
+        val timeDeltaMs = timeDeltaBetweenSamplesMs(candidate, currentBest)
+        if (timeDeltaMs < -2_000L) return false
+
+        val bestIsGps = currentBest.provider.equals("gps", ignoreCase = true) ||
+            currentBest.provider.equals("fused", ignoreCase = true)
+        val bestAcc = if (currentBest.hasAccuracy) currentBest.accuracyMeters else 20f
+
+        if (bestIsGps && isNet) {
+            // While GPS is actively locking, reject coarse (> 65m) network triangles
+            if (timeDeltaMs <= LOCATION_NETWORK_COARSE_SUPPRESSION_MS && acc > LOCATION_NETWORK_INDOOR_FALLBACK_ACCURACY_M) {
+                return false
+            }
+            // Within 45s of GPS, let NETWORK override only when crisp RTT is materially sharper
+            if (timeDeltaMs <= LOCATION_GPS_OWNERSHIP_WINDOW_MS) {
+                return acc <= 40f && (acc + 15f) < bestAcc
+            }
+            // Past 45s without GPS, allow crisp (<= 65m) or post-120s (<= 100m) network fixes indoors
+            val fallbackLimit = if (timeDeltaMs > LOCATION_NETWORK_COARSE_SUPPRESSION_MS) {
+                LOCATION_NETWORK_MAX_ACCURACY_M
+            } else {
+                LOCATION_NETWORK_INDOOR_FALLBACK_ACCURACY_M
+            }
+            return acc <= fallbackLimit
+        }
+
+        // Prevent a momentary GPS multipath spike right after a sharp GPS lock
+        if (!isNet && bestIsGps && timeDeltaMs in 0L..10_000L && bestAcc <= 30f && acc > 80f) {
+            return false
+        }
+
+        if (candidate.provider.equals(currentBest.provider, ignoreCase = true) && timeDeltaMs < 0L) {
+            return false
+        }
+
+        return isGps || timeDeltaMs >= 0L
+    }
+
+    /**
+     * Thread-safe monotonic gate shared across MainActivity and BackgroundLocationService so
+     * parallel location providers cannot race backwards in time or overwrite fresh GPS with coarse cell fixes.
+     */
+    fun acceptLocationUpdate(location: android.location.Location): Boolean {
+        val candidate = location.toSampleMeta()
+        synchronized(locationArbiterLock) {
+            val current = lastAcceptedLocationMeta
+            if (!shouldAcceptLocationUpdate(candidate, current)) {
+                return false
+            }
+            lastAcceptedLocationMeta = candidate
+            return true
+        }
+    }
+
+    /**
+     * Selects the stronger fix between two cached last-known locations (e.g. GPS vs NETWORK),
+     * preferring accurate recent GPS over newer coarse Wi-Fi/cellular triangulation.
+     */
+    fun pickBetterLocation(
+        first: android.location.Location?,
+        second: android.location.Location?
+    ): android.location.Location? {
+        if (first == null) return second
+        if (second == null) return first
+        val meta1 = first.toSampleMeta()
+        val meta2 = second.toSampleMeta()
+        val valid1 = shouldAcceptLocationUpdate(meta1, null)
+        val valid2 = shouldAcceptLocationUpdate(meta2, null)
+        if (!valid1 && !valid2) {
+            val isZero1 = meta1.latitude == 0.0 && meta1.longitude == 0.0
+            val isZero2 = meta2.latitude == 0.0 && meta2.longitude == 0.0
+            if (isZero1 && isZero2) return null
+            if (isZero1) return second
+            if (isZero2) return first
+            return if (meta1.accuracyMeters <= meta2.accuracyMeters) first else second
+        }
+        if (!valid1) return second
+        if (!valid2) return first
+
+        val deltaMs = timeDeltaBetweenSamplesMs(meta2, meta1)
+        return if (deltaMs >= 0L) {
+            if (shouldAcceptLocationUpdate(meta2, meta1)) second else first
+        } else {
+            if (shouldAcceptLocationUpdate(meta1, meta2)) first else second
+        }
+    }
 }
