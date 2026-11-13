@@ -60,7 +60,9 @@ async function runTests() {
         const dashRes = await makeRequest('/dashboard');
         assert.strictEqual(dashRes.statusCode, 200);
         assert(dashRes.body.includes('Kin-Tracker Sovereign VPS Radar & Command Center'));
-        console.log('   ✅ /dashboard static HTML served.');
+        assert(dashRes.body.includes('id="otaModalBtn"'));
+        assert(dashRes.body.includes('id="otaModal"'));
+        console.log('   ✅ /dashboard static HTML + OTA rollback modal served.');
 
         // 3. Admin Auth - Reject without token
         console.log('3️⃣ Testing Admin Auth Rejection without token...');

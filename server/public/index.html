@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kin-Tracker Sovereign VPS Radar & Command Center</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,14 +20,14 @@
     <div class="radar-scan-line"></div>
 
     <!-- AUTH LOGIN MODAL OVERLAY -->
-    <div id="authModal" class="modal-backdrop show">
+    <dialog id="authModal" class="modal-dialog" closedby="none" aria-labelledby="authModalTitle">
         <div class="glass-card login-card animate-fade-in">
             <div class="brand-header text-center">
-                <div class="brand-icon-radar">
+                <div class="brand-icon-radar" aria-hidden="true">
                     <span class="pulse-ring"></span>
                     <span class="icon-core">📡</span>
                 </div>
-                <h1 class="brand-title">KIN-TRACKER</h1>
+                <h1 id="authModalTitle" class="brand-title">KIN-TRACKER</h1>
                 <p class="brand-subtitle">Sovereign VPS Radar & Command Center</p>
             </div>
             
@@ -35,21 +35,21 @@
                 <div class="form-group">
                     <label for="adminKeyInput">Admin Access Passcode</label>
                     <div class="input-wrapper">
-                        <span class="input-icon">🔐</span>
+                        <span class="input-icon" aria-hidden="true">🔐</span>
                         <input type="password" id="adminKeyInput" placeholder="Enter Sovereign Admin Passcode" autofocus autocomplete="current-password" required>
                     </div>
                 </div>
                 <button type="submit" id="loginBtn" class="btn btn-primary btn-glow btn-block">
                     <span>Unlock VPS Console</span>
-                    <span class="btn-arrow">→</span>
+                    <span class="btn-arrow" aria-hidden="true">→</span>
                 </button>
-                <div id="loginError" class="alert-box error hidden"></div>
+                <div id="loginError" class="alert-box error hidden" role="alert"></div>
             </form>
             <div class="login-footer text-center">
                 <span class="badge-pill secure-badge">🔒 End-to-End Sovereign Telemetry</span>
             </div>
         </div>
-    </div>
+    </dialog>
 
     <!-- MAIN APP DASHBOARD WRAPPER -->
     <div id="dashboardApp" class="app-container hidden">
@@ -71,10 +71,10 @@
             </div>
 
             <!-- EMERGENCY GLOBAL ALERT BANNER -->
-            <div id="globalSosBanner" class="sos-banner-compact hidden">
-                <span class="sos-pulse">🚨</span>
+            <div id="globalSosBanner" class="sos-banner-compact hidden" role="alert">
+                <span class="sos-pulse" aria-hidden="true">🚨</span>
                 <span id="sosBannerText">ACTIVE EMERGENCY DISTRESS BEACON</span>
-                <button id="resolveAllSosBtn" class="btn btn-xs btn-danger">Silence Alarm</button>
+                <button type="button" id="resolveAllSosBtn" class="btn btn-xs btn-danger">Silence Alarm</button>
             </div>
 
             <div class="nav-right">
@@ -94,16 +94,18 @@
                 </div>
 
                 <div class="nav-actions">
-                    <button id="refreshBtn" class="btn btn-icon" title="Refresh Live Data">🔄</button>
-                    <button id="backupModalBtn" class="btn btn-secondary btn-sm" title="Database Snapshot">💾 Backup</button>
-                    <button id="broadcastBtn" class="btn btn-accent btn-sm" title="Broadcast Message">📢 Broadcast</button>
-                    <button id="logoutBtn" class="btn btn-outline btn-sm" title="Lock Console">🔒 Logout</button>
+                    <button type="button" id="refreshBtn" class="btn btn-icon" aria-label="Refresh Live Data" title="Refresh Live Data">🔄</button>
+                    <button type="button" id="otaModalBtn" class="btn btn-emerald btn-sm" title="Manage Live OTA Releases & Rollback">📦 OTA Rollback</button>
+                    <button type="button" id="backupModalBtn" class="btn btn-secondary btn-sm" title="Database Snapshot">💾 Backup</button>
+                    <button type="button" id="broadcastBtn" class="btn btn-accent btn-sm" title="Broadcast Message">📢 Broadcast</button>
+                    <button type="button" id="logoutBtn" class="btn btn-outline btn-sm" title="Lock Console">🔒 Logout</button>
                 </div>
             </div>
         </header>
 
         <!-- MAIN DASHBOARD CONTENT -->
         <main class="dashboard-body">
+            <h1 class="visually-hidden">Kin-Tracker Sovereign GPS Radar &amp; Command Center</h1>
             <!-- TOP METRICS STATS BAR -->
             <section class="stats-grid">
                 <!-- STAT 1: ACTIVE KIN -->
@@ -147,7 +149,7 @@
 
                 <!-- STAT 4: CLOUD AUDIO RELAY -->
                 <div class="glass-card stat-card">
-                    <div class="stat-icon-wrapper purple">🎙️</div>
+                    <div class="stat-icon-wrapper teal">🎙️</div>
                     <div class="stat-content">
                         <div class="stat-label">Cloud Audio Relay</div>
                         <div class="stat-number-row">
@@ -171,13 +173,13 @@
                         </div>
                         <div class="map-controls">
                             <div class="btn-group">
-                                <button id="fitMapBtn" class="btn btn-xs btn-outline" title="Fit all devices">🔍 Fit Kin</button>
-                                <button id="focusHomeBtn" class="btn btn-xs btn-outline" title="Center on Home">🏠 Home</button>
-                                <button id="focusWorkBtn" class="btn btn-xs btn-outline" title="Center on Work">🏢 Work</button>
+                                <button type="button" id="fitMapBtn" class="btn btn-xs btn-outline" title="Fit all devices">🔍 Fit Kin</button>
+                                <button type="button" id="focusHomeBtn" class="btn btn-xs btn-outline" title="Center on Home">🏠 Home</button>
+                                <button type="button" id="focusWorkBtn" class="btn btn-xs btn-outline" title="Center on Work">🏢 Work</button>
                             </div>
                             <div class="map-mode-selector">
-                                <button id="mapClickCalibrateHomeBtn" class="btn btn-xs btn-emerald" title="Click on map to position Home">📍 Set Home</button>
-                                <button id="mapClickCalibrateWorkBtn" class="btn btn-xs btn-cyan" title="Click on map to position Work">📍 Set Work</button>
+                                <button type="button" id="mapClickCalibrateHomeBtn" class="btn btn-xs btn-emerald" title="Click on map to position Home">📍 Set Home</button>
+                                <button type="button" id="mapClickCalibrateWorkBtn" class="btn btn-xs btn-cyan" title="Click on map to position Work">📍 Set Work</button>
                             </div>
                         </div>
                     </div>
@@ -187,7 +189,7 @@
                         <!-- MAP OVERLAY CONTROLS -->
                         <div id="mapCalibrateBanner" class="map-calibrate-banner hidden">
                             <span id="mapCalibrateText">Click anywhere on the map to set Home coordinates</span>
-                            <button id="cancelMapCalibrateBtn" class="btn btn-xs btn-dark">Cancel</button>
+                            <button type="button" id="cancelMapCalibrateBtn" class="btn btn-xs btn-dark">Cancel</button>
                         </div>
                     </div>
                 </section>
@@ -200,7 +202,7 @@
                             <h2 class="panel-title">Family Devices & Controls</h2>
                         </div>
                         <div class="panel-actions">
-                            <button id="openCircleConfigBtn" class="btn btn-xs btn-primary" title="Configure Geofences & Circle">⚙️ Geofence Settings</button>
+                            <button type="button" id="openCircleConfigBtn" class="btn btn-xs btn-primary" title="Configure Geofences & Circle">⚙️ Geofence Settings</button>
                         </div>
                     </div>
 
@@ -211,8 +213,8 @@
                             <span id="inviteCodeDisplay" class="invite-code mono">KT-4666</span>
                         </div>
                         <div class="invite-actions">
-                            <button id="copyInviteBtn" class="btn btn-xs btn-outline" title="Copy Invite Code">📋 Copy</button>
-                            <button id="regenInviteBtn" class="btn btn-xs btn-outline" title="Regenerate Code">🔀 Regen</button>
+                            <button type="button" id="copyInviteBtn" class="btn btn-xs btn-outline" title="Copy Invite Code">📋 Copy</button>
+                            <button type="button" id="regenInviteBtn" class="btn btn-xs btn-outline" title="Regenerate Code">🔀 Regen</button>
                         </div>
                     </div>
 
@@ -245,8 +247,8 @@
                             </div>
                         </div>
                         <div class="audio-actions">
-                            <button id="startListenAudioBtn" class="btn btn-sm btn-purple" disabled>🎧 Listen Live in Browser</button>
-                            <button id="stopListenAudioBtn" class="btn btn-sm btn-dark hidden">⏹️ Stop Listening</button>
+                            <button type="button" id="startListenAudioBtn" class="btn btn-sm btn-teal" disabled>🎧 Listen Live in Browser</button>
+                            <button type="button" id="stopListenAudioBtn" class="btn btn-sm btn-dark hidden">⏹️ Stop Listening</button>
                             <span id="browserAudioStatus" class="mono text-xs text-dim">Player idle</span>
                         </div>
                     </div>
@@ -259,7 +261,7 @@
                             <span class="panel-icon">⚡</span>
                             <h3 class="panel-title">Real-Time VPS Event Stream</h3>
                         </div>
-                        <button id="clearLogsBtn" class="btn btn-xs btn-outline">Clear View</button>
+                        <button type="button" id="clearLogsBtn" class="btn btn-xs btn-outline">Clear View</button>
                     </div>
                     <div id="eventStreamContainer" class="event-stream-container">
                         <!-- Events populated dynamically -->
@@ -270,24 +272,24 @@
     </div>
 
     <!-- MODAL: GEOFENCE & CIRCLE CONFIG -->
-    <div id="circleConfigModal" class="modal-backdrop hidden">
+    <dialog id="circleConfigModal" class="modal-dialog" closedby="any" aria-labelledby="circleConfigModalTitle">
         <div class="glass-card config-modal animate-fade-in" style="max-width: 680px; max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
-                <h3>⚙️ Places & Safe Zones Manager</h3>
-                <button class="modal-close" data-close="circleConfigModal">✕</button>
+                <h2 id="circleConfigModalTitle">⚙️ Places & Safe Zones Manager</h2>
+                <button type="button" class="modal-close" data-close="circleConfigModal" aria-label="Close">✕</button>
             </div>
             <form id="circleConfigForm">
                 <div class="form-row">
                     <div class="form-group flex-2">
-                        <label>Circle Name</label>
+                        <label for="cfgCircleName">Circle Name</label>
                         <input type="text" id="cfgCircleName" class="form-control" placeholder="e.g. Family Circle" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Circle Icon</label>
+                        <label for="cfgCircleEmoji">Circle Icon</label>
                         <input type="text" id="cfgCircleEmoji" class="form-control text-center" placeholder="👑" maxlength="4">
                     </div>
                     <div class="form-group flex-1">
-                        <label>Invite Code</label>
+                        <label for="cfgInviteCode">Invite Code</label>
                         <input type="text" id="cfgInviteCode" class="form-control mono" readonly>
                     </div>
                 </div>
@@ -300,30 +302,30 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-2">
-                            <label>Place Name</label>
+                            <label for="cfgHomeName">Place Name</label>
                             <input type="text" id="cfgHomeName" class="form-control" placeholder="e.g. Home, Family House" value="Home">
                         </div>
                         <div class="form-group flex-1">
-                            <label>Icon / Emoji</label>
+                            <label for="cfgHomeEmoji">Icon / Emoji</label>
                             <input type="text" id="cfgHomeEmoji" class="form-control text-center" placeholder="🏠" value="🏠" maxlength="4">
                         </div>
                         <div class="form-group flex-1">
-                            <label>Radius (m)</label>
+                            <label for="cfgHomeRadius">Radius (m)</label>
                             <input type="number" id="cfgHomeRadius" class="form-control mono" min="20" max="2000" value="140" required>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label>Latitude</label>
+                            <label for="cfgHomeLat">Latitude</label>
                             <input type="number" step="any" id="cfgHomeLat" class="form-control mono" required>
                         </div>
                         <div class="form-group flex-1">
-                            <label>Longitude</label>
+                            <label for="cfgHomeLng">Longitude</label>
                             <input type="number" step="any" id="cfgHomeLng" class="form-control mono" required>
                         </div>
                     </div>
                     <div class="form-row-actions">
-                        <label class="checkbox-label">
+                        <label class="checkbox-label" for="cfgHomeCalibrated">
                             <input type="checkbox" id="cfgHomeCalibrated"> Active & Calibrated
                         </label>
                         <div class="btn-group">
@@ -341,30 +343,30 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-2">
-                            <label>Place Name</label>
+                            <label for="cfgWorkName">Place Name</label>
                             <input type="text" id="cfgWorkName" class="form-control" placeholder="e.g. Annette's Work, Office" value="Work">
                         </div>
                         <div class="form-group flex-1">
-                            <label>Icon / Emoji</label>
+                            <label for="cfgWorkEmoji">Icon / Emoji</label>
                             <input type="text" id="cfgWorkEmoji" class="form-control text-center" placeholder="🏢" value="🏢" maxlength="4">
                         </div>
                         <div class="form-group flex-1">
-                            <label>Radius (m)</label>
+                            <label for="cfgWorkRadius">Radius (m)</label>
                             <input type="number" id="cfgWorkRadius" class="form-control mono" min="20" max="2000" value="75">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label>Latitude</label>
+                            <label for="cfgWorkLat">Latitude</label>
                             <input type="number" step="any" id="cfgWorkLat" class="form-control mono">
                         </div>
                         <div class="form-group flex-1">
-                            <label>Longitude</label>
+                            <label for="cfgWorkLng">Longitude</label>
                             <input type="number" step="any" id="cfgWorkLng" class="form-control mono">
                         </div>
                     </div>
                     <div class="form-row-actions">
-                        <label class="checkbox-label">
+                        <label class="checkbox-label" for="cfgWorkCalibrated">
                             <input type="checkbox" id="cfgWorkCalibrated"> Active & Calibrated
                         </label>
                         <div class="btn-group">
@@ -376,9 +378,9 @@
 
                 <!-- 3. ADDITIONAL CUSTOM PLACES (Eloisa's School, Isabel's Work, etc.) -->
                 <div class="config-section">
-                    <div class="section-title text-purple" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="section-title text-teal" style="display:flex; justify-content:space-between; align-items:center;">
                         <span>📍 Additional Family Places & Schools</span>
-                        <button type="button" id="addNewPlaceBtn" class="btn btn-xs btn-purple">+ Add Place</button>
+                        <button type="button" id="addNewPlaceBtn" class="btn btn-xs btn-teal">+ Add Place</button>
                     </div>
                     <div id="customSafeZonesList" class="custom-places-list">
                         <!-- Custom Places populated dynamically -->
@@ -391,50 +393,50 @@
                 </div>
             </form>
         </div>
-    </div>
+    </dialog>
 
     <!-- MODAL: ADD / EDIT CUSTOM PLACE -->
-    <div id="customPlaceModal" class="modal-backdrop hidden">
+    <dialog id="customPlaceModal" class="modal-dialog" closedby="any" aria-labelledby="customPlaceModalTitle">
         <div class="glass-card config-modal animate-fade-in" style="max-width: 480px;">
             <div class="modal-header">
-                <h3 id="customPlaceModalTitle">📍 Add Family Place</h3>
-                <button class="modal-close" data-close="customPlaceModal">✕</button>
+                <h2 id="customPlaceModalTitle">📍 Add Family Place</h2>
+                <button type="button" class="modal-close" data-close="customPlaceModal" aria-label="Close">✕</button>
             </div>
             <form id="customPlaceForm">
                 <input type="hidden" id="placeId">
                 <div class="form-row">
                     <div class="form-group flex-2">
-                        <label>Place Name</label>
+                        <label for="placeNameInput">Place Name</label>
                         <input type="text" id="placeNameInput" class="form-control" placeholder="e.g. Eloisa's School, Isabel's Work" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Icon / Emoji</label>
+                        <label for="placeEmojiInput">Icon / Emoji</label>
                         <input type="text" id="placeEmojiInput" class="form-control text-center" placeholder="🏫" value="🏫" maxlength="4" required>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group flex-1">
-                        <label>Latitude</label>
+                        <label for="placeLatInput">Latitude</label>
                         <input type="number" step="any" id="placeLatInput" class="form-control mono" placeholder="51.3294" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Longitude</label>
+                        <label for="placeLngInput">Longitude</label>
                         <input type="number" step="any" id="placeLngInput" class="form-control mono" placeholder="-0.1190" required>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group flex-1">
-                        <label>Geofence Radius (meters)</label>
+                        <label for="placeRadiusInput">Geofence Radius (meters)</label>
                         <input type="number" id="placeRadiusInput" class="form-control mono" min="20" max="2000" value="100" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Map Color</label>
-                        <input type="color" id="placeColorInput" class="form-control color-picker" value="#A855F7">
+                        <label for="placeColorInput">Map Color</label>
+                        <input type="color" id="placeColorInput" class="form-control color-picker" value="#10B981">
                     </div>
                 </div>
                 <div class="form-row-actions">
                     <button type="button" id="placeSetCurrentGPS" class="btn btn-xs btn-outline">📍 Use Browser GPS</button>
-                    <button type="button" id="placePickOnMapBtn" class="btn btn-xs btn-purple">🗺️ Click on Map to Set</button>
+                    <button type="button" id="placePickOnMapBtn" class="btn btn-xs btn-teal">🗺️ Click on Map to Set</button>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-close="customPlaceModal">Cancel</button>
@@ -442,21 +444,21 @@
                 </div>
             </form>
         </div>
-    </div>
+    </dialog>
 
 
     <!-- MODAL: MEMBER CONTROL & REMOTE PHONE RINGING -->
-    <div id="memberControlModal" class="modal-backdrop hidden">
+    <dialog id="memberControlModal" class="modal-dialog" closedby="any" aria-labelledby="memberModalTitle">
         <div class="glass-card config-modal animate-fade-in">
             <div class="modal-header">
                 <div class="modal-title-group">
-                    <div id="ctrlHeaderAvatar" class="modal-avatar">📱</div>
+                    <div id="ctrlHeaderAvatar" class="modal-avatar" aria-hidden="true">📱</div>
                     <div>
-                        <h3 id="memberModalTitle">Family Member Controls</h3>
+                        <h2 id="memberModalTitle">Family Member Controls</h2>
                         <p id="memberModalSubtitle" class="text-dim text-xs">Sovereign Over-the-Air Device Command</p>
                     </div>
                 </div>
-                <button class="modal-close" data-close="memberControlModal">✕</button>
+                <button type="button" class="modal-close" data-close="memberControlModal" aria-label="Close">✕</button>
             </div>
 
             <!-- PROMINENT OVER-THE-AIR PHONE RING SECTION -->
@@ -486,50 +488,50 @@
                 <input type="hidden" id="ctrlMemberId">
                 <div class="form-row">
                     <div class="form-group flex-2">
-                        <label>Display Name</label>
+                        <label for="ctrlMemberName">Display Name</label>
                         <input type="text" id="ctrlMemberName" class="form-control" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Avatar Emoji</label>
+                        <label for="ctrlMemberEmoji">Avatar Emoji</label>
                         <input type="text" id="ctrlMemberEmoji" class="form-control text-center" maxlength="4">
                     </div>
                     <div class="form-group flex-1">
-                        <label>Avatar Color</label>
+                        <label for="ctrlMemberColor">Avatar Color</label>
                         <input type="color" id="ctrlMemberColor" class="form-control color-picker">
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group flex-1">
-                        <label>Latitude</label>
+                        <label for="ctrlMemberLat">Latitude</label>
                         <input type="number" step="any" id="ctrlMemberLat" class="form-control mono" required>
                     </div>
                     <div class="form-group flex-1">
-                        <label>Longitude</label>
+                        <label for="ctrlMemberLng">Longitude</label>
                         <input type="number" step="any" id="ctrlMemberLng" class="form-control mono" required>
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group flex-1">
-                        <label>Battery Level (%)</label>
+                        <label for="ctrlMemberBattery">Battery Level (%)</label>
                         <input type="number" id="ctrlMemberBattery" class="form-control mono" min="0" max="100">
                     </div>
                     <div class="form-group flex-1">
-                        <label>Speed (mph)</label>
+                        <label for="ctrlMemberSpeed">Speed (mph)</label>
                         <input type="number" step="0.1" id="ctrlMemberSpeed" class="form-control mono" min="0">
                     </div>
                     <div class="form-group flex-2">
-                        <label>Status Text</label>
+                        <label for="ctrlMemberStatus">Status Text</label>
                         <input type="text" id="ctrlMemberStatus" class="form-control" placeholder="e.g. Active, At Home">
                     </div>
                 </div>
 
                 <div class="form-row-actions">
-                    <label class="checkbox-label">
+                    <label class="checkbox-label" for="ctrlMemberCharging">
                         <input type="checkbox" id="ctrlMemberCharging"> ⚡ Is Charging
                     </label>
-                    <label class="checkbox-label">
+                    <label class="checkbox-label" for="ctrlMemberPaused">
                         <input type="checkbox" id="ctrlMemberPaused"> ⏸️ Pause GPS Tracking
                     </label>
                 </div>
@@ -545,18 +547,18 @@
                 </div>
             </form>
         </div>
-    </div>
+    </dialog>
 
     <!-- MODAL: BROADCAST ALERT -->
-    <div id="broadcastModal" class="modal-backdrop hidden">
+    <dialog id="broadcastModal" class="modal-dialog" closedby="any" aria-labelledby="broadcastModalTitle">
         <div class="glass-card config-modal animate-fade-in">
             <div class="modal-header">
-                <h3>📢 Broadcast Message to Kin</h3>
-                <button class="modal-close" data-close="broadcastModal">✕</button>
+                <h2 id="broadcastModalTitle">📢 Broadcast Message to Kin</h2>
+                <button type="button" class="modal-close" data-close="broadcastModal" aria-label="Close">✕</button>
             </div>
             <form id="broadcastForm">
                 <div class="form-group">
-                    <label>Broadcast Message / Notification</label>
+                    <label for="broadcastMessageInput">Broadcast Message / Notification</label>
                     <textarea id="broadcastMessageInput" class="form-control" rows="3" placeholder="e.g. Family meeting at 6 PM! Or Emergency Alert..." required></textarea>
                 </div>
                 <div class="modal-footer">
@@ -565,37 +567,70 @@
                 </div>
             </form>
         </div>
-    </div>
+    </dialog>
 
     <!-- MODAL: DATABASE BACKUP & RESTORE -->
-    <div id="backupModal" class="modal-backdrop hidden">
+    <dialog id="backupModal" class="modal-dialog" closedby="any" aria-labelledby="backupModalTitle">
         <div class="glass-card config-modal animate-fade-in">
             <div class="modal-header">
-                <h3>💾 Sovereign Database Snapshot</h3>
-                <button class="modal-close" data-close="backupModal">✕</button>
+                <h2 id="backupModalTitle">💾 Sovereign Database Snapshot</h2>
+                <button type="button" class="modal-close" data-close="backupModal" aria-label="Close">✕</button>
             </div>
             <div class="backup-modal-body">
                 <div class="backup-card">
-                    <h4>📤 Export Snapshot</h4>
+                    <h3>📤 Export Snapshot</h3>
                     <p class="text-dim text-sm">Download an instant JSON backup of all circles, members, geofences, and shopping lists.</p>
-                    <button id="downloadBackupBtn" class="btn btn-sm btn-primary">Download Backup JSON</button>
+                    <button type="button" id="downloadBackupBtn" class="btn btn-sm btn-primary">Download Backup JSON</button>
                 </div>
 
                 <div class="backup-card">
-                    <h4>📥 Restore Snapshot</h4>
-                    <p class="text-dim text-sm">Restore database state from a verified JSON backup file.</p>
+                    <h3>📥 Restore Snapshot</h3>
+                    <label for="restoreFileInput" class="text-dim text-sm">Restore database state from a verified JSON backup file.</label>
                     <input type="file" id="restoreFileInput" accept=".json" class="form-control file-input">
-                    <button id="executeRestoreBtn" class="btn btn-sm btn-danger mt-2" disabled>Execute Restore</button>
+                    <button type="button" id="executeRestoreBtn" class="btn btn-sm btn-danger mt-2" disabled>Execute Restore</button>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-close="backupModal">Close</button>
             </div>
         </div>
-    </div>
+    </dialog>
+
+    <!-- MODAL: OTA RELEASES & ROLLBACK -->
+    <dialog id="otaModal" class="modal-dialog" closedby="any" aria-labelledby="otaModalTitle">
+        <div class="glass-card config-modal ota-modal animate-fade-in" style="max-width: 640px; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 id="otaModalTitle">📦 Live OTA Releases &amp; Rollback</h2>
+                <div class="ota-header-actions">
+                    <button type="button" id="refreshOtaBtn" class="btn btn-xs btn-outline" title="Reload OTA status">🔄 Refresh</button>
+                    <button type="button" class="modal-close" data-close="otaModal" aria-label="Close">✕</button>
+                </div>
+            </div>
+            <div class="ota-modal-body">
+                <div id="otaCurrentCard" class="ota-current-card">
+                    <div class="text-dim text-sm">Loading live OTA version...</div>
+                </div>
+
+                <div class="ota-note-box text-xs">
+                    <strong>How rollback works:</strong> Restoring an archive immediately swaps the live APK on Ra so un-updated devices get that build. Phones already on a newer build won't auto-downgrade over Android's installer—use the direct APK download button below if you need to reinstall on this device.
+                </div>
+
+                <div class="ota-section-header">
+                    <h3>Archived Stable Builds</h3>
+                    <span id="otaBackupCount" class="badge-pill">0 archived</span>
+                </div>
+                <div id="otaBackupsList" class="ota-backups-list">
+                    <div class="empty-state">Checking archived builds...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close="otaModal">Close</button>
+            </div>
+        </div>
+    </dialog>
 
     <!-- TOAST NOTIFICATION CONTAINER -->
-    <div id="toastContainer" class="toast-container"></div>
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <!-- SCRIPTS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>

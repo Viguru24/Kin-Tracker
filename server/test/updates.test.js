@@ -81,6 +81,67 @@ async function runTests() {
             assert.strictEqual(backupsRes.statusCode, 200);
             assert(Array.isArray(backupsRes.body.backups));
             console.log('   ✅ /updates/backups and /updates/rollback HTTP auth routes verified.');
+
+            // 3. Test admin proxy routes (/api/admin/ota/backups & /api/admin/ota/rollback)
+            // Point OTA_UPDATES_BASE_URL to an isolated local mock upstream OTA server
+            const upstreamApp = express();
+            upstreamApp.use(express.json());
+            const upstreamAppDir = path.join(updateDir, appId);
+            upstreamApp.get('/updates/:appId/backups', (req, res) => {
+                if (req.headers['x-admin-key'] !== 'test_secret_4666') {
+                    return res.status(403).json({ error: 'Forbidden' });
+                }
+                const current = JSON.parse(fs.readFileSync(path.join(upstreamAppDir, 'version.json'), 'utf8'));
+                res.json({ appId: req.params.appId, current, backups: listBackups(upstreamAppDir) });
+            });
+            upstreamApp.post('/updates/:appId/rollback', (req, res) => {
+                if (req.headers['x-admin-key'] !== 'test_secret_4666') {
+                    return res.status(403).json({ error: 'Forbidden' });
+                }
+                const result = restoreBackup(upstreamAppDir, updateDir, req.params.appId, req.body || {});
+                res.json({ success: true, message: `Rolled back to v${result.metadata.versionName}`, ...result });
+            });
+
+            const upstreamServer = http.createServer(upstreamApp);
+            await new Promise(resolve => upstreamServer.listen(0, '127.0.0.1', resolve));
+            const upstreamPort = upstreamServer.address().port;
+
+            process.env.ADMIN_KEY = 'test_secret_4666';
+            process.env.OTA_UPDATES_BASE_URL = `http://127.0.0.1:${upstreamPort}/updates`;
+            const adminRouter = require('../src/routes/admin');
+            const dashApp = express();
+            dashApp.use(express.json());
+            dashApp.use('/api/admin', adminRouter);
+
+            const dashServer = http.createServer(dashApp);
+            await new Promise(resolve => dashServer.listen(0, '127.0.0.1', resolve));
+            const dashPort = dashServer.address().port;
+
+            try {
+                const unauthDash = await requestJson(dashPort, 'GET', '/api/admin/ota/backups');
+                assert.strictEqual(unauthDash.statusCode, 401);
+
+                const dashList = await requestJson(dashPort, 'GET', '/api/admin/ota/backups', null, { 'x-admin-key': 'test_secret_4666' });
+                assert.strictEqual(dashList.statusCode, 200);
+                assert.strictEqual(dashList.body.current.versionCode, 49);
+                assert.strictEqual(dashList.body.backups.length, 1);
+
+                const dashRollback = await requestJson(
+                    dashPort,
+                    'POST',
+                    '/api/admin/ota/rollback',
+                    { appId: 'kin-tracker', versionCode: 49 },
+                    { 'x-admin-key': 'test_secret_4666' }
+                );
+                assert.strictEqual(dashRollback.statusCode, 200);
+                assert.strictEqual(dashRollback.body.success, true);
+                assert.strictEqual(dashRollback.body.metadata.versionCode, 49);
+                console.log('   ✅ Dashboard /api/admin/ota/backups & /api/admin/ota/rollback proxy verified.');
+            } finally {
+                delete process.env.OTA_UPDATES_BASE_URL;
+                await new Promise(resolve => dashServer.close(resolve));
+                await new Promise(resolve => upstreamServer.close(resolve));
+            }
         } finally {
             await new Promise(resolve => server.close(resolve));
         }

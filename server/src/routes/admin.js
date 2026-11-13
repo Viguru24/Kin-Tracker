@@ -1,11 +1,56 @@
 const express = require('express');
 const router = express.Router();
 const os = require('os');
+const http = require('http');
+const https = require('https');
 const db = require('../db');
 const { getAudioRelayStats } = require('../audioRelay');
 const { generateInviteCode } = require('../utils/codeGenerator');
 const { ringMemberPhone, stopRingMemberPhone } = require('../syncBridge');
 const { isValidAdminKey } = require('../config');
+
+const DEFAULT_OTA_UPDATES_URL = 'https://api.cosmowhisper.com/updates';
+
+function getOtaUpdatesBaseUrl() {
+    return (process.env.OTA_UPDATES_BASE_URL || DEFAULT_OTA_UPDATES_URL).replace(/\/+$/, '');
+}
+
+function requestOtaJson(targetUrl, options = {}) {
+    return new Promise((resolve, reject) => {
+        const urlObj = new URL(targetUrl);
+        const transport = urlObj.protocol === 'https:' ? https : http;
+        const bodyStr = options.body ? JSON.stringify(options.body) : null;
+        const headers = { ...(options.headers || {}) };
+        if (bodyStr) {
+            headers['Content-Type'] = 'application/json';
+            headers['Content-Length'] = Buffer.byteLength(bodyStr);
+        }
+
+        const req = transport.request({
+            hostname: urlObj.hostname,
+            port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+            path: `${urlObj.pathname}${urlObj.search}`,
+            method: options.method || 'GET',
+            headers,
+            timeout: 10000
+        }, (res) => {
+            let raw = '';
+            res.on('data', chunk => { raw += chunk; });
+            res.on('end', () => {
+                try {
+                    const data = raw ? JSON.parse(raw) : {};
+                    resolve({ statusCode: res.statusCode, data });
+                } catch (_) {
+                    reject(new Error(`Invalid JSON from OTA server (HTTP ${res.statusCode})`));
+                }
+            });
+        });
+        req.on('timeout', () => req.destroy(new Error('OTA server request timed out')));
+        req.on('error', reject);
+        if (bodyStr) req.write(bodyStr);
+        req.end();
+    });
+}
 
 // Admin Authentication Middleware
 function requireAdmin(req, res, next) {
@@ -454,6 +499,54 @@ router.post('/backup/import', requireAdmin, (req, res) => {
     } catch (err) {
         console.error('[Admin Import Error]', err);
         return res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 15. LIST LIVE OTA BACKUPS (proxies to live OTA hub on Ra or OTA_UPDATES_BASE_URL)
+router.get('/ota/backups', requireAdmin, async (req, res) => {
+    try {
+        const appId = encodeURIComponent(req.query.app || 'kin-tracker');
+        const baseUrl = getOtaUpdatesBaseUrl();
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        const upstream = await requestOtaJson(`${baseUrl}/${appId}/backups`, {
+            method: 'GET',
+            headers: { 'x-admin-key': adminKey }
+        });
+        return res.status(upstream.statusCode).json({
+            otaServer: baseUrl,
+            ...upstream.data
+        });
+    } catch (err) {
+        console.error('[Admin OTA Backups Error]', err);
+        return res.status(502).json({ success: false, error: `Failed to reach OTA server: ${err.message}` });
+    }
+});
+
+// 16. ROLL BACK LIVE OTA BUILD TO SELECTED ARCHIVE
+router.post('/ota/rollback', requireAdmin, async (req, res) => {
+    try {
+        const { backupId, versionCode, appId: rawAppId } = req.body || {};
+        const appId = encodeURIComponent(rawAppId || req.query.app || 'kin-tracker');
+        const baseUrl = getOtaUpdatesBaseUrl();
+        const adminKey = req.headers['x-admin-key'] || req.body?.adminKey;
+        const upstream = await requestOtaJson(`${baseUrl}/${appId}/rollback`, {
+            method: 'POST',
+            headers: { 'x-admin-key': adminKey },
+            body: { backupId, versionCode }
+        });
+
+        if (upstream.statusCode >= 200 && upstream.statusCode < 300 && upstream.data?.success) {
+            const meta = upstream.data.metadata || {};
+            db.logEvent('OTA_ROLLBACK', `Rolled back live OTA (${meta.appId || 'kin-tracker'}) to v${meta.versionName || '?'} (code ${meta.versionCode || '?'})`);
+        }
+
+        return res.status(upstream.statusCode).json({
+            otaServer: baseUrl,
+            ...upstream.data
+        });
+    } catch (err) {
+        console.error('[Admin OTA Rollback Error]', err);
+        return res.status(502).json({ success: false, error: `OTA rollback failed: ${err.message}` });
     }
 });
 

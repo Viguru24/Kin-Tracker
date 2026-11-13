@@ -25,6 +25,7 @@
         placeMarkers: {},
         mapClickMode: null, // 'home', 'work', or 'place'
         pollTimer: null,
+        pollAbortController: null,
         audioWs: null,
         audioCtx: null,
         isPlayingAudio: false,
@@ -138,6 +139,12 @@
         broadcastForm: document.getElementById('broadcastForm'),
         broadcastMessageInput: document.getElementById('broadcastMessageInput'),
         backupModal: document.getElementById('backupModal'),
+        otaModalBtn: document.getElementById('otaModalBtn'),
+        otaModal: document.getElementById('otaModal'),
+        refreshOtaBtn: document.getElementById('refreshOtaBtn'),
+        otaCurrentCard: document.getElementById('otaCurrentCard'),
+        otaBackupCount: document.getElementById('otaBackupCount'),
+        otaBackupsList: document.getElementById('otaBackupsList'),
         downloadBackupBtn: document.getElementById('downloadBackupBtn'),
         restoreFileInput: document.getElementById('restoreFileInput'),
         executeRestoreBtn: document.getElementById('executeRestoreBtn'),
@@ -151,6 +158,35 @@
         eventStreamContainer: document.getElementById('eventStreamContainer'),
         clearLogsBtn: document.getElementById('clearLogsBtn')
     };
+
+    // Helper: Safe HTML Escaping
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // Helper: Native <dialog> Modal Controls
+    function openDialog(dialogEl) {
+        if (!dialogEl) return;
+        if (typeof dialogEl.showModal === 'function') {
+            if (!dialogEl.open) dialogEl.showModal();
+        } else {
+            dialogEl.setAttribute('open', '');
+        }
+    }
+
+    function closeDialog(dialogEl) {
+        if (!dialogEl) return;
+        if (typeof dialogEl.close === 'function') {
+            if (dialogEl.open) dialogEl.close();
+        } else {
+            dialogEl.removeAttribute('open');
+        }
+    }
 
     // Helper: API Client
     async function apiRequest(endpoint, options = {}) {
@@ -170,7 +206,9 @@
             }
             return data;
         } catch (err) {
-            console.error(`[API Error] ${endpoint}:`, err);
+            if (err.name !== 'AbortError') {
+                console.error(`[API Error] ${endpoint}:`, err);
+            }
             throw err;
         }
     }
@@ -180,7 +218,12 @@
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         const icons = { success: '✅', error: '❌', info: 'ℹ️' };
-        toast.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${message}</span>`;
+        const iconSpan = document.createElement('span');
+        iconSpan.setAttribute('aria-hidden', 'true');
+        iconSpan.textContent = icons[type] || 'ℹ️';
+        const msgSpan = document.createElement('span');
+        msgSpan.textContent = String(message ?? '');
+        toast.append(iconSpan, msgSpan);
         el.toastContainer.appendChild(toast);
         setTimeout(() => {
             toast.style.opacity = '0';
@@ -204,13 +247,14 @@
     }
 
     function showLogin() {
-        el.authModal.classList.remove('hidden');
         el.dashboardApp.classList.add('hidden');
         if (state.pollTimer) clearInterval(state.pollTimer);
+        if (state.pollAbortController) state.pollAbortController.abort();
+        openDialog(el.authModal);
     }
 
     function showDashboard() {
-        el.authModal.classList.add('hidden');
+        closeDialog(el.authModal);
         el.dashboardApp.classList.remove('hidden');
         initMap();
         fetchInitialData();
@@ -221,6 +265,7 @@
         state.adminKey = '';
         localStorage.removeItem('kt_admin_key');
         if (state.pollTimer) clearInterval(state.pollTimer);
+        if (state.pollAbortController) state.pollAbortController.abort();
         if (state.audioWs) state.audioWs.close();
         showLogin();
     }
@@ -290,7 +335,7 @@
             } else if (state.mapClickMode === 'place') {
                 el.placeLatInput.value = lat.toFixed(6);
                 el.placeLngInput.value = lng.toFixed(6);
-                el.customPlaceModal.classList.remove('hidden');
+                openDialog(el.customPlaceModal);
                 showToast(`📍 Place coordinates set to ${lat.toFixed(6)}, ${lng.toFixed(6)}`, 'info');
             }
             exitMapCalibrateMode();
@@ -328,17 +373,21 @@
     function startPolling() {
         if (state.pollTimer) clearInterval(state.pollTimer);
         state.pollTimer = setInterval(async () => {
-            await Promise.all([
-                loadCircles(false),
-                loadStats(false),
-                loadEvents(false)
+            if (document.hidden || !state.adminKey) return;
+            if (state.pollAbortController) state.pollAbortController.abort();
+            state.pollAbortController = new AbortController();
+            const { signal } = state.pollAbortController;
+            await Promise.allSettled([
+                loadCircles(false, signal),
+                loadStats(false, signal),
+                loadEvents(false, signal)
             ]);
         }, 3000);
     }
 
-    async function loadCircles(updatePicker = true) {
+    async function loadCircles(updatePicker = true, signal = undefined) {
         try {
-            const data = await apiRequest('/api/admin/circles');
+            const data = await apiRequest('/api/admin/circles', signal ? { signal } : {});
             state.circles = data.circles || [];
 
             if (state.circles.length === 0) {
@@ -395,9 +444,9 @@
     }
 
     // 4. STATS & TELEMETRY VIEW
-    async function loadStats() {
+    async function loadStats(_ignored = false, signal = undefined) {
         try {
-            const data = await apiRequest('/api/admin/stats');
+            const data = await apiRequest('/api/admin/stats', signal ? { signal } : {});
             state.stats = data.system || {};
             state.audioStats = data.audio || {};
 
@@ -925,7 +974,7 @@
                 startRingCountdown(memberId, 20);
             }
             await loadCircles(false);
-            if (member && !el.memberControlModal.classList.contains('hidden') && el.ctrlMemberId.value === member.id) {
+            if (member && el.memberControlModal.open && el.ctrlMemberId.value === member.id) {
                 const refreshed = state.members.find(m => m.id === member.id);
                 if (refreshed) openMemberControlModal(refreshed);
             }
@@ -1082,6 +1131,9 @@
             const card = document.createElement('div');
             const isAlarm = m.statusText === '🚨 ALARM';
             card.className = `member-card ${isAlarm ? 'alarm-active' : ''}`;
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', `Open controls for ${m.name}`);
 
             const badgeClass = isAlarm ? 'alarm' :
                 m.isLocationPaused ? 'paused' :
@@ -1093,35 +1145,39 @@
                 ? formatDwellTime(m.locationSince)
                 : '';
 
+            const safeName = escapeHtml(m.name);
+            const safeStatus = escapeHtml(m.statusText || 'Active');
+            const safeColor = escapeHtml(isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88'));
+
             card.innerHTML = `
                 <div class="member-card-content">
                     <div class="member-main">
-                        <div class="member-avatar" style="border-color: ${isAlarm ? '#ff3366' : (m.avatarColorHex || '#00ff88')}" title="Click to open ${m.name}'s location in Google Maps">
+                        <div class="member-avatar" style="border-color: ${safeColor}" title="Click to open ${safeName}'s location in Google Maps">
                             ${getSafeEmoji(m)}
                         </div>
                         <div class="member-name-group">
-                            <div class="member-name">${m.name}</div>
+                            <div class="member-name">${safeName}</div>
                             <div class="member-status-line">
-                                <span class="member-badge ${badgeClass}">${m.statusText || 'Active'}</span>
-                                ${m.speedMph > 2 ? `<span>${m.speedMph} mph</span>` : ''}
-                                ${dwellStr ? `<span class="member-dwell-badge" style="color: #00ff88; font-size: 11px; margin-left: 6px; font-weight: 500;">📍 here ${dwellStr}</span>` : ''}
+                                <span class="member-badge ${badgeClass}">${safeStatus}</span>
+                                ${m.speedMph > 2 ? `<span>${Number(m.speedMph)} mph</span>` : ''}
+                                ${dwellStr ? `<span class="member-dwell-badge" style="color: #00ff88; font-size: 11px; margin-left: 6px; font-weight: 500;">📍 here ${escapeHtml(dwellStr)}</span>` : ''}
                             </div>
                         </div>
                     </div>
                     <div class="member-actions-col">
-                        <button class="btn-gmaps" title="Open ${m.name}'s exact location in Google Maps">
-                            <span>🗺️</span>
+                        <button type="button" class="btn-gmaps" title="Open ${safeName}'s exact location in Google Maps" aria-label="Open ${safeName}'s location in Google Maps">
+                            <span aria-hidden="true">🗺️</span>
                             <span>Maps</span>
                         </button>
-                        <button class="btn-ring-phone ${isRinging ? 'ringing' : ''}" title="Ring ${m.name}'s phone loudly">
-                            <span>${isRinging ? '🚨' : '🔔'}</span>
+                        <button type="button" class="btn-ring-phone ${isRinging ? 'ringing' : ''}" title="Ring ${safeName}'s phone loudly">
+                            <span aria-hidden="true">${isRinging ? '🚨' : '🔔'}</span>
                             <span>${isRinging ? 'Ringing...' : 'Ring Phone'}</span>
                         </button>
                         <div class="member-telemetry-col">
                             <div class="battery-pill ${m.isCharging ? 'charging' : (m.batteryPercentage < 20 ? 'low' : '')}">
-                                ${m.isCharging ? '⚡' : '🔋'} ${m.batteryPercentage}%
+                                ${m.isCharging ? '⚡' : '🔋'} ${Number(m.batteryPercentage)}%
                             </div>
-                            <div class="member-last-active">${relativeTime}</div>
+                            <div class="member-last-active">${escapeHtml(relativeTime)}</div>
                         </div>
                     </div>
                 </div>
@@ -1155,8 +1211,21 @@
                 });
             }
 
-            // Entire Card Click -> Opens Modal
+            // Entire Card Click / Keyboard -> Opens Modal
             card.addEventListener('click', () => openMemberControlModal(m));
+            card.addEventListener('keydown', (e) => {
+                if (e.target !== card) return;
+                if (e.key === 'Enter') {
+                    openMemberControlModal(m);
+                }
+            });
+            card.addEventListener('keyup', (e) => {
+                if (e.target !== card) return;
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    openMemberControlModal(m);
+                }
+            });
             el.membersList.appendChild(card);
         });
     }
@@ -1211,7 +1280,7 @@
         // Render additional custom places (Eloisa's School, Isabel's Work, etc.)
         renderCustomPlacesList(circle.safeZones || [], circle.id);
 
-        el.circleConfigModal.classList.remove('hidden');
+        openDialog(el.circleConfigModal);
     }
 
     function renderCustomPlacesList(safeZones, circleId) {
@@ -1226,24 +1295,27 @@
         safeZones.forEach(zone => {
             const card = document.createElement('div');
             card.className = 'place-item-card';
+            const safeName = escapeHtml(zone.name);
+            const safeColor = escapeHtml(zone.colorHex || '#10B981');
+            const safeIcon = escapeHtml(zone.iconName || '🏫');
             card.innerHTML = `
                 <div class="place-item-left">
-                    <div class="place-icon-badge" style="border-color: ${zone.colorHex || '#A855F7'}">${zone.iconName || '🏫'}</div>
+                    <div class="place-icon-badge" style="border-color: ${safeColor}">${safeIcon}</div>
                     <div>
-                        <div class="place-name">${zone.name}</div>
-                        <div class="place-meta">${Number(zone.latitude).toFixed(5)}, ${Number(zone.longitude).toFixed(5)} &bull; ${zone.radiusMeters || 100}m radius</div>
+                        <div class="place-name">${safeName}</div>
+                        <div class="place-meta">${Number(zone.latitude).toFixed(5)}, ${Number(zone.longitude).toFixed(5)} &bull; ${Number(zone.radiusMeters || 100)}m radius</div>
                     </div>
                 </div>
                 <div class="place-actions">
-                    <button type="button" class="btn btn-xs btn-outline btn-locate-place" title="Locate on map">🗺️</button>
-                    <button type="button" class="btn btn-xs btn-secondary btn-edit-place">✏️ Edit</button>
-                    <button type="button" class="btn btn-xs btn-outline-danger btn-delete-place">🗑️</button>
+                    <button type="button" class="btn btn-xs btn-outline btn-locate-place" title="Locate on map" aria-label="Locate ${safeName} on map">🗺️</button>
+                    <button type="button" class="btn btn-xs btn-secondary btn-edit-place" aria-label="Edit ${safeName}">✏️ Edit</button>
+                    <button type="button" class="btn btn-xs btn-outline-danger btn-delete-place" aria-label="Delete ${safeName}">🗑️</button>
                 </div>
             `;
 
             card.querySelector('.btn-locate-place').addEventListener('click', (e) => {
                 e.stopPropagation();
-                el.circleConfigModal.classList.add('hidden');
+                closeDialog(el.circleConfigModal);
                 if (state.map) {
                     state.map.flyTo([Number(zone.latitude), Number(zone.longitude)], 16);
                 }
@@ -1282,7 +1354,7 @@
             el.placeLatInput.value = place.latitude;
             el.placeLngInput.value = place.longitude;
             el.placeRadiusInput.value = place.radiusMeters || 100;
-            el.placeColorInput.value = place.colorHex || '#A855F7';
+            el.placeColorInput.value = place.colorHex || '#10B981';
         } else {
             el.customPlaceModalTitle.innerText = `📍 Add Family Place / School / Work`;
             el.placeId.value = '';
@@ -1292,9 +1364,9 @@
             el.placeLatInput.value = currentCircle?.homeLat || '';
             el.placeLngInput.value = currentCircle?.homeLng || '';
             el.placeRadiusInput.value = 100;
-            el.placeColorInput.value = '#A855F7';
+            el.placeColorInput.value = '#10B981';
         }
-        el.customPlaceModal.classList.remove('hidden');
+        openDialog(el.customPlaceModal);
     }
 
     async function saveGeofenceLocation(circleId, updates) {
@@ -1381,7 +1453,7 @@
         el.ctrlTriggerAlarmBtn.innerText = isAlarm ? '✅ Silence SOS Alarm' : '🚨 Trigger SOS Alarm';
         el.ctrlTriggerAlarmBtn.className = isAlarm ? 'btn btn-sm btn-emerald' : 'btn btn-sm btn-danger';
 
-        el.memberControlModal.classList.remove('hidden');
+        openDialog(el.memberControlModal);
     }
 
     // 9. AUDIO RELAY PLAYBACK IN BROWSER
@@ -1499,9 +1571,9 @@
     }
 
     // 10. ACTIVITY EVENT STREAM
-    async function loadEvents() {
+    async function loadEvents(_ignored = false, signal = undefined) {
         try {
-            const data = await apiRequest('/api/admin/events?limit=40');
+            const data = await apiRequest('/api/admin/events?limit=40', signal ? { signal } : {});
             state.events = data.events || [];
             renderEventStream();
         } catch (_) {}
@@ -1518,10 +1590,11 @@
             const row = document.createElement('div');
             row.className = 'event-row';
             const timeStr = new Date(evt.timestamp).toLocaleTimeString();
+            const safeType = escapeHtml(evt.type);
             row.innerHTML = `
-                <span class="event-time">${timeStr}</span>
-                <span class="event-tag ${evt.type}">${evt.type}</span>
-                <span class="event-msg">${evt.message}</span>
+                <span class="event-time">${escapeHtml(timeStr)}</span>
+                <span class="event-tag ${safeType}">${safeType}</span>
+                <span class="event-msg">${escapeHtml(evt.message)}</span>
             `;
             el.eventStreamContainer.appendChild(row);
         });
@@ -1630,21 +1703,21 @@
             };
 
             await saveGeofenceLocation(circle.id, updates);
-            el.circleConfigModal.classList.add('hidden');
+            closeDialog(el.circleConfigModal);
             showToast('Places & calibration settings updated successfully', 'success');
         });
 
         // Browser GPS & Map Picking for Home & Work in Config Modal
         if (el.cfgPickHomeOnMapBtn) {
             el.cfgPickHomeOnMapBtn.addEventListener('click', () => {
-                el.circleConfigModal.classList.add('hidden');
+                closeDialog(el.circleConfigModal);
                 enterMapCalibrateMode('home');
             });
         }
 
         if (el.cfgPickWorkOnMapBtn) {
             el.cfgPickWorkOnMapBtn.addEventListener('click', () => {
-                el.circleConfigModal.classList.add('hidden');
+                closeDialog(el.circleConfigModal);
                 enterMapCalibrateMode('work');
             });
         }
@@ -1687,7 +1760,7 @@
 
         if (el.placePickOnMapBtn) {
             el.placePickOnMapBtn.addEventListener('click', () => {
-                el.customPlaceModal.classList.add('hidden');
+                closeDialog(el.customPlaceModal);
                 enterMapCalibrateMode('place');
             });
         }
@@ -1705,7 +1778,7 @@
                     latitude: Number(el.placeLatInput.value),
                     longitude: Number(el.placeLngInput.value),
                     radiusMeters: Number(el.placeRadiusInput.value) || 100,
-                    colorHex: el.placeColorInput.value || '#A855F7'
+                    colorHex: el.placeColorInput.value || '#10B981'
                 };
 
                 try {
@@ -1713,11 +1786,11 @@
                         method: 'POST',
                         body: JSON.stringify(placeData)
                     });
-                    el.customPlaceModal.classList.add('hidden');
+                    closeDialog(el.customPlaceModal);
                     showToast(`Saved place "${placeData.name}"`, 'success');
                     await loadCircles(false);
                     const updated = getCurrentCircle();
-                    if (updated && !el.circleConfigModal.classList.contains('hidden')) {
+                    if (updated && el.circleConfigModal.open) {
                         renderCustomPlacesList(updated.safeZones || [], updated.id);
                     }
                 } catch (err) {
@@ -1748,7 +1821,7 @@
                     method: 'POST',
                     body: JSON.stringify(updates)
                 });
-                el.memberControlModal.classList.add('hidden');
+                closeDialog(el.memberControlModal);
                 showToast(`Device ${updates.name} updated`, 'success');
                 await loadCircles(false);
             } catch (err) {
@@ -1771,7 +1844,7 @@
                 const lat = Number(el.ctrlMemberLat.value);
                 const lng = Number(el.ctrlMemberLng.value);
                 if (lat && lng && state.map) {
-                    el.memberControlModal.classList.add('hidden');
+                    closeDialog(el.memberControlModal);
                     state.map.flyTo([lat, lng], 19, { animate: true, duration: 1.2 });
                     const memberId = el.ctrlMemberId.value;
                     if (state.markers[memberId]) {
@@ -1792,7 +1865,7 @@
             }
             try {
                 const res = await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/toggle-alarm`, { method: 'POST' });
-                el.memberControlModal.classList.add('hidden');
+                closeDialog(el.memberControlModal);
                 showToast(res.isAlarm ? '🚨 SOS Distress Alarm Triggered' : '✅ SOS Alarm Resolved', res.isAlarm ? 'error' : 'success');
                 await loadCircles(false);
             } catch (err) {
@@ -1825,7 +1898,7 @@
             if (!circle || !confirm('Are you sure you want to remove this device from the circle?')) return;
             try {
                 await apiRequest(`/api/admin/circles/${circle.id}/members/${memberId}`, { method: 'DELETE' });
-                el.memberControlModal.classList.add('hidden');
+                closeDialog(el.memberControlModal);
                 showToast('Device removed from circle', 'success');
                 await loadCircles(false);
             } catch (err) {
@@ -1836,7 +1909,7 @@
         // Broadcast Modal
         el.broadcastBtn.addEventListener('click', () => {
             el.broadcastMessageInput.value = '';
-            el.broadcastModal.classList.remove('hidden');
+            openDialog(el.broadcastModal);
         });
         el.broadcastForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -1847,7 +1920,7 @@
                     method: 'POST',
                     body: JSON.stringify({ circleId: circle?.id, message: msg, statusText: msg })
                 });
-                el.broadcastModal.classList.add('hidden');
+                closeDialog(el.broadcastModal);
                 showToast('Broadcast sent to all circle devices', 'success');
                 await loadCircles(false);
             } catch (err) {
@@ -1856,9 +1929,191 @@
         });
 
         // Backup Modal & Snapshot Export / Import
-        el.backupModalBtn.addEventListener('click', () => el.backupModal.classList.remove('hidden'));
-        el.downloadBackupBtn.addEventListener('click', () => {
-            window.location.href = `/api/admin/backup/export?adminKey=${encodeURIComponent(state.adminKey)}`;
+        el.backupModalBtn.addEventListener('click', () => openDialog(el.backupModal));
+
+        // OTA Releases & Rollback Modal
+        function formatApkMb(bytes) {
+            const num = Number(bytes) || 0;
+            return num > 0 ? `${(num / (1024 * 1024)).toFixed(2)} MB` : 'unknown size';
+        }
+
+        function formatOtaDate(ts) {
+            const ms = Number(ts) || 0;
+            return ms > 0 ? new Date(ms).toLocaleString() : 'Unknown time';
+        }
+
+        function renderOtaModal(data) {
+            const current = data?.current || null;
+            const backups = Array.isArray(data?.backups) ? data.backups : [];
+
+            if (el.otaCurrentCard) {
+                el.otaCurrentCard.replaceChildren();
+                if (!current) {
+                    const empty = document.createElement('div');
+                    empty.className = 'text-dim text-sm';
+                    empty.textContent = 'No live OTA metadata found on server.';
+                    el.otaCurrentCard.appendChild(empty);
+                } else {
+                    const top = document.createElement('div');
+                    top.className = 'ota-card-top';
+
+                    const titleWrap = document.createElement('div');
+                    titleWrap.className = 'ota-version-title';
+                    const livePill = document.createElement('span');
+                    livePill.className = 'ota-live-pill';
+                    livePill.textContent = 'LIVE ON RA';
+                    const titleText = document.createElement('span');
+                    titleText.textContent = `v${current.versionName || '?'} (code ${current.versionCode || '?'})`;
+                    titleWrap.append(livePill, titleText);
+
+                    top.appendChild(titleWrap);
+
+                    if (typeof current.apkUrl === 'string' && /^https?:\/\//i.test(current.apkUrl)) {
+                        const dl = document.createElement('a');
+                        const sep = current.apkUrl.includes('?') ? '&' : '?';
+                        dl.href = `${current.apkUrl}${sep}token=81e5632c_pin_group`;
+                        dl.target = '_blank';
+                        dl.rel = 'noopener noreferrer';
+                        dl.className = 'btn btn-xs btn-outline';
+                        dl.textContent = '⬇️ Download Active APK';
+                        top.appendChild(dl);
+                    }
+
+                    const notes = document.createElement('div');
+                    notes.className = 'ota-backup-notes';
+                    notes.textContent = current.releaseNotes || 'No release notes.';
+
+                    const sub = document.createElement('div');
+                    sub.className = 'ota-backup-sub mono';
+                    sub.textContent = `Published: ${formatOtaDate(current.publishedAt)}${current.restoredFromBackupId ? ` · Restored from ${current.restoredFromBackupId}` : ''}`;
+
+                    el.otaCurrentCard.append(top, notes, sub);
+                }
+            }
+
+            if (el.otaBackupCount) {
+                el.otaBackupCount.textContent = `${backups.length} archived`;
+            }
+
+            if (el.otaBackupsList) {
+                el.otaBackupsList.replaceChildren();
+                if (backups.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'empty-state';
+                    empty.textContent = 'No archived OTA builds available yet. Future uploads automatically archive the previous version.';
+                    el.otaBackupsList.appendChild(empty);
+                    return;
+                }
+
+                backups.forEach((b) => {
+                    const item = document.createElement('div');
+                    item.className = 'ota-backup-item';
+
+                    const meta = document.createElement('div');
+                    meta.className = 'ota-backup-meta';
+
+                    const verRow = document.createElement('div');
+                    verRow.className = 'ota-version-title';
+                    verRow.textContent = `v${b.versionName || '?'} · code ${b.versionCode || '?'}`;
+
+                    const notes = document.createElement('div');
+                    notes.className = 'ota-backup-notes';
+                    notes.textContent = b.releaseNotes || 'No release notes.';
+
+                    const sub = document.createElement('div');
+                    sub.className = 'ota-backup-sub mono';
+                    sub.textContent = `${formatApkMb(b.apkSize)} · Archived ${formatOtaDate(b.archivedAt)} · ID: ${b.backupId}`;
+
+                    meta.append(verRow, notes, sub);
+
+                    const actions = document.createElement('div');
+                    actions.className = 'ota-backup-actions';
+
+                    const isSameActive = current && Number(current.versionCode) === Number(b.versionCode);
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = isSameActive ? 'btn btn-xs btn-outline' : 'btn btn-xs btn-amber';
+                    btn.textContent = isSameActive ? 'Re-apply Build' : `↩️ Rollback to v${b.versionName}`;
+                    btn.addEventListener('click', () => triggerOtaRollback(b, btn));
+
+                    actions.appendChild(btn);
+                    item.append(meta, actions);
+                    el.otaBackupsList.appendChild(item);
+                });
+            }
+        }
+
+        async function loadOtaBackups() {
+            if (!el.otaCurrentCard || !el.otaBackupsList) return;
+            el.otaCurrentCard.innerHTML = '<div class="text-dim text-sm">Loading live OTA version from Ra...</div>';
+            try {
+                const data = await apiRequest('/api/admin/ota/backups?app=kin-tracker');
+                renderOtaModal(data);
+            } catch (err) {
+                el.otaCurrentCard.replaceChildren();
+                const errDiv = document.createElement('div');
+                errDiv.className = 'alert-box error';
+                errDiv.textContent = `Could not load OTA builds: ${err.message}`;
+                el.otaCurrentCard.appendChild(errDiv);
+                el.otaBackupsList.replaceChildren();
+            }
+        }
+
+        async function triggerOtaRollback(backup, btn) {
+            const label = `v${backup.versionName} (code ${backup.versionCode})`;
+            if (!confirm(`Roll back the live OTA server to ${label}?\n\nDevices checking for updates will receive ${label}.`)) {
+                return;
+            }
+            const origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Restoring...';
+            try {
+                const res = await apiRequest('/api/admin/ota/rollback', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        appId: 'kin-tracker',
+                        backupId: backup.backupId,
+                        versionCode: backup.versionCode
+                    })
+                });
+                showToast(res.message || `Rolled back live OTA to ${label}`, 'success');
+                await loadOtaBackups();
+                await loadEvents();
+            } catch (err) {
+                showToast(`Rollback failed: ${err.message}`, 'error');
+                btn.disabled = false;
+                btn.textContent = origText;
+            }
+        }
+
+        if (el.otaModalBtn && el.otaModal) {
+            el.otaModalBtn.addEventListener('click', () => {
+                openDialog(el.otaModal);
+                loadOtaBackups();
+            });
+        }
+        if (el.refreshOtaBtn) {
+            el.refreshOtaBtn.addEventListener('click', loadOtaBackups);
+        }
+        el.downloadBackupBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/admin/backup/export', {
+                    headers: { 'x-admin-key': state.adminKey }
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `kin-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                showToast('Database backup downloaded', 'success');
+            } catch (err) {
+                showToast(`Backup download failed: ${err.message}`, 'error');
+            }
         });
         el.restoreFileInput.addEventListener('change', (e) => {
             el.executeRestoreBtn.disabled = !e.target.files.length;
@@ -1873,7 +2128,7 @@
                     method: 'POST',
                     body: JSON.stringify(json)
                 });
-                el.backupModal.classList.add('hidden');
+                closeDialog(el.backupModal);
                 showToast('Database snapshot restored successfully!', 'success');
                 await loadCircles();
             } catch (err) {
@@ -1895,8 +2150,37 @@
             btn.addEventListener('click', () => {
                 const modalId = btn.getAttribute('data-close');
                 const target = document.getElementById(modalId);
-                if (target) target.classList.add('hidden');
+                if (target) closeDialog(target);
             });
+        });
+
+        // Prevent Esc dismissal on login gate
+        if (el.authModal) {
+            el.authModal.addEventListener('cancel', (e) => e.preventDefault());
+        }
+
+        // Progressive-enhancement fallback for <dialog closedby="any">
+        if (typeof HTMLDialogElement !== 'undefined' && !('closedBy' in HTMLDialogElement.prototype)) {
+            const isOutside = (e, dialog) => {
+                const r = dialog.getBoundingClientRect();
+                return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+            };
+            document.querySelectorAll('dialog[closedby="any"]').forEach((dialog) => {
+                let pressedOutside = false;
+                dialog.addEventListener('pointerdown', (e) => { pressedOutside = isOutside(e, dialog); });
+                dialog.addEventListener('pointerup', (e) => {
+                    if (pressedOutside && isOutside(e, dialog)) closeDialog(dialog);
+                });
+            });
+        }
+
+        // Pause background polling when tab is hidden; resume & refresh when visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (state.pollAbortController) state.pollAbortController.abort();
+            } else if (state.adminKey && !el.dashboardApp.classList.contains('hidden')) {
+                fetchInitialData();
+            }
         });
     }
 
