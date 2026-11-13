@@ -86,27 +86,22 @@ class BackgroundLocationService : Service() {
 
     private fun withWakeLock(timeoutMs: Long = 10_000L, block: suspend () -> Unit) {
         serviceScope.launch {
-            var held = false
+            var localLock: PowerManager.WakeLock? = null
             try {
-                if (wakeLock == null) {
-                    val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-                    wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KinTracker:LocationWakeLock")?.apply {
-                        setReferenceCounted(false)
-                    }
+                val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                localLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KinTracker:LocationWakeLock")?.apply {
+                    setReferenceCounted(false)
+                    acquire(timeoutMs)
                 }
-                wakeLock?.acquire(timeoutMs)
-                held = true
                 block()
             } catch (e: Exception) {
                 // Safe fallback
             } finally {
-                if (held) {
-                    try {
-                        if (wakeLock?.isHeld == true) {
-                            wakeLock?.release()
-                        }
-                    } catch (e: Exception) {}
-                }
+                try {
+                    if (localLock?.isHeld == true) {
+                        localLock.release()
+                    }
+                } catch (e: Exception) {}
             }
         }
     }

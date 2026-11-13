@@ -259,9 +259,12 @@ class CloudSyncManager(
                 savePreferences()
                 uiEvents.emit("📱 Device name updated to '$newSyncedName' by circle!")
             }
-            val currentLocPaused = prefs.getBoolean("is_location_paused", false)
+            val currentLocPaused = prefs.getBoolean("isLocationPaused", prefs.getBoolean("is_location_paused", false))
             if (myEntry != null && myEntry.isLocationPaused != currentLocPaused) {
-                prefs.edit().putBoolean("is_location_paused", myEntry.isLocationPaused).apply()
+                prefs.edit()
+                    .putBoolean("isLocationPaused", myEntry.isLocationPaused)
+                    .putBoolean("is_location_paused", myEntry.isLocationPaused)
+                    .apply()
                 if (myEntry.isLocationPaused) {
                     com.example.data.BackgroundLocationService.stopService(application)
                     uiEvents.emit("⏸️ Location tracking paused remotely.")
@@ -271,7 +274,7 @@ class CloudSyncManager(
                 }
             }
 
-            val isLocPaused = prefs.getBoolean("is_location_paused", false)
+            val isLocPaused = prefs.getBoolean("isLocationPaused", prefs.getBoolean("is_location_paused", false))
             val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime.value
             val myCloudMember = CloudMember(
                 id = myCloudId,

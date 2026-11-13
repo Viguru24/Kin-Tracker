@@ -41,6 +41,7 @@ fun AddDeviceDialog(
     activeGroupName: String = "Family Circle",
     members: List<FamilyMember> = emptyList(),
     onJoinGroupWithPin: (String) -> Unit = {},
+    onJoinGroupWithPinWithResult: ((String, (Boolean, String) -> Unit) -> Unit)? = null,
     onCreateGroupWithPin: (String) -> Unit = {},
     onDeleteMemberFromCircle: (FamilyMember) -> Unit = {},
     initialTab: Int = 0,
@@ -50,6 +51,8 @@ fun AddDeviceDialog(
     val clipboardManager = LocalClipboardManager.current
     var selectedTab by remember { mutableStateOf(initialTab) } // 0 = Join Circle, 1 = Invite Device, 2 = Delete from Circle
     var pinToJoinInput by remember { mutableStateOf("") }
+    var isJoining by remember { mutableStateOf(false) }
+    var joinErrorMessage by remember { mutableStateOf<String?>(null) }
     var isCopied by remember { mutableStateOf(false) }
     var showCreateCircleView by remember { mutableStateOf(false) }
     var newCircleNameInput by remember { mutableStateOf("") }
@@ -252,6 +255,7 @@ fun AddDeviceDialog(
                                 val clean = input.filter { it.isLetterOrDigit() || it == '-' }.uppercase()
                                 if (clean.length <= 10) {
                                     pinToJoinInput = clean
+                                    joinErrorMessage = null
                                 }
                             },
                             label = { Text("Circle PIN or Invite Code", color = Color(0xFFB0BEC5), fontSize = 14.sp) },
@@ -277,12 +281,26 @@ fun AddDeviceDialog(
                         val isValidCode = pinToJoinInput.trim().length >= 4
                         Button(
                             onClick = {
-                                if (isValidCode) {
-                                    onJoinGroupWithPin(pinToJoinInput.trim())
-                                    onDismiss()
+                                if (isValidCode && !isJoining) {
+                                    val code = pinToJoinInput.trim()
+                                    if (onJoinGroupWithPinWithResult != null) {
+                                        isJoining = true
+                                        joinErrorMessage = null
+                                        onJoinGroupWithPinWithResult(code) { success, msg ->
+                                            isJoining = false
+                                            if (success) {
+                                                onDismiss()
+                                            } else {
+                                                joinErrorMessage = msg.ifBlank { "Could not connect to circle. Check PIN or connection." }
+                                            }
+                                        }
+                                    } else {
+                                        onJoinGroupWithPin(code)
+                                        onDismiss()
+                                    }
                                 }
                             },
-                            enabled = isValidCode,
+                            enabled = isValidCode && !isJoining,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF00E5FF),
                                 disabledContainerColor = Color(0xFF263238)
@@ -293,10 +311,20 @@ fun AddDeviceDialog(
                                 .height(50.dp)
                         ) {
                             Text(
-                                text = "Join Circle 👥",
-                                color = if (isValidCode) Color.Black else Color(0xFF78909C),
+                                text = if (isJoining) "Connecting..." else "Join Circle 👥",
+                                color = if (isValidCode && !isJoining) Color.Black else Color(0xFF78909C),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (joinErrorMessage != null) {
+                            Text(
+                                text = joinErrorMessage!!,
+                                color = Color(0xFFFF5252),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
 

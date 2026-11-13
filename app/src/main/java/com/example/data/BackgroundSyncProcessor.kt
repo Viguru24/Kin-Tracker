@@ -137,6 +137,7 @@ object BackgroundSyncProcessor {
         status: String,
         forceSync: Boolean = false
     ) {
+        if (BackgroundLocationService.isInForeground && !forceSync) return
         val isCloudSyncEnabled = prefs.getBoolean("isCloudSyncEnabled", true)
         var token = prefs.getString("groupSyncToken", "") ?: ""
         if (token.isBlank()) {
@@ -259,7 +260,10 @@ object BackgroundSyncProcessor {
                 }
             }
             if (myEntry != null && myEntry.isLocationPaused) {
-                prefs.edit().putBoolean("is_location_paused", true).apply()
+                prefs.edit()
+                    .putBoolean("isLocationPaused", true)
+                    .putBoolean("is_location_paused", true)
+                    .apply()
                 BackgroundLocationService.stopService(context)
                 return
             }
@@ -339,7 +343,7 @@ object BackgroundSyncProcessor {
             val ghostExpiry = prefs.getLong("ghostModeExpiryTime", 0L)
             val isGhostMode = System.currentTimeMillis() < ghostExpiry
 
-            val isLocPaused = prefs.getBoolean("is_location_paused", false)
+            val isLocPaused = prefs.getBoolean("isLocationPaused", prefs.getBoolean("is_location_paused", false))
             val myCloudMember = CloudMember(
                 id = myCloudId,
                 name = myName,

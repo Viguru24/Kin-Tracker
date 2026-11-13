@@ -173,10 +173,11 @@ app.put('/sync/:token', (req, res) => {
             }
         });
 
-        // Clean up any existing circle member that has the same UUID suffix but a different ID,
-        // or any member explicitly removed from the client members map
+        // Clean up any existing circle member that has the same UUID suffix (device renamed),
+        // or stale members (>2m inactive) removed from the client members map
         if (circle.memberIds && circle.memberIds.length > 0) {
             const obsoleteIds = [];
+            const now = Date.now();
             circle.memberIds.forEach(existingId => {
                 const parts = existingId.split('_');
                 if (parts.length >= 3) {
@@ -187,7 +188,11 @@ app.put('/sync/:token', (req, res) => {
                     }
                 }
                 if (!body.members[existingId]) {
-                    obsoleteIds.push(existingId);
+                    const existingMember = db.getMember(existingId);
+                    const ageMs = existingMember && existingMember.lastActive ? (now - Number(existingMember.lastActive)) : Infinity;
+                    if (ageMs > 120000) {
+                        obsoleteIds.push(existingId);
+                    }
                 }
             });
             obsoleteIds.forEach(oldId => {

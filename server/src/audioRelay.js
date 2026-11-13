@@ -49,9 +49,15 @@ function setupAudioRelay(server) {
         const parsedUrl = url.parse(request.url, true);
         const query = parsedUrl.query || {};
         const role = (query.role || '').toLowerCase(); // 'broadcast' or 'listen'
-        const circleId = query.circleId || 'default';
-        const memberId = query.memberId || 'anonymous';
+        const circleId = String(query.circleId || '').trim();
+        const memberId = String(query.memberId || '').trim();
         const memberName = query.memberName || memberId;
+
+        if (!circleId || circleId === 'default' || circleId.length < 4 || !memberId || memberId === 'anonymous') {
+            console.warn(`[AudioRelay] Rejected unauthorized connection (circleId="${circleId}", memberId="${memberId}")`);
+            ws.close(1008, 'Unauthorized: valid circleId and memberId required');
+            return;
+        }
 
         ws.isAlive = true;
         ws.on('pong', () => { ws.isAlive = true; });

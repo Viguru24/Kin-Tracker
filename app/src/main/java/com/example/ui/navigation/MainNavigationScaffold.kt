@@ -288,6 +288,7 @@ fun MainScreen(
             shoppingItems = shoppingItems,
             onOpenShoppingList = { isShoppingListPopupOpen = true },
             onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+            onJoinGroupWithPinWithResult = { pin, cb -> viewModel.joinGroupWithPin(pin, cb) },
             onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
             isLocationPaused = isLocationPaused,
             onToggleLocationPaused = { viewModel.toggleLocationPaused(it) },
@@ -799,6 +800,7 @@ fun MainScreen(
                 activeGroupName = activeCircleName,
                 members = members,
                 onJoinGroupWithPin = { pin -> viewModel.joinGroupWithPin(pin) },
+                onJoinGroupWithPinWithResult = { pin, cb -> viewModel.joinGroupWithPin(pin, cb) },
                 onCreateGroupWithPin = { name -> viewModel.createGroupWithPin(name) },
                 onDeleteMemberFromCircle = { member -> viewModel.deleteFamilyMember(member.id) },
                 onDismiss = { showAddDeviceDialog = false }

@@ -323,8 +323,9 @@ object RoomAudioStreamManager {
                 // 2. Connect outgoing WebSocket to VPS Cloud Relay (for cellular listeners)
                 launch(Dispatchers.IO) {
                     try {
-                        val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "")
-                        val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=broadcast&circleId=$cleanCircle&memberId=${URLEncoder.encode(myDeviceId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
+                        val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "").ifBlank { "default_circle" }
+                        val effectiveMemberId = myDeviceId.ifBlank { "device_member" }
+                        val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=broadcast&circleId=$cleanCircle&memberId=${URLEncoder.encode(effectiveMemberId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
                         appendLog("Connecting to VPS Cloud Relay...")
                         val req = Request.Builder().url(wsUrl).build()
                         relayWebSocket = httpClient.newWebSocket(req, object : WebSocketListener() {
@@ -674,10 +675,11 @@ object RoomAudioStreamManager {
             if (!connectedViaLan && isActive) {
                 _activeTransport.value = "VPS Cloud Relay"
                 _statusMessage.value = "Connecting to VPS Cloud Relay..."
-                val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "")
+                val cleanCircle = activeCircleId.replace(Regex("[^a-zA-Z0-9_]"), "").ifBlank { "default_circle" }
                 appendLog("Connecting to VPS Cloud Relay (circle: $cleanCircle)...")
 
-                val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=listen&circleId=$cleanCircle&memberId=${URLEncoder.encode(myDeviceId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
+                val effectiveMemberId = myDeviceId.ifBlank { "device_member" }
+                val wsUrl = "${AppConfig.AUDIO_RELAY_WS_URL}?role=listen&circleId=$cleanCircle&memberId=${URLEncoder.encode(effectiveMemberId, "UTF-8")}&memberName=${URLEncoder.encode(myDeviceName, "UTF-8")}"
                 val req = Request.Builder().url(wsUrl).build()
 
                 audioTrack.play()
