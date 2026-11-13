@@ -11,6 +11,9 @@ async function runTests() {
 
     // 1. Unit test otaBackups archive/list/prune/restore in isolated temp dir
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kt-ota-test-'));
+    process.env.NODE_ENV = 'test';
+    process.env.KINTRACKER_DISABLE_LIVE_SYNC = '1';
+    process.env.DATA_DIR = path.join(tmpRoot, 'data');
     try {
         const updateDir = path.join(tmpRoot, 'updates');
         const appId = 'kin-tracker';

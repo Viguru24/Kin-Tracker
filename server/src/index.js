@@ -54,9 +54,11 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 const { syncLiveProductionFamily } = require('./syncBridge');
 
-// Initial live fetch and recurring 4s polling bridge
-syncLiveProductionFamily();
-setInterval(syncLiveProductionFamily, 4000);
+// Initial live fetch and recurring 4s polling bridge (disabled during automated tests)
+if (process.env.KINTRACKER_DISABLE_LIVE_SYNC !== '1' && process.env.NODE_ENV !== 'test') {
+    syncLiveProductionFamily();
+    setInterval(syncLiveProductionFamily, 4000);
+}
 
 
 // Dashboard Route Shortcuts

@@ -380,7 +380,8 @@ class CloudSyncManager(
 
                     val isExplicitlyDeleted = deletedMembersPrefs.getBoolean("deleted_$entryId", false) ||
                         deletedMembersPrefs.getBoolean("deleted_member_$entryId", false)
-                    val isOldMock = entryId.contains("abc123") || entryId.startsWith("mock_")
+                    val isOldMock = entryId.contains("abc123") || entryId.startsWith("mock_") ||
+                        entryId.startsWith("device_test_") || entryName == "test explorer"
                     val isKnownFamily = knownFamilyKeywords.any { entryName.contains(it) } || entryId.contains("isabel") || entryId.contains("eloise") || entryId.contains("tab")
                     val isStaleUnknown = !isKnownFamily && (System.currentTimeMillis() - entry.value.lastActive) > staleThresholdMs
 

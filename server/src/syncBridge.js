@@ -4,6 +4,10 @@ const db = require('./db');
 const SYNC_URL = 'https://api.cosmowhisper.com/sync/81e5632c_pin_group';
 const activeRingTimers = new Map();
 
+function isLiveSyncDisabled() {
+    return process.env.KINTRACKER_DISABLE_LIVE_SYNC === '1' || process.env.NODE_ENV === 'test';
+}
+
 function distanceMeters(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
     const R = 6371000;
@@ -20,6 +24,8 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
  * Fetch live data from production VPS into local database
  */
 async function syncLiveProductionFamily() {
+    if (isLiveSyncDisabled()) return false;
+
     return new Promise((resolve) => {
         https.get(SYNC_URL, (res) => {
             let raw = '';
@@ -63,7 +69,7 @@ async function syncLiveProductionFamily() {
                                         const homeDist = (circle.homeLat && circle.homeLng)
                                             ? distanceMeters(lat, lng, Number(circle.homeLat), Number(circle.homeLng))
                                             : Infinity;
-                                        if (homeDist <= Math.max(Number(circle.homeRadiusMeters || 140), 150)) {
+                                        if (homeDist <= Math.max(Number(circle.homeRadiusMeters || 140), 35)) {
                                             normalized.x = Number(circle.homeLng);
                                             normalized.y = Number(circle.homeLat);
                                             normalized.speedMph = 0;
@@ -103,6 +109,8 @@ async function syncLiveProductionFamily() {
  * Push current local circle + members snapshot to production VPS
  */
 async function pushLiveProductionFamily(customMembersMap = null) {
+    if (isLiveSyncDisabled()) return false;
+
     return new Promise((resolve) => {
         try {
             const circle = db.getCircleById('circle_default_sovereign') || db.getCircleByInviteCode('4666') || Object.values(db.getAllCircles())[0];
@@ -260,6 +268,7 @@ async function stopRingMemberPhone(memberId) {
 
 module.exports = {
     syncLiveProductionFamily,
+    isLiveSyncDisabled,
     pushLiveProductionFamily,
     ringMemberPhone,
     stopRingMemberPhone

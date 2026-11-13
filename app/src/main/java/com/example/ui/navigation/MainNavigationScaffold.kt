@@ -47,6 +47,7 @@ fun MainScreen(
 ) {
     val members by viewModel.familyMembers.collectAsStateWithLifecycle()
     val locationTrails by viewModel.locationTrails.collectAsStateWithLifecycle()
+    val snappedTripRoutes by viewModel.snappedTripRoutes.collectAsStateWithLifecycle()
     val routeTimeFilter by viewModel.routeTimeFilter.collectAsStateWithLifecycle()
     val logs by viewModel.activityLogs.collectAsStateWithLifecycle()
     val shoppingItems by viewModel.shoppingItems.collectAsStateWithLifecycle()
@@ -253,6 +254,9 @@ fun MainScreen(
             homeLat = homeLat,
             homeLng = homeLng,
             locationTrails = locationTrails,
+            snappedTripRoutes = snappedTripRoutes,
+            onRequestMemberTrailSnap = { viewModel.ensureMemberTrailSnapped(it) },
+            onRequestTripRouteSnap = { viewModel.ensureTripRouteSnapped(it) },
             onTriggerSOS = { viewModel.triggerSOS() },
             onTriggerCheckIn = { viewModel.triggerCheckIn() },
             onSendReaction = { memberId, reaction -> viewModel.sendEmojiReaction(memberId, reaction) },

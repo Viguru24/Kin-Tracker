@@ -111,6 +111,9 @@ fun RadarMap(
     homeLat: Double,
     homeLng: Double,
     locationTrails: Map<String, List<Pair<Double, Double>>> = emptyMap(),
+    snappedTripRoutes: Map<String, List<Pair<Double, Double>>> = emptyMap(),
+    onRequestMemberTrailSnap: (String) -> Unit = {},
+    onRequestTripRouteSnap: (com.example.data.CloudCompletedTrip) -> Unit = {},
     onTriggerSOS: () -> Unit = {},
     onTriggerCheckIn: () -> Unit = {},
     onSendReaction: (String, String) -> Unit = { _, _ -> },
@@ -217,9 +220,13 @@ fun RadarMap(
 
     // Life360 selected completed trip route playback
     val selectedTrip by com.example.data.TelemetryWebSocketManager.selectedTrip.collectAsState()
-    LaunchedEffect(selectedTrip) {
+    LaunchedEffect(selectedTrip, snappedTripRoutes) {
         selectedTrip?.let { trip ->
-            val points = if (trip.breadcrumbs.isNotEmpty()) {
+            onRequestTripRouteSnap(trip)
+            val snapped = snappedTripRoutes[trip.id]
+            val points = if (!snapped.isNullOrEmpty()) {
+                snapped.map { GeoPoint(it.first, it.second) }
+            } else if (trip.breadcrumbs.isNotEmpty()) {
                 trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
             } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
                 listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
@@ -539,32 +546,52 @@ fun RadarMap(
         }
     }
 
-    // Auto-fit route between Start/Home and Current Location when Route Trail is toggled ON!
-    LaunchedEffect(isRouteTrailEnabled, selectedMemberId) {
-        if (isRouteTrailEnabled) {
-            val targetMember = selectedMember ?: members.firstOrNull { it.id != "me" && (kotlin.math.hypot(it.y - homeLat, it.x - homeLng) * 111.0 > 0.06) }
-            if (targetMember != null) {
-                val recordedPoints = locationTrails[targetMember.id]
-                    ?: locationTrails.entries.firstOrNull { it.key.contains(targetMember.name.lowercase().take(4)) || targetMember.id.contains(it.key) }?.value
-                    ?: emptyList()
-                val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(targetMember.y - homeLat, targetMember.x - homeLng) * 111.0 > 0.06)
-                val points = if (recordedPoints.size >= 2) recordedPoints else if (isAway) listOf(Pair(homeLat, homeLng), Pair(targetMember.y, targetMember.x)) else emptyList()
-                if (points.size >= 2) {
-                    mapViewRef?.let { map ->
-                        val minLat = points.minOf { it.first }
-                        val maxLat = points.maxOf { it.first }
-                        val minLng = points.minOf { it.second }
-                        val maxLng = points.maxOf { it.second }
-                        val latMargin = maxOf((maxLat - minLat) * 0.35, 0.008)
-                        val lngMargin = maxOf((maxLng - minLng) * 0.35, 0.008)
-                        try {
-                            val box = BoundingBox(maxLat + latMargin, maxLng + lngMargin, minLat - latMargin, minLng - lngMargin)
-                            map.zoomToBoundingBox(box, true, 120)
-                        } catch (e: Exception) {
-                            val centerLat = (minLat + maxLat) / 2.0
-                            val centerLng = (minLng + maxLng) / 2.0
-                            map.controller.animateTo(GeoPoint(centerLat, centerLng))
-                        }
+    // Request road-snapped trails for away/selected members and fit camera once per toggle/selection
+    var lastAutoFittedTrailKey by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(isRouteTrailEnabled, selectedMemberId, members) {
+        if (!isRouteTrailEnabled) {
+            lastAutoFittedTrailKey = null
+            return@LaunchedEffect
+        }
+        if (selectedMember != null) {
+            onRequestMemberTrailSnap(selectedMember.id)
+        } else {
+            members.filter {
+                homeLat != 0.0 && homeLng != 0.0 &&
+                    com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, it.y, it.x) > 60.0
+            }.forEach { onRequestMemberTrailSnap(it.id) }
+        }
+    }
+    LaunchedEffect(isRouteTrailEnabled, selectedMemberId, locationTrails) {
+        if (!isRouteTrailEnabled) return@LaunchedEffect
+        val fitKey = "${isRouteTrailEnabled}_${selectedMemberId ?: "auto"}"
+        if (lastAutoFittedTrailKey == fitKey) return@LaunchedEffect
+        val targetMember = selectedMember ?: members.firstOrNull {
+            it.id != "me" && homeLat != 0.0 && homeLng != 0.0 &&
+                com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, it.y, it.x) > 60.0
+        } ?: members.firstOrNull {
+            homeLat != 0.0 && homeLng != 0.0 &&
+                com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, it.y, it.x) > 60.0
+        }
+        if (targetMember != null) {
+            val points = com.example.ui.map.TrailRouteEngine.findTrailForMember(locationTrails, targetMember)
+                ?: emptyList()
+            if (points.size >= 2) {
+                lastAutoFittedTrailKey = fitKey
+                mapViewRef?.let { map ->
+                    val minLat = points.minOf { it.first }
+                    val maxLat = points.maxOf { it.first }
+                    val minLng = points.minOf { it.second }
+                    val maxLng = points.maxOf { it.second }
+                    val latMargin = maxOf((maxLat - minLat) * 0.35, 0.008)
+                    val lngMargin = maxOf((maxLng - minLng) * 0.35, 0.008)
+                    try {
+                        val box = BoundingBox(maxLat + latMargin, maxLng + lngMargin, minLat - latMargin, minLng - lngMargin)
+                        map.zoomToBoundingBox(box, true, 120)
+                    } catch (e: Exception) {
+                        val centerLat = (minLat + maxLat) / 2.0
+                        val centerLng = (minLng + maxLng) / 2.0
+                        map.controller.animateTo(GeoPoint(centerLat, centerLng))
                     }
                 }
             }
@@ -874,15 +901,12 @@ fun RadarMap(
 
                     // Draw visual breadcrumb trails showing previous location history ONLY when enabled & member is selected or away!
                     if (isRouteTrailEnabled && (isSelected || (selectedMemberId == null && isAway))) {
-                        val recordedPoints = locationTrails[member.id]
-                            ?: locationTrails.entries.firstOrNull { it.key.contains(member.name.lowercase().take(4)) || member.id.contains(it.key) }?.value
+                        val recordedPoints = com.example.ui.map.TrailRouteEngine.findTrailForMember(locationTrails, member)
                             ?: emptyList()
                         val trailPoints = if (recordedPoints.size >= 2) {
                             recordedPoints
-                        } else if (isAway) {
-                            listOf(Pair(homeLat, homeLng), Pair(member.y, member.x))
                         } else {
-                            recordedPoints
+                            emptyList()
                         }
 
                         if (trailPoints.size >= 2) {
@@ -981,10 +1005,20 @@ fun RadarMap(
 
                 // 4. Draw Selected Trip Route History (Life360 Route Playback)
                 selectedTrip?.let { trip ->
-                    val tripPoints = if (trip.breadcrumbs.isNotEmpty()) {
+                    val snapped = snappedTripRoutes[trip.id]
+                    val rawPoints = if (trip.breadcrumbs.isNotEmpty()) {
                         trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
                     } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
                         listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
+                    } else {
+                        emptyList()
+                    }
+                    val tripPoints = if (!snapped.isNullOrEmpty() && snapped.size >= 2) {
+                        snapped.map { GeoPoint(it.first, it.second) }
+                    } else if (trip.transitMode.equals("TRAIN", ignoreCase = true)) {
+                        rawPoints
+                    } else if (rawPoints.size >= 3 && !com.example.ui.map.TrailRouteEngine.hasSparseGaps(rawPoints.map { Pair(it.latitude, it.longitude) })) {
+                        rawPoints
                     } else {
                         emptyList()
                     }

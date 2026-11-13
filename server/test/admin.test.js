@@ -1,14 +1,26 @@
 const http = require('http');
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 // Test runner for VPS Dashboard & Admin API
 async function runTests() {
     console.log('🧪 Starting Kin-Tracker VPS Dashboard & Admin API Tests...');
 
-    // Require index to boot Express server
+    // Isolate tests completely from local data/ and live production Ra sync
+    const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kintracker-admin-test-'));
+    const cleanup = () => {
+        try { fs.rmSync(tempDataDir, { recursive: true, force: true }); } catch (_) {}
+    };
+
     const TEST_PORT = process.env.TEST_PORT || 4677;
+    process.env.NODE_ENV = 'test';
+    process.env.KINTRACKER_DISABLE_LIVE_SYNC = '1';
+    process.env.DATA_DIR = tempDataDir;
     process.env.PORT = TEST_PORT;
     process.env.ADMIN_KEY = 'test_secret_4666';
+    const { syncLiveProductionFamily, pushLiveProductionFamily } = require('../src/syncBridge');
     const serverModule = require('../src/index');
 
     // Wait a brief moment for server to bind
@@ -161,17 +173,24 @@ async function runTests() {
         assert(eventRes.body.events.length > 0);
         console.log(`   ✅ ${eventRes.body.events.length} event(s) in VPS event buffer.`);
 
-        // 10. Backup Export check
-        console.log('🔟 Testing DB Backup Export...');
+        // 10. Backup Export & Live-Sync Test Isolation check
+        console.log('🔟 Testing DB Backup Export & Live-Sync Isolation...');
         const backupRes = await makeRequest('/api/admin/backup/export', { headers: authHeaders });
         assert.strictEqual(backupRes.statusCode, 200);
         assert(backupRes.body.circles);
-        console.log('   ✅ Database snapshot export generated.');
+        assert.strictEqual(await syncLiveProductionFamily(), false);
+        assert.strictEqual(await pushLiveProductionFamily(), false);
+        console.log('   ✅ Database snapshot export generated & live Ra sync verified disabled in tests.');
+
+        // Wait briefly for debounced temp DB flush before cleanup
+        await new Promise(r => setTimeout(r, 150));
+        cleanup();
 
         console.log('\n🎉 ALL VPS DASHBOARD & ADMIN API TESTS PASSED PERFECTLY!\n');
         process.exit(0);
 
     } catch (err) {
+        cleanup();
         console.error('❌ Test failed:', err);
         process.exit(1);
     }

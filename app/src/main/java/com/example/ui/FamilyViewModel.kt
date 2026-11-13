@@ -30,6 +30,8 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     val routeTimeFilter = MutableStateFlow("today") // "today", "7days", "30days"
     private val _locationTrails = MutableStateFlow<Map<String, List<Pair<Double, Double>>>>(emptyMap())
     val locationTrails: StateFlow<Map<String, List<Pair<Double, Double>>>> = _locationTrails
+    private val _snappedTripRoutes = MutableStateFlow<Map<String, List<Pair<Double, Double>>>>(emptyMap())
+    val snappedTripRoutes: StateFlow<Map<String, List<Pair<Double, Double>>>> = _snappedTripRoutes
 
     val isCloudSyncEnabled = MutableStateFlow(true)
     val isLocationPaused = MutableStateFlow(false)
@@ -217,6 +219,133 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private val roadRouteCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<Double, Double>>>()
+    private val snappingInFlight = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun ensureMemberTrailSnapped(memberId: String) {
+        val member = familyMembers.value.firstOrNull { it.id == memberId } ?: return
+        val existing = com.example.ui.map.TrailRouteEngine.findTrailForMember(_locationTrails.value, member)
+        val hasCoords = member.x != 0.0 && member.y != 0.0
+        val isAway = hasCoords && homeLat != 0.0 && homeLng != 0.0 &&
+            com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, member.y, member.x) > 60.0
+        val needsSnap = existing == null ||
+            (existing.size < 2 && isAway) ||
+            com.example.ui.map.TrailRouteEngine.hasSparseGaps(existing)
+        if (!needsSnap) return
+
+        val key = "member:$memberId"
+        if (!snappingInFlight.add(key)) return
+        viewModelScope.launch {
+            try {
+                val resolved = resolveTrailForMember(member, getCutoffTimestamp(routeTimeFilter.value))
+                if (resolved.size >= 2) {
+                    _locationTrails.value = _locationTrails.value + (member.id to resolved)
+                }
+            } finally {
+                snappingInFlight.remove(key)
+            }
+        }
+    }
+
+    fun ensureTripRouteSnapped(trip: com.example.data.CloudCompletedTrip) {
+        if (_snappedTripRoutes.value.containsKey(trip.id)) return
+        val key = "trip:${trip.id}"
+        if (!snappingInFlight.add(key)) return
+
+        viewModelScope.launch {
+            try {
+                val rawPoints = if (trip.breadcrumbs.isNotEmpty()) {
+                    trip.breadcrumbs.map { Pair(it.lat, it.lng) }
+                } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
+                    listOf(Pair(trip.startLat, trip.startLng), Pair(trip.endLat, trip.endLng))
+                } else {
+                    emptyList()
+                }
+                if (rawPoints.size < 2) return@launch
+
+                val profiles = com.example.ui.map.TrailRouteEngine.selectOsrmProfiles(
+                    trip.topSpeedMph,
+                    trip.transitMode,
+                    trip.memberId
+                )
+                val result = withContext(Dispatchers.IO) {
+                    com.example.ui.map.TrailRouteEngine.resolveRoadSnappedTrail(
+                        rawPoints = rawPoints,
+                        speedMph = trip.topSpeedMph,
+                        statusText = trip.transitMode,
+                        memberId = trip.memberId,
+                        routeCache = roadRouteCache
+                    )
+                }
+                val accept = result.points.size >= 2 && (
+                    result.allGapsSnapped ||
+                        result.usedRoadNetwork ||
+                        profiles.isEmpty() ||
+                        (rawPoints.size >= 3 && !com.example.ui.map.TrailRouteEngine.hasSparseGaps(result.points))
+                    )
+                if (accept) {
+                    _snappedTripRoutes.value = _snappedTripRoutes.value + (trip.id to result.points.takeLast(2000))
+                }
+            } finally {
+                snappingInFlight.remove(key)
+            }
+        }
+    }
+
+    private suspend fun resolveTrailForMember(
+        member: com.example.data.FamilyMember,
+        cutoff: Long
+    ): List<Pair<Double, Double>> {
+        val cleanName = member.name.lowercase(java.util.Locale.US)
+            .replace(Regex("""\s*\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\)""", RegexOption.IGNORE_CASE), "")
+            .trim()
+        val extraLegacyBreadcrumbs = if (cleanName.isNotBlank() && cleanName != member.id && !cleanName.contains("tab")) {
+            repository.getBreadcrumbsForMemberSinceOnce(cleanName, cutoff)
+        } else {
+            emptyList()
+        }
+        val dbBreadcrumbs = (repository.getBreadcrumbsForMemberSinceOnce(member.id, cutoff) + extraLegacyBreadcrumbs)
+            .distinctBy { "${it.latitude}_${it.longitude}" }
+            .sortedBy { it.timestamp }
+
+        val hasCurrent = member.x != 0.0 && member.y != 0.0
+        val currentPoint = Pair(member.y, member.x)
+        val rawPoints = dbBreadcrumbs.map { Pair(it.latitude, it.longitude) }.toMutableList()
+        if (hasCurrent) {
+            val last = rawPoints.lastOrNull()
+            if (last == null || com.example.data.GeoUtils.distanceMeters(last.first, last.second, currentPoint.first, currentPoint.second) >= 5.0) {
+                rawPoints.add(currentPoint)
+            }
+        }
+
+        val isAwayFromHome = hasCurrent && homeLat != 0.0 && homeLng != 0.0 &&
+            com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, member.y, member.x) > 60.0
+        val syntheticFromHome = rawPoints.size < 2 && isAwayFromHome && hasCurrent
+        val candidatePoints = if (syntheticFromHome) {
+            listOf(Pair(homeLat, homeLng), currentPoint)
+        } else {
+            rawPoints
+        }
+        if (candidatePoints.size < 2) return candidatePoints
+
+        val profiles = com.example.ui.map.TrailRouteEngine.selectOsrmProfiles(
+            member.speedMph,
+            member.statusText,
+            member.id
+        )
+        val resolved = withContext(Dispatchers.IO) {
+            com.example.ui.map.TrailRouteEngine.resolveRoadSnappedTrail(
+                rawPoints = candidatePoints,
+                speedMph = member.speedMph,
+                statusText = member.statusText,
+                memberId = member.id,
+                routeCache = roadRouteCache
+            )
+        }
+        if (profiles.isNotEmpty() && !resolved.usedRoadNetwork && com.example.ui.map.TrailRouteEngine.hasSparseGaps(candidatePoints)) {
+            return if (rawPoints.size <= 2) emptyList() else resolved.points.takeLast(2000)
+        }
+        return resolved.points.takeLast(2000)
+    }
 
     private suspend fun refreshLocationTrails() {
         val membersList = familyMembers.value
@@ -225,34 +354,9 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         val loadedTrails = mutableMapOf<String, List<Pair<Double, Double>>>()
 
         membersList.forEach { m ->
-            val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
-            val dbBreadcrumbs = (repository.getBreadcrumbsForMemberSinceOnce(m.id, cutoff) + repository.getBreadcrumbsForMemberSinceOnce(cleanKey, cutoff))
-                .distinctBy { "${it.latitude}_${it.longitude}" }
-                .sortedBy { it.timestamp }
-
-            val points = if (m.x != 0.0 && m.y != 0.0) {
-                val currentPoint = Pair(m.y, m.x)
-                val isAwayFromHome = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(m.y - homeLat, m.x - homeLng) * 111.0 > 0.06)
-
-                if (dbBreadcrumbs.size >= 3) {
-                    dbBreadcrumbs.map { Pair(it.latitude, it.longitude) } + currentPoint
-                } else if (isAwayFromHome) {
-                    val cacheKey = "${m.id}_${homeLat}_${homeLng}_${m.y}_${m.x}"
-                    roadRouteCache[cacheKey] ?: run {
-                        val route = fetchRoadRoute(Pair(homeLat, homeLng), currentPoint)
-                        roadRouteCache[cacheKey] = route
-                        route
-                    }
-                } else {
-                    listOf(currentPoint)
-                }
-            } else {
-                dbBreadcrumbs.map { Pair(it.latitude, it.longitude) }
-            }
-
+            val points = resolveTrailForMember(m, cutoff)
             if (points.isNotEmpty()) {
-                loadedTrails[m.id] = points.takeLast(400)
-                loadedTrails[cleanKey] = points.takeLast(400)
+                loadedTrails[m.id] = points
             }
         }
         _locationTrails.value = loadedTrails
@@ -266,11 +370,10 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
-            combine(familyMembers, routeTimeFilter) { membersList, filter ->
-                Pair(membersList, filter)
-            }.collect { (membersList, filter) ->
+            combine(familyMembers, routeTimeFilter) { membersList, _ ->
+                membersList
+            }.collect { membersList ->
                 if (membersList.isEmpty()) return@collect
-                val cutoff = getCutoffTimestamp(filter)
                 val activeTrails = _locationTrails.value.toMutableMap()
                 var hasUpdates = false
 
@@ -279,31 +382,59 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     // Persist throttled breadcrumb to DB
                     repository.recordBreadcrumbThrottled(m.id, m.y, m.x, m.speedMph)
                     com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(m.id, m.y, m.x, m.speedMph)
-                    
-                    val cleanKey = m.name.lowercase().replace(Regex("\\s*\\((You|Wife|Dad|Mama|Daughter|Older Daughter|Younger Daughter)\\)", RegexOption.IGNORE_CASE), "").trim()
+
                     val existingCoords = activeTrails[m.id] ?: emptyList()
                     val newPoint = Pair(m.y, m.x)
+                    val isAwayFromHome = homeLat != 0.0 && homeLng != 0.0 &&
+                        com.example.data.GeoUtils.distanceMeters(homeLat, homeLng, m.y, m.x) > 60.0
 
-                    if (existingCoords.isEmpty() || existingCoords.size < 2) {
-                        val isAwayFromHome = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(m.y - homeLat, m.x - homeLng) * 111.0 > 0.06)
-                        val trail = if (isAwayFromHome) {
-                            val cacheKey = "${m.id}_${homeLat}_${homeLng}_${m.y}_${m.x}"
-                            roadRouteCache[cacheKey] ?: run {
-                                val route = fetchRoadRoute(Pair(homeLat, homeLng), newPoint)
-                                roadRouteCache[cacheKey] = route
-                                route
-                            }
-                        } else {
-                            listOf(newPoint)
+                    if (existingCoords.size < 2) {
+                        if (isAwayFromHome) {
+                            ensureMemberTrailSnapped(m.id)
+                        } else if (existingCoords.isEmpty()) {
+                            activeTrails[m.id] = listOf(newPoint)
+                            hasUpdates = true
                         }
-                        activeTrails[m.id] = trail.takeLast(400)
-                        activeTrails[cleanKey] = trail.takeLast(400)
-                        hasUpdates = true
-                    } else if (existingCoords.last() != newPoint) {
-                        val updated = (existingCoords + newPoint).takeLast(400)
-                        activeTrails[m.id] = updated
-                        activeTrails[cleanKey] = updated
-                        hasUpdates = true
+                    } else {
+                        val lastPoint = existingCoords.last()
+                        val stepMeters = com.example.data.GeoUtils.distanceMeters(
+                            lastPoint.first,
+                            lastPoint.second,
+                            newPoint.first,
+                            newPoint.second
+                        )
+                        if (stepMeters >= 3.0) {
+                            if (stepMeters <= com.example.ui.map.TrailRouteEngine.MAX_DIRECT_SEGMENT_METERS) {
+                                activeTrails[m.id] = (existingCoords + newPoint).takeLast(2000)
+                                hasUpdates = true
+                            } else {
+                                val profiles = com.example.ui.map.TrailRouteEngine.selectOsrmProfiles(
+                                    m.speedMph,
+                                    m.statusText,
+                                    m.id
+                                )
+                                if (profiles.isEmpty()) {
+                                    activeTrails[m.id] = (existingCoords + newPoint).takeLast(2000)
+                                    hasUpdates = true
+                                } else {
+                                    val segment = withContext(Dispatchers.IO) {
+                                        com.example.ui.map.TrailRouteEngine.fetchOsrmSegmentRoute(
+                                            lastPoint,
+                                            newPoint,
+                                            profiles,
+                                            roadRouteCache
+                                        )
+                                    }
+                                    if (segment != null && segment.size >= 2) {
+                                        val stitched = (existingCoords + segment.drop(1) + if (segment.last() != newPoint) listOf(newPoint) else emptyList()).takeLast(2000)
+                                        activeTrails[m.id] = stitched
+                                        hasUpdates = true
+                                    } else {
+                                        ensureMemberTrailSnapped(m.id)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if (hasUpdates) {
@@ -324,49 +455,6 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     myDeviceUUID = myDeviceUUID.value,
                     myDeviceName = myDeviceName.value
                 )
-            }
-        }
-    }
-
-    private suspend fun fetchRoadRoute(from: Pair<Double, Double>, to: Pair<Double, Double>): List<Pair<Double, Double>> {
-        return withContext(Dispatchers.IO) {
-            try {
-                // If they are extremely close (less than 15 meters), return raw straight line
-                val dist = hypot(from.second - to.second, from.first - to.first) * 111000.0
-                if (dist < 15.0) return@withContext listOf(from, to)
-
-                // Try walking route first, fallback to driving route
-                val urls = listOf(
-                    "https://router.project-osrm.org/route/v1/walking/${from.second},${from.first};${to.second},${to.first}?overview=full&geometries=geojson",
-                    "https://router.project-osrm.org/route/v1/driving/${from.second},${from.first};${to.second},${to.first}?overview=full&geometries=geojson"
-                )
-
-                for (urlStr in urls) {
-                    try {
-                        val url = java.net.URL(urlStr)
-                        val conn = url.openConnection() as java.net.HttpURLConnection
-                        conn.connectTimeout = 4000
-                        conn.readTimeout = 4000
-                        conn.requestMethod = "GET"
-                        
-                        if (conn.responseCode == 200) {
-                            val text = conn.inputStream.bufferedReader().use { it.readText() }
-                            val coordinatesList = mutableListOf<Pair<Double, Double>>()
-                            val matcher = java.util.regex.Pattern.compile("\\[\\s*(-?\\d+\\.\\d+)\\s*,\\s*(-?\\d+\\.\\d+)\\s*\\]").matcher(text)
-                            while (matcher.find()) {
-                                val lng = matcher.group(1)?.toDouble() ?: 0.0
-                                val lat = matcher.group(2)?.toDouble() ?: 0.0
-                                coordinatesList.add(Pair(lat, lng))
-                            }
-                            if (coordinatesList.size >= 2) {
-                                return@withContext coordinatesList
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-                listOf(from, to)
-            } catch (e: Exception) {
-                listOf(from, to)
             }
         }
     }
