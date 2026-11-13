@@ -794,23 +794,23 @@ fun RadarMap(
                             if (anchor != null && target != null && member != null) {
                                 val vibrantColor = getVibrantSpokeColor(member.avatarColorHex)
 
-                                // 1. Thick solid white halo for bold contrast against dark/light tiles
+                                // 1. Subtle neutral halo for crisp separation without heavy visual bulk
                                 val haloLine = Polyline(mapView).apply {
                                     setPoints(listOf(anchor, target))
                                     outlinePaint.color = android.graphics.Color.WHITE
-                                    outlinePaint.strokeWidth = 5.2f * density
+                                    outlinePaint.strokeWidth = 3.2f * density
                                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                    outlinePaint.alpha = 245
+                                    outlinePaint.alpha = 200
                                 }
                                 mapView.overlays.add(haloLine)
 
-                                // 2. Crisp, solid vibrant spoke in member's signature color
+                                // 2. Sleek vibrant spoke in member's signature color
                                 val coreLine = Polyline(mapView).apply {
                                     setPoints(listOf(anchor, target))
                                     outlinePaint.color = vibrantColor
-                                    outlinePaint.strokeWidth = 3.2f * density
+                                    outlinePaint.strokeWidth = 1.8f * density
                                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                    outlinePaint.alpha = 255
+                                    outlinePaint.alpha = 230
                                 }
                                 mapView.overlays.add(coreLine)
                             }
@@ -860,14 +860,14 @@ fun RadarMap(
                         android.graphics.Color.parseColor(member.avatarColorHex)
                     } catch (e: Exception) { android.graphics.Color.BLUE }
 
-                    // Draw a transparent circle ring around the true location (Only for 'me' to avoid map clutter)
+                    // Draw a subtle ring around the true location (Only for 'me' to avoid map clutter)
                     if (member.id == "me") {
                         val ring = Polygon(mapView).apply {
                             points = Polygon.pointsAsCircle(trueGeo, 60.0) // 60 meters radius
                             fillPaint.color = android.graphics.Color.TRANSPARENT
                             outlinePaint.color = memberColor
-                            outlinePaint.strokeWidth = 2.0f * density
-                            outlinePaint.alpha = 80 // Semi-transparent outline ring
+                            outlinePaint.strokeWidth = 1.4f * density
+                            outlinePaint.alpha = 55 // Light translucent outline ring
                         }
                         mapView.overlays.add(ring)
                     }
@@ -915,12 +915,20 @@ fun RadarMap(
                     val isOffline = member.batteryPercentage <= 5
 
                     // Live relative time badge from the stored lastActive timestamp
-                    val timeLabel = if (member.id == "me") "now"
-                                    else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
-                                    else "now"
+                    val rawTimeLabel = if (member.id == "me") "now"
+                                       else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
+                                       else "now"
 
-                    // Location duration badge or live movement activity badge (walking feet 👣, driving 🚗, bicycle 🚲, train 🚆)
-                    val locationDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince, member.id)
+                    // Location duration / transit pill; hide stationary clutter unless selected/SOS
+                    val rawDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince, member.id)
+                    val isMovingTransit = rawDurationLabel.startsWith("👣") ||
+                        rawDurationLabel.startsWith("🚗") ||
+                        rawDurationLabel.startsWith("🚲") ||
+                        rawDurationLabel.startsWith("🚆")
+
+                    val timeLabel = if (isSelected || isSos || isOffline || rawTimeLabel != "now") rawTimeLabel else ""
+                    val locationDurationLabel = if (isSelected || isSos || isMovingTransit) rawDurationLabel else ""
+                    val showBatteryBadge = member.id != "me" && (isSelected || isSos || member.batteryPercentage <= 25 || member.isCharging)
 
                     val memberMarker = object : Marker(mapView) {
                         override fun showInfoWindow() {
@@ -938,7 +946,7 @@ fun RadarMap(
                             isOffline = isOffline,
                             relativeTime = timeLabel,
                             locationDuration = locationDurationLabel,
-                            batteryPercentage = if (member.id != "me") member.batteryPercentage else -1,
+                            batteryPercentage = if (showBatteryBadge) member.batteryPercentage else -1,
                             isCharging = member.isCharging,
                             animFrame = animTick
                         )

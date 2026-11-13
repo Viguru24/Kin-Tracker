@@ -3,13 +3,18 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { isValidAdminKey } = require('../config');
+const { archiveCurrentBuild, listBackups, restoreBackup } = require('../utils/otaBackups');
 
 const router = express.Router();
 const UPDATE_DIR = path.join(__dirname, '../../updates');
+const STAGING_DIR = path.join(UPDATE_DIR, '.staging');
 
-// Ensure base update directory exists
+// Ensure base update and staging directories exist
 if (!fs.existsSync(UPDATE_DIR)) {
     fs.mkdirSync(UPDATE_DIR, { recursive: true });
+}
+if (!fs.existsSync(STAGING_DIR)) {
+    fs.mkdirSync(STAGING_DIR, { recursive: true });
 }
 
 // Canonical App Slugs and Aliases
@@ -73,14 +78,13 @@ function getAppUpdateDir(appId) {
     return { resolved, dir };
 }
 
-// Multer storage
+// Stage incoming APKs in .staging/ so active app-latest.apk stays intact until archived
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const appId = req.params.appId || req.query.app || req.body.appId || 'kin-tracker';
-        const { dir } = getAppUpdateDir(appId);
-        cb(null, dir);
+        if (!fs.existsSync(STAGING_DIR)) fs.mkdirSync(STAGING_DIR, { recursive: true });
+        cb(null, STAGING_DIR);
     },
-    filename: (req, file, cb) => cb(null, 'app-latest.apk')
+    filename: (req, file, cb) => cb(null, `app-upload-${Date.now()}-${Math.round(Math.random() * 1e6)}.tmp`)
 });
 const upload = multer({ 
     storage: storage,
@@ -205,26 +209,51 @@ function handleApkDownload(req, res) {
 router.get('/app-latest.apk', validateGroupOrAdminToken, handleApkDownload);
 router.get('/:appId/app-latest.apk', validateGroupOrAdminToken, handleApkDownload);
 
-// 3. Upload a new build
+function cleanupStagedFile(filePath) {
+    if (filePath && fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch (_) {}
+    }
+}
+
+function moveStagedApk(stagedPath, targetPath) {
+    try {
+        fs.renameSync(stagedPath, targetPath);
+    } catch (_) {
+        fs.copyFileSync(stagedPath, targetPath);
+        cleanupStagedFile(stagedPath);
+    }
+}
+
+// 3. Upload a new build (archives prior working APK + metadata first)
 function handleUpload(req, res) {
     const adminKey = req.headers['x-admin-key'];
     if (!isValidAdminKey(adminKey)) {
+        cleanupStagedFile(req.file && req.file.path);
         return res.status(403).json({ error: 'Forbidden: Invalid Admin Key' });
     }
 
     const { versionCode, versionName, releaseNotes } = req.body;
     if (!versionCode || !versionName) {
+        cleanupStagedFile(req.file && req.file.path);
         return res.status(400).json({ error: 'Missing version metadata' });
     }
 
     const targetApp = req.params.appId || req.body.appId || req.query.app || 'kin-tracker';
     const { resolved: appId, dir: appDir } = getAppUpdateDir(targetApp);
 
+    // Preserve previous working build before overwriting app-latest.apk
+    const archivedBackup = archiveCurrentBuild(appDir, UPDATE_DIR, appId);
+
+    const currentApkPath = path.join(appDir, 'app-latest.apk');
+    if (req.file && req.file.path) {
+        moveStagedApk(req.file.path, currentApkPath);
+    }
+
     const host = req.get('host') || 'api.cosmowhisper.com';
     const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
     const baseUrl = `${protocol}://${host}`;
 
-    const apkUrl = (appId === 'kin-tracker') 
+    const apkUrl = (appId === 'kin-tracker')
         ? `${baseUrl}/updates/app-latest.apk`
         : `${baseUrl}/updates/${appId}/app-latest.apk`;
 
@@ -244,20 +273,67 @@ function handleUpload(req, res) {
     if (appId === 'kin-tracker') {
         fs.writeFileSync(path.join(UPDATE_DIR, 'version.json'), metaJson);
         const rootApkPath = path.join(UPDATE_DIR, 'app-latest.apk');
-        const currentApkPath = path.join(appDir, 'app-latest.apk');
         if (rootApkPath !== currentApkPath && fs.existsSync(currentApkPath)) {
             try { fs.copyFileSync(currentApkPath, rootApkPath); } catch (_) {}
         }
     }
 
-    res.json({ 
-        success: true, 
+    res.json({
+        success: true,
         message: `Successfully deployed [${appId}] version ${versionName} (${versionCode})`,
-        metadata 
+        metadata,
+        archivedBackup
     });
 }
 
 router.post('/upload', upload.single('apk'), handleUpload);
 router.post('/:appId/upload', upload.single('apk'), handleUpload);
+
+// 4. List available rollback backups for an app
+function handleListBackups(req, res) {
+    const targetApp = req.params.appId || req.query.app || 'kin-tracker';
+    const { resolved: appId, dir: appDir } = getAppUpdateDir(targetApp);
+    const currentPath = path.join(appDir, 'version.json');
+    let current = null;
+    if (fs.existsSync(currentPath)) {
+        try { current = JSON.parse(fs.readFileSync(currentPath, 'utf8')); } catch (_) {}
+    }
+    const backups = listBackups(appDir);
+    res.json({
+        appId,
+        current,
+        totalBackups: backups.length,
+        backups
+    });
+}
+
+router.get('/backups', validateGroupOrAdminToken, handleListBackups);
+router.get('/:appId/backups', validateGroupOrAdminToken, handleListBackups);
+
+// 5. Instant OTA rollback to a previous archived build
+function handleRollback(req, res) {
+    const adminKey = req.headers['x-admin-key'];
+    if (!isValidAdminKey(adminKey)) {
+        return res.status(403).json({ error: 'Forbidden: Invalid Admin Key' });
+    }
+
+    const targetApp = req.params.appId || (req.body && req.body.appId) || req.query.app || 'kin-tracker';
+    const { resolved: appId, dir: appDir } = getAppUpdateDir(targetApp);
+    const result = restoreBackup(appDir, UPDATE_DIR, appId, req.body || {});
+
+    if (result.error) {
+        return res.status(result.statusCode || 404).json({ error: result.error });
+    }
+
+    res.json({
+        success: true,
+        message: `Rolled back [${appId}] to version ${result.metadata.versionName} (${result.metadata.versionCode})`,
+        restoredFrom: result.restoredFrom,
+        metadata: result.metadata
+    });
+}
+
+router.post('/rollback', handleRollback);
+router.post('/:appId/rollback', handleRollback);
 
 module.exports = router;

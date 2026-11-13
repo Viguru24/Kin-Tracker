@@ -70,32 +70,33 @@ object MapMarkerRenderer {
 
     private fun createHomeMarkerDrawable(context: Context): Drawable {
         val density = context.resources.displayMetrics.density
-        val bubblePx = (52 * density).toInt()
-        val stemW = (10 * density).toInt()
-        val stemH = (13 * density).toInt()
-        val shadowRadius = (4 * density)
-        val shadowDy = (2 * density)
+        val bubblePx = (34 * density).toInt()
+        val stemW = (7 * density).toInt()
+        val stemH = (8 * density).toInt()
+        val shadowRadius = (3f * density)
+        val shadowDy = (1.5f * density)
         val shadowPad = (shadowRadius + shadowDy).toInt() + 2
 
         val bmpW = bubblePx + shadowPad * 2
-        val bmpH = bubblePx + stemH + shadowPad * 2
+        val bottomPad = (2 * density).toInt()
+        val bmpH = shadowPad + bubblePx + stemH + bottomPad
         val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val homeColor = Color.parseColor("#2E7D32")
+        val homeColor = Color.parseColor("#10B981")
         val cx = bmpW / 2f
         val bubbleTop = shadowPad.toFloat()
         val bubbleBottom = bubbleTop + bubblePx
         val bubbleCy = bubbleTop + bubblePx / 2f
         val bubbleR = bubblePx / 2f
-        val stemTipY = bubbleBottom + stemH - shadowPad
+        val stemTipY = bubbleBottom + stemH
 
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
-            alpha = 50
+            alpha = 40
             maskFilter = BlurMaskFilter(shadowRadius, BlurMaskFilter.Blur.NORMAL)
         }
-        canvas.drawCircle(cx + 1.5f, bubbleCy + shadowDy + 1.5f, bubbleR - density, shadowPaint)
+        canvas.drawCircle(cx + 1f, bubbleCy + shadowDy + 1f, bubbleR - density, shadowPaint)
 
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -103,7 +104,7 @@ object MapMarkerRenderer {
         }
         canvas.drawCircle(cx, bubbleCy, bubbleR - density, fillPaint)
 
-        val ringWidth = 3f * density
+        val ringWidth = 2.2f * density
         val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = homeColor
             style = Paint.Style.STROKE
@@ -112,8 +113,8 @@ object MapMarkerRenderer {
         canvas.drawCircle(cx, bubbleCy, bubbleR - ringWidth / 2f - density * 0.5f, ringPaint)
 
         val stemPath = Path().apply {
-            moveTo(cx - stemW / 2f, bubbleBottom - density * 2f)
-            lineTo(cx + stemW / 2f, bubbleBottom - density * 2f)
+            moveTo(cx - stemW / 2f, bubbleBottom - density * 1.5f)
+            lineTo(cx + stemW / 2f, bubbleBottom - density * 1.5f)
             lineTo(cx, stemTipY)
             close()
         }
@@ -128,7 +129,7 @@ object MapMarkerRenderer {
 
         val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textAlign = Paint.Align.CENTER
-            textSize = 24f * density
+            textSize = 15f * density
         }
         val fm = emojiPaint.fontMetrics
         val textY = bubbleCy - (fm.ascent + fm.descent) / 2f
@@ -139,17 +140,17 @@ object MapMarkerRenderer {
 
     private fun createZoneIcon(context: Context, name: String, iconName: String): Drawable {
         val density = context.resources.displayMetrics.density
-        val sizePx = (36 * density).toInt()
+        val sizePx = (28 * density).toInt()
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        paint.color = Color.parseColor("#00C853")
+        paint.color = Color.parseColor("#10B981")
         paint.style = Paint.Style.FILL
         canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
 
         paint.color = Color.WHITE
-        canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 2f * density, paint)
+        canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 1.8f * density, paint)
 
         val emoji = when (iconName.lowercase()) {
             "home" -> "🏠"
@@ -161,12 +162,21 @@ object MapMarkerRenderer {
         }
 
         paint.textAlign = Paint.Align.CENTER
-        paint.textSize = 18f * density
+        paint.textSize = 13f * density
         val fm = paint.fontMetrics
         val textY = (sizePx / 2f) - (fm.ascent + fm.descent) / 2f
         canvas.drawText(emoji, sizePx / 2f, textY, paint)
 
         return BitmapDrawable(context.resources, bitmap)
+    }
+
+    private fun measurePillWidthPx(text: String, density: Float): Int {
+        if (text.isEmpty()) return 0
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 6.8f * density
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        return kotlin.math.ceil((paint.measureText(text) + 10f * density).toDouble()).toInt()
     }
 
     private fun createColoredMarkerDrawable(
@@ -185,41 +195,71 @@ object MapMarkerRenderer {
     ): Drawable {
         val density = context.resources.displayMetrics.density
 
-        val bubbleDp = if (isSelected) 66 else 54
+        // Sleek proportional circular marker sizing (36dp default, 46dp when selected)
+        val bubbleDp = if (isSelected) 46 else 36
         val bubblePx = (bubbleDp * density).toInt()
-        val stemW = (10 * density).toInt()
-        val stemH = (14 * density).toInt()
-        val shadowRadius = (4 * density)
-        val shadowDy = (2 * density)
+        val bubbleR = bubblePx / 2f
+        val stemW = (7 * density).toInt()
+        val stemH = (9 * density).toInt()
+        val shadowRadius = (3f * density)
+        val shadowDy = (1.5f * density)
         val shadowPad = (shadowRadius + shadowDy).toInt() + 2
 
-        val timePillHeight = if (relativeTime.isNotEmpty()) (16 * density).toInt() else 0
-        val timePillMargin = if (relativeTime.isNotEmpty()) (4 * density).toInt() else 0
-        val locPillHeight = if (locationDuration.isNotEmpty()) (15 * density).toInt() else 0
-        val locPillMargin = if (locationDuration.isNotEmpty()) (3 * density).toInt() else 0
+        val hasBatteryBadge = batteryPercentage in 0..100
+        val isWalking = locationDuration.startsWith("👣") || weatherEmoji == "👣"
+        val isDriving = locationDuration.startsWith("🚗") || weatherEmoji == "🚗"
+        val isCycling = locationDuration.startsWith("🚲") || weatherEmoji == "🚲"
+        val isTrain = locationDuration.startsWith("🚆") || weatherEmoji == "🚆"
+        val activityEmojiToDraw = when {
+            isWalking -> "👣"
+            isDriving -> "🚗"
+            isCycling -> "🚲"
+            isTrain -> "🚆"
+            else -> ""
+        }
 
-        val bmpW = bubblePx + shadowPad * 2
-        val bmpH = bubblePx + stemH + shadowPad * 2 + timePillHeight + timePillMargin + locPillHeight + locPillMargin
+        // Compute horizontal & top badge overhang so compact bubbles never clip corner badges or wide pills
+        val battOverhang = if (hasBatteryBadge) {
+            kotlin.math.ceil(maxOf(0f, 6.8f * density + 1.2f * density - bubbleR * 0.34f).toDouble()).toInt()
+        } else 0
+        val actOverhang = if (activityEmojiToDraw.isNotEmpty()) {
+            kotlin.math.ceil(maxOf(0f, 7.5f * density + 1.5f * density - bubbleR * 0.30f).toDouble()).toInt()
+        } else 0
+
+        val sidePad = maxOf(shadowPad, battOverhang, actOverhang)
+        val topBadgePad = maxOf(shadowPad, actOverhang)
+
+        val timePillHeight = if (relativeTime.isNotEmpty()) kotlin.math.ceil(13f * density).toInt() else 0
+        val timePillMargin = if (relativeTime.isNotEmpty()) kotlin.math.ceil(2.5f * density).toInt() else 0
+        val locPillHeight = if (locationDuration.isNotEmpty()) kotlin.math.ceil(13f * density).toInt() else 0
+        val locPillMargin = if (locationDuration.isNotEmpty()) kotlin.math.ceil(2f * density).toInt() else 0
+        val bottomPad = (2 * density).toInt()
+
+        val maxPillWidth = maxOf(
+            measurePillWidthPx(relativeTime, density),
+            measurePillWidthPx(locationDuration, density)
+        )
+        val bmpW = maxOf(bubblePx + sidePad * 2, maxPillWidth + (4 * density).toInt())
+        val bmpH = topBadgePad + timePillHeight + timePillMargin + bubblePx + stemH + locPillHeight + locPillMargin + bottomPad
         val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         val parsedColor = try {
             Color.parseColor(colorHex)
         } catch (_: Exception) {
-            Color.parseColor("#42A5F5")
+            Color.parseColor("#38BDF8")
         }
 
         val cx = bmpW / 2f
-        val bubbleTop = shadowPad.toFloat() + timePillHeight + timePillMargin
+        val bubbleTop = topBadgePad.toFloat() + timePillHeight + timePillMargin
         val bubbleBottom = bubbleTop + bubblePx
         val bubbleCy = bubbleTop + bubblePx / 2f
-        val bubbleR = bubblePx / 2f
         val stemTipX = cx
-        val stemTipY = bubbleBottom + stemH - shadowPad
+        val stemTipY = bubbleBottom + stemH
 
         // ── 1. Relative Time Pill (Top) ──
         if (relativeTime.isNotEmpty()) {
-            drawTimePill(canvas, cx, density, relativeTime, isOffline)
+            drawTimePill(canvas, cx, bubbleTop, density, relativeTime, isOffline)
         }
 
         // ── 2. Location Duration Pill (Bottom) ──
@@ -230,16 +270,16 @@ object MapMarkerRenderer {
         // ── 3. Shadow Circle ──
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
-            alpha = if (isOffline) 20 else 55
+            alpha = if (isOffline) 16 else 42
             maskFilter = BlurMaskFilter(shadowRadius, BlurMaskFilter.Blur.NORMAL)
         }
-        canvas.drawCircle(cx + 1.5f, bubbleCy + shadowDy + 1.5f, bubbleR - density, shadowPaint)
+        canvas.drawCircle(cx + 1f, bubbleCy + shadowDy + 1f, bubbleR - density, shadowPaint)
 
         // ── 4. White Fill Circle ──
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.FILL
-            alpha = if (isOffline) 100 else 255
+            alpha = if (isOffline) 105 else 255
         }
         canvas.drawCircle(cx, bubbleCy, bubbleR - density, fillPaint)
 
@@ -247,20 +287,20 @@ object MapMarkerRenderer {
         if (isSelected) {
             val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = parsedColor
-                alpha = if (isOffline) 30 else 60
+                alpha = if (isOffline) 28 else 55
                 style = Paint.Style.STROKE
-                strokeWidth = 5f * density
+                strokeWidth = 3.5f * density
             }
             canvas.drawCircle(cx, bubbleCy, bubbleR - 0.5f * density, glowPaint)
         }
 
         // ── 6. Colored Border Ring ──
-        val ringWidth = if (isSelected) 3.5f * density else 2.8f * density
+        val ringWidth = if (isSelected) 2.8f * density else 2.0f * density
         val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = parsedColor
             style = Paint.Style.STROKE
             strokeWidth = ringWidth
-            alpha = if (isOffline) 100 else 255
+            alpha = if (isOffline) 105 else 255
         }
         canvas.drawCircle(cx, bubbleCy, bubbleR - ringWidth / 2f - density * 0.5f, ringPaint)
 
@@ -276,9 +316,9 @@ object MapMarkerRenderer {
         if (!drawnPhoto) {
             val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 textAlign = Paint.Align.CENTER
-                textSize = (if (isSelected) 28f else 22f) * density
+                textSize = (if (isSelected) 20f else 15f) * density
                 typeface = Typeface.DEFAULT
-                alpha = if (isOffline) 100 else 255
+                alpha = if (isOffline) 105 else 255
             }
             val fm = emojiPaint.fontMetrics
             val textY = bubbleCy - (fm.ascent + fm.descent) / 2f
@@ -286,22 +326,11 @@ object MapMarkerRenderer {
         }
 
         // ── 9. Battery % Badge (Bottom-Left) ──
-        if (batteryPercentage in 0..100) {
+        if (hasBatteryBadge) {
             drawBatteryBadge(canvas, cx, bubbleCy, bubbleR, batteryPercentage, isCharging, density)
         }
 
         // ── 10. Transit Mode Activity Badge (Top-Right of avatar) ──
-        val isWalking = locationDuration.startsWith("👣") || weatherEmoji == "👣"
-        val isDriving = locationDuration.startsWith("🚗") || weatherEmoji == "🚗"
-        val isCycling = locationDuration.startsWith("🚲") || weatherEmoji == "🚲"
-        val isTrain = locationDuration.startsWith("🚆") || weatherEmoji == "🚆"
-        val activityEmojiToDraw = when {
-            isWalking -> "👣"
-            isDriving -> "🚗"
-            isCycling -> "🚲"
-            isTrain -> "🚆"
-            else -> ""
-        }
         if (activityEmojiToDraw.isNotEmpty()) {
             drawActivityBadge(canvas, cx, bubbleCy, bubbleR, activityEmojiToDraw, density, animFrame)
         }
@@ -309,23 +338,23 @@ object MapMarkerRenderer {
         return BitmapDrawable(context.resources, bitmap)
     }
 
-    private fun drawTimePill(canvas: Canvas, cx: Float, density: Float, text: String, isOffline: Boolean) {
+    private fun drawTimePill(canvas: Canvas, cx: Float, bubbleTop: Float, density: Float, text: String, isOffline: Boolean) {
         val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isOffline) Color.parseColor("#B71C1C") else Color.parseColor("#0F172A")
+            color = if (isOffline) Color.parseColor("#991B1B") else Color.parseColor("#121215")
             style = Paint.Style.FILL
-            alpha = 230
+            alpha = 235
         }
         val pillTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (isOffline) Color.parseColor("#FFCDD2") else Color.parseColor("#38BDF8")
-            textSize = 7.5f * density
+            color = if (isOffline) Color.parseColor("#FECACA") else Color.parseColor("#38BDF8")
+            textSize = 6.8f * density
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         val textWidth = pillTextPaint.measureText(text)
-        val pillW = textWidth + 12f * density
-        val pillH = 14f * density
+        val pillW = textWidth + 10f * density
+        val pillH = 12.5f * density
         val pillLeft = cx - pillW / 2f
-        val pillTop = 2f * density
+        val pillTop = maxOf(1f * density, bubbleTop - pillH - 2.5f * density)
         val pillRect = RectF(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH)
         canvas.drawRoundRect(pillRect, pillH / 2f, pillH / 2f, pillPaint)
         val pfm = pillTextPaint.fontMetrics
@@ -344,12 +373,12 @@ object MapMarkerRenderer {
             } else if (text.startsWith("🚲")) {
                 Color.parseColor("#0C4A6E") // Cyan dark
             } else if (text.startsWith("🚆")) {
-                Color.parseColor("#0F766E") // Teal dark
+                Color.parseColor("#134E4A") // Teal dark
             } else {
-                Color.parseColor("#0F172A")
+                Color.parseColor("#121215") // Obsidian zinc
             }
             style = Paint.Style.FILL
-            alpha = 230
+            alpha = 235
         }
         val locTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = if (isOffline) {
@@ -361,19 +390,19 @@ object MapMarkerRenderer {
             } else if (text.startsWith("🚲")) {
                 Color.parseColor("#7DD3FC")
             } else if (text.startsWith("🚆")) {
-                Color.parseColor("#F0ABFC")
+                Color.parseColor("#5EEAD4") // Teal accent
             } else {
-                Color.parseColor("#E2E8F0")
+                Color.parseColor("#E4E4E7") // Zinc-200
             }
-            textSize = 7.5f * density
+            textSize = 6.8f * density
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
         val textWidth = locTextPaint.measureText(text)
-        val pillW = textWidth + 12f * density
-        val pillH = 14f * density
+        val pillW = textWidth + 10f * density
+        val pillH = 12.5f * density
         val pillLeft = cx - pillW / 2f
-        val pillTop = stemTipY + 2f * density
+        val pillTop = stemTipY + 1.5f * density
         val pillRect = RectF(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH)
         canvas.drawRoundRect(pillRect, pillH / 2f, pillH / 2f, locPillPaint)
         val pfm = locTextPaint.fontMetrics
@@ -387,15 +416,15 @@ object MapMarkerRenderer {
     ) {
         val stemPath = Path().apply {
             val stemBaseHalf = stemW / 2f
-            moveTo(cx - stemBaseHalf, bubbleBottom - density * 2f)
-            lineTo(cx + stemBaseHalf, bubbleBottom - density * 2f)
+            moveTo(cx - stemBaseHalf, bubbleBottom - density * 1.5f)
+            lineTo(cx + stemBaseHalf, bubbleBottom - density * 1.5f)
             lineTo(stemTipX, stemTipY)
             close()
         }
         val stemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.FILL
-            alpha = if (isOffline) 100 else 255
+            alpha = if (isOffline) 105 else 255
         }
         canvas.drawPath(stemPath, stemPaint)
         val stemBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -403,7 +432,7 @@ object MapMarkerRenderer {
             style = Paint.Style.STROKE
             strokeWidth = ringWidth * 0.85f
             strokeJoin = Paint.Join.ROUND
-            alpha = if (isOffline) 100 else 255
+            alpha = if (isOffline) 105 else 255
         }
         canvas.drawPath(stemPath, stemBorderPaint)
     }
@@ -416,14 +445,14 @@ object MapMarkerRenderer {
             val file = File(photoPath)
             if (file.exists()) {
                 val clipR = bubbleR - ringWidth - density * 0.5f
-                val clipSize = (clipR * 2).toInt()
+                val clipSize = (clipR * 2).toInt().coerceAtLeast(1)
                 val photoBmp = loadUprightMarkerBitmap(photoPath, clipSize)
                 if (photoBmp != null) {
                     val scaledBmp = Bitmap.createScaledBitmap(photoBmp, clipSize, clipSize, true)
                     val shader = BitmapShader(scaledBmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
                     val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         this.shader = shader
-                        alpha = if (isOffline) 100 else 255
+                        alpha = if (isOffline) 105 else 255
                     }
                     canvas.save()
                     canvas.translate(cx - clipR, bubbleCy - clipR)
@@ -442,30 +471,30 @@ object MapMarkerRenderer {
         canvas: Canvas, cx: Float, bubbleCy: Float, bubbleR: Float,
         batteryPercentage: Int, isCharging: Boolean, density: Float
     ) {
-        val badgeRadius = 9f * density
-        val bx = cx - bubbleR * 0.68f
-        val by = bubbleCy + bubbleR * 0.68f
+        val badgeRadius = 6.8f * density
+        val bx = cx - bubbleR * 0.66f
+        val by = bubbleCy + bubbleR * 0.66f
         val battColor = when {
-            isCharging -> Color.parseColor("#00E676")
-            batteryPercentage <= 20 -> Color.parseColor("#FF1744")
-            batteryPercentage <= 50 -> Color.parseColor("#FFB300")
-            else -> Color.parseColor("#00E676")
+            isCharging -> Color.parseColor("#10B981")
+            batteryPercentage <= 20 -> Color.parseColor("#EF4444")
+            batteryPercentage <= 50 -> Color.parseColor("#F59E0B")
+            else -> Color.parseColor("#10B981")
         }
         val battBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1A1A2E")
+            color = Color.parseColor("#121215")
             style = Paint.Style.FILL
-            alpha = 230
+            alpha = 235
         }
         canvas.drawCircle(bx, by, badgeRadius, battBg)
         val battBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = battColor
             style = Paint.Style.STROKE
-            strokeWidth = 1.2f * density
+            strokeWidth = 1.1f * density
         }
         canvas.drawCircle(bx, by, badgeRadius, battBorder)
         val battText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = battColor
-            textSize = 6.5f * density
+            textSize = 5.5f * density
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
@@ -484,12 +513,12 @@ object MapMarkerRenderer {
         density: Float,
         animFrame: Int
     ) {
-        val badgeRadius = 9.5f * density
-        val ax = cx + bubbleR * 0.72f
-        val ay = bubbleCy - bubbleR * 0.72f
+        val badgeRadius = 7.5f * density
+        val ax = cx + bubbleR * 0.70f
+        val ay = bubbleCy - bubbleR * 0.70f
 
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#0F172A")
+            color = Color.parseColor("#121215")
             style = Paint.Style.FILL
             alpha = 240
         }
@@ -502,13 +531,13 @@ object MapMarkerRenderer {
                 else -> Color.WHITE
             }
             style = Paint.Style.STROKE
-            strokeWidth = 1.8f * density
+            strokeWidth = 1.5f * density
         }
         canvas.drawCircle(ax, ay, badgeRadius, bgPaint)
         canvas.drawCircle(ax, ay, badgeRadius, borderPaint)
 
         val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 10f * density
+            textSize = 8f * density
             textAlign = Paint.Align.CENTER
         }
         val efm = emojiPaint.fontMetrics
