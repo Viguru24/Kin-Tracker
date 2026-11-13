@@ -1,169 +1,174 @@
 <div align="center">
 
-# 🛰️ Kin-Tracker
-
-### Next-Generation, Private, 24/7 Family Safety Radar & GPS Transit Network
-*The Privacy-First, Open-Source Life360 Alternative for Android.*
+![Kin-Tracker — Private 24/7 Family Safety Radar](docs/assets/kin-tracker-hero.svg)
 
 <br/>
 
-[![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://android.com)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-00C853?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
-[![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![Privacy First](https://img.shields.io/badge/Privacy-100%25%20No%20Data%20Brokers-00ff88?style=for-the-badge&logo=shield)](https://github.com/Viguru24/Kin-Tracker)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Latest Release](https://img.shields.io/badge/Release-v2.8.2_Latest-10B981?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
+[![Download Latest APK](https://img.shields.io/badge/📥_Download_Latest_APK-v2.8.3_(Android_8.0+)-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
+[![All Releases](https://img.shields.io/badge/GitHub_Releases-Changelog_&_APKs-18181B?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases)
+[![Privacy](https://img.shields.io/badge/Data_Brokers-Zero_(100%25_Private)-14B8A6?style=for-the-badge&logo=shield&logoColor=white)](#why-families-switch-from-life360)
+[![Kotlin & Compose](https://img.shields.io/badge/Kotlin_2.0+-Jetpack_Compose-06B6D4?style=for-the-badge&logo=kotlin&logoColor=white)](#architecture--security)
+[![License](https://img.shields.io/badge/License-MIT_Free_Forever-27272A?style=for-the-badge)](LICENSE)
 
 <br/>
 
-<p align="center">
-  <a href="https://github.com/Viguru24/Kin-Tracker/releases/latest">
-    <img src="https://img.shields.io/badge/📥_Download_APK-v2.8.2_Stable-00E676?style=for-the-badge&logo=android&logoColor=black" alt="Download APK" height="42" />
-  </a>
-</p>
-
-<p align="center">
-  <a href="#-why-kin-tracker">🌟 <b>Why Kin-Tracker</b></a> •
-  <a href="#-whats-new-in-v282">✨ <b>What's New</b></a> •
-  <a href="#-feature-comparison">📊 <b>Comparison</b></a> •
-  <a href="#-key-features">🚀 <b>Features</b></a> •
-  <a href="#-download--installation">📥 <b>Download & Install</b></a> •
-  <a href="#-tech-stack--architecture">🛠️ <b>Tech Stack</b></a> •
-  <a href="#-the-ecosystem">🌟 <b>Ecosystem</b></a>
+<p>
+  <a href="#download--30-second-setup"><b>Download &amp; Install</b></a> •
+  <a href="#whats-new-in-v283"><b>What's New in v2.8.3</b></a> •
+  <a href="#kin-tracker-vs-life360--apple-find-my"><b>Compare</b></a> •
+  <a href="#complete-feature-suite"><b>All Features</b></a> •
+  <a href="#architecture--security"><b>Architecture</b></a> •
+  <a href="#self-host-your-own-sovereign-vps"><b>Self-Host VPS</b></a>
 </p>
 
 </div>
 
 ---
 
-## 🌟 Why Kin-Tracker?
-
-Commercial family trackers (like Life360) have faced severe backlash for selling user location history to third-party data brokers while locking essential safety features behind costly monthly subscriptions ($15/mo+).
-
-**Kin-Tracker provides a completely sovereign alternative:**
-1. **🛡️ 100% Privacy-First:** No location data brokers, no user telemetry, and no accounts required — data is encrypted and shared strictly within your private family circle.
-2. **⚡ Bulletproof Screen-Off Background GPS:** Intelligent hardware `WakeLock` cycling and foreground service prioritization ensure continuous 24/7 location streaming without being killed by Android Doze mode.
-3. **💸 Free & Sovereign Forever:** No paywalled geofences, no driving reports subscription fees, and zero ads.
-
----
-
-## ✨ What's New in v2.8.2
-
-Kin-Tracker **v2.8.2** is a major reliability, efficiency, and UI polish release built for 24/7 everyday family safety:
-
-- **🚨 Find My Phone Full-Screen `STOP` Overlay & Precision Ringing:** Ring a misplaced family phone or tablet remotely even when it's on silent. A bold full-screen `STOP` overlay appears on the ringing device to silence it in one tap and automatically clear the cloud alarm state, backed by strict device-UUID matching so alarms only trigger on the intended device.
-- **📶 Smart Low-Data Mode & Gzip Compression:** Drastically reduces background mobile data consumption with gzip-compressed sync payloads, automatic trip breadcrumb stripping during background polling, and exponential backoff on WebSocket reconnects (`45s` ping interval with smart backoff up to `300s`).
-- **👥 Redesigned Circle Switcher & Live `#PIN` HUD:** Sleek obsidian-dark Circle Switcher overlay featuring a Current Circle hero card, live member count, an instant `#PIN` badge right in the top HUD bar, and one-tap circle switching or invite sharing.
-- **🌐 Configurable Sovereign VPS & Self-Hosting:** Point Kin-Tracker directly to your own private VPS from the onboarding screen or Settings—complete control over your family's data with zero vendor lock-in.
-- **🎨 Obsidian & Emerald UI + Modular Architecture:** Refined `#09090b` / `#121215` dark-mode styling with crisp emerald and cyan accents, backed by a cleanly modularized Jetpack Compose & sync architecture (`CloudSyncManager`, `RadarMap`, `MainNavigationScaffold`, and `SettingsHub`).
-
----
-
-## 📊 Feature Comparison
-
-| Feature | Life360 ($15+/mo) | Apple Find My | 🛰️ **Kin-Tracker** |
-| :--- | :---: | :---: | :---: |
-| **No Location Data Selling** | ❌ (Sells Data) | ✅ | **✅ 100% Private** |
-| **Cross-Platform / Pure Android** | ⚠️ | ❌ (Apple Only) | **✅ Android Native** |
-| **Unlimited Safe Zones (Geofences)** | ❌ (Paywalled) | ⚠️ (Limited) | **✅ Unlimited** |
-| **Live Battery & Transit Speed HUD** | ⚠️ | ❌ | **✅ Real-Time HUD** |
-| **Turn-by-Turn Route Trails** | ❌ (Requires Gold) | ❌ | **✅ Built-in** |
-| **Ghost Mode Privacy Blur** | ⚠️ (Requires Gold) | ❌ | **✅ Built-in (1-Tap)** |
-| **Shared Family Grocery & Task List** | ❌ | ❌ | **✅ Real-Time Synced** |
-
----
-
-## 🚀 Key Features
-
-| Feature | Description |
-| :--- | :--- |
-| **🛡️ 24/7 Background Radar** | Continuous GPS location streaming that never sleeps, even when phones are locked in pockets or deep sleep mode. |
-| **🛤️ Turn-by-Turn Route Trails** | Live breadcrumb road pathing from Home to current location with automated bounding-box camera auto-framing. |
-| **🚨 Emergency SOS System** | Instant one-tap SOS trigger with high-priority audio alarms, screen flash alerts, and direct location beacons. |
-| **🔋 Battery & Speed Telemetry** | Live battery percentage, charging state indicators, transit speed (mph/km/h), and automatic low-battery warnings (<15%). |
-| **🛒 Synced Family Shopping List** | Real-time shared grocery & task lists with instant cloud checkoffs and member attribution. |
-| **👻 Ghost Mode Privacy** | Pause or blur location sharing for 1h, 2h, 8h, or custom durations when privacy is desired. |
-| **📍 Smart Safe Zones & Geofences** | Instant arrival and departure activity logging for Home, School, Work, and custom-defined safe circles. |
-| **🗣️ Voice Proximity Radar** | Text-to-speech voice announcements when family members arrive safely, depart, or move closer. |
-| **🎨 Marker Collision Deconfliction** | Smart visual layout engine that prevents overlapping map pins when multiple family members are in the same spot. |
-
----
-
-## 🛠️ Tech Stack & Architecture
-
-- **Language & Framework:** 100% Kotlin with declarative **Jetpack Compose** & **Material 3**.
-- **Architecture:** Clean MVVM (Model-View-ViewModel) + StateFlow reactive streams + Repository pattern.
-- **Local Persistence:** **Room Database** (SQLite) with zero-loss fallback migration and persistent member caching.
-- **Mapping & Geodesy:** **OSMDroid** with offline tile caching and OSRM road-routing APIs.
-- **Background Engine:** Android Foreground Service with `PowerManager.PARTIAL_WAKE_LOCK`, `AlarmManager.RTC_WAKEUP`, and `LocationListener`.
-- **Networking & Serialization:** OkHttp3 + Moshi JSON for peer-to-peer cloud state synchronization.
-
----
-
-## 📥 Download & Installation
-
-### Option 1: Direct APK Download (Android Phones)
-
-Download the pre-compiled Android package directly to your phone:
+> **Save $180+/year per family while reclaiming 100% of your location privacy.**  
+> **Kin-Tracker** gives your family unlimited geofenced Safe Zones, turn-by-turn transit trails, remote Find My Phone ringing through silent mode, live room audio monitoring, and a synced family grocery list—completely free, ad-free, and hosted on your terms.
 
 <div align="center">
 
-[![Download Kin-Tracker APK](https://img.shields.io/badge/Download-KinTracker_APK_(v2.8.2)-00E676?style=for-the-badge&logo=android&logoColor=black)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
-[![GitHub Releases](https://img.shields.io/badge/All_Releases-GitHub-27272a?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases)
+![Kin-Tracker Radar Map, Circle Switcher, and Find My Phone STOP Overlay](docs/assets/kin-tracker-phone-preview.svg)
 
 </div>
 
-1. Tap **Download APK** above on your Android phone (Android 8.0 Oreo or newer).
-2. Open the downloaded `.apk` file and tap **Install** (allow *"Install unknown apps"* if prompted by your browser/file manager).
-3. Open **Kin-Tracker**, select your name and avatar emoji, and either:
-   - **Create a New Circle:** Generates your private invite code to share with family members.
-   - **Join an Existing Circle:** Enter the 6-character circle code from your family.
-4. *(Optional for Self-Hosters)* Tap the **Server URL** button on the setup screen or in **Settings** to route all traffic to your own private sovereign VPS.
+---
+
+## Why Families Switch From Life360
+
+Commercial tracking apps sell your family's movement history to third-party data brokers while locking basic alerts behind **$14.99+/month** subscriptions. **Kin-Tracker** eliminates the compromise:
+
+1. **Zero Data Brokers & Zero Accounts:** No email sign-ups, no ad SDKs, no location monetization. Create a private family circle and pair devices in 30 seconds with a 4-digit PIN or 6-character invite code.
+2. **Engineered Never to Miss an Arrival or Ring:** Built around a hardened Android Foreground Service with per-coroutine hardware `WakeLock` leases, adaptive cellular data compression, and downgrade-safe Room persistence.
+3. **Full Self-Hosting Freedom:** Use the default hosted sync relay out of the box, or tap **Server URL** during onboarding or Settings to route 100% of your family's GPS & WebSocket audio traffic to your own private VPS.
 
 ---
 
-### Option 2: Build From Source (Developers)
+## Download & 30-Second Setup
 
-### Prerequisites
-- Android Studio Ladybug (or newer)
-- Android SDK 34+
-- Java JDK 17+
+<div align="center">
+
+| Ready to install on Android 8.0+? | Step 1 | Step 2 | Step 3 |
+| :--- | :--- | :--- | :--- |
+| [![Download Kin-Tracker APK](https://img.shields.io/badge/📥_Download_APK-v2.8.3-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest) | Tap **Download APK** on your Android phone or tablet | Open the `.apk` file and tap **Install** | Pick your name & avatar, then **Create Circle** or enter your family `#PIN` |
+
+</div>
+
+- **Automatic In-App OTA Updates:** Every fresh launch checks your configured server for newer builds so family phones and tablets stay up to date effortlessly.
+- **Browse Release History & Checksums:** [github.com/Viguru24/Kin-Tracker/releases](https://github.com/Viguru24/Kin-Tracker/releases)
+
+---
+
+## What's New in v2.8.3
+
+**v2.8.3 (build 48)** builds on the v2.8.2 overhaul with major reliability, safety UI, and synchronization upgrades across Android and the Node.js backend:
+
+- **Full-Screen `STOP` Overlay + Exact Device-UUID Ringing:** Trigger **Find My Phone** from any circle device to ring through silent mode—now backed by strict device-UUID matching (eliminating cross-device false rings on shared family names/tablets) and a large one-tap **STOP** button overlay directly on the ringing phone or tablet.
+- **Redesigned Circle Switcher & Live `#PIN` HUD:** See your active circle name and `#PIN` directly inside the top map pill and Current Circle hero card, plus live inline `"Connecting..."` / error feedback when pairing a new device with a PIN.
+- **Unified Sync Engine (`SyncResolutionHelper`):** Foreground (`CloudSyncManager`) and background (`BackgroundSyncProcessor`) sync paths now share a single conflict-resolution engine with placeholder token guards (`00000000_`), 30-day shopping-list deletion tombstones, and a 2-minute server-side grace window so newly joined tablets/phones are never overwritten by stale snapshots.
+- **Authenticated `/audio` Relay & Resilient WebSockets:** Live room audio WebSocket streams verify circle IDs and member identities before relaying, paired with `45s` ping keepalives and exponential reconnect backoff up to `300s`.
+- **Zero-Loss Database Upgrades & Per-Coroutine `WakeLock`s:** Replaced catch-all destructive Room fallback migrations with downgrade-only fallback so saved circles and safe zones survive schema upgrades, isolated location `WakeLock` leases per coroutine, and added a bounded 100-entry diagnostic telemetry buffer in `AppLogger`.
+- **Low-Data Gzip Mode:** Strips bulky completed-trip breadcrumb histories from background sync payloads while throttling cellular wakes cleanly (`30s` Wi-Fi / `45s` metered).
+
+---
+
+## Kin-Tracker vs Life360 & Apple Find My
+
+| Capability | Life360 Gold ($14.99+/mo) | Apple Find My | 🛰️ **Kin-Tracker v2.8.3** |
+| :--- | :---: | :---: | :---: |
+| **Cost Forever** | `$180+/yr` | Free (Apple hardware lock-in) | **$0 Forever (MIT Open Source)** |
+| **Location Privacy** | Third-party broker history | Apple Cloud | **Zero Brokers • Self-Hostable VPS** |
+| **Unlimited Safe Zones (Geofences)** | ❌ Paywalled (2 free only) | ⚠️ Basic alerts | **✅ Unlimited (Home, School, Work, Custom)** |
+| **Find My Phone Through Silent + `STOP` UI** | ⚠️ App-only ping | ✅ iOS only | **✅ High-Priority Alarm + Full-Screen STOP** |
+| **Live Room Audio Walkie-Talkie** | ❌ | ❌ | **✅ Authenticated WebSocket Audio** |
+| **Railway & Turn-by-Turn Transit Trails** | ❌ Gold/Platinum only | ❌ | **✅ Built-in Breadcrumbs & Train Detection** |
+| **Synced Family Shopping & Task List** | ❌ | ❌ | **✅ Real-Time Synced + Tombstone Safe** |
+| **One-Tap Ghost Mode Blur** | ⚠️ Bubble tier | ❌ | **✅ 1h / 2h / 8h Instant Blur** |
+| **Custom Private Server Support** | ❌ Impossible | ❌ Impossible | **✅ Configurable in Onboarding & Settings** |
+
+---
+
+## Complete Feature Suite
+
+| Feature | How It Works |
+| :--- | :--- |
+| **🛡️ 24/7 Screen-Off Background Radar** | Foreground location service paired with per-coroutine `WakeLock`s and `AlarmManager` wakeups keeps GPS active through Android Doze without draining your battery. |
+| **📍 Smart Safe Zones & Hysteresis** | Customizable Home (`140m`), Work, School, and custom geofences with `60m` exit hysteresis and 3-reading confirmation to filter indoor GPS drift. |
+| **🚨 Find My Phone & Emergency SOS** | Remote loud alarm override targeting exact device UUIDs with a giant one-tap **STOP** card, plus instant Emergency SOS distress beacons across your circle. |
+| **🎙️ Authenticated Room Audio Intercom** | Tap in to listen to a family member's room monitor stream over circle-scoped `/audio` WebSockets with automatic speaker/IP routing. |
+| **🛤️ Transit Mode & Route Playback** | Automatic walking/driving/railway corridor classification (`RailwayTransitDetector`) and interactive breadcrumb trip playback cards. |
+| **🗣️ Voice Proximity Announcements** | Optional Text-to-Speech alerts announce safe arrivals, departures, and low-battery warnings (<15%) aloud when hands-free. |
+| **👻 Ghost Mode Privacy Pause** | Temporarily pause or blur your live location for preset windows without leaving your family circle. |
+| **🛒 Synced Family Shopping List** | Add, check off, and clear shared household groceries in real time across every paired phone and tablet. |
+| **🔋 Battery & Charging Telemetry** | Live percentage indicators, charging badges, speed readout, and automatic low-battery notifications on the map. |
+
+---
+
+## Architecture & Security
+
+```mermaid
+flowchart LR
+    Phone["📱 Android Phones & Tablets\nKotlin • Jetpack Compose • Room DB"]
+    Relay["🌐 Sovereign Node.js Server\nExpress • Better-SQLite3 • /audio WS"]
+    Dash["🖥️ Live Web Command Center\n/dashboard Admin Map & Controls"]
+
+    Phone <-- "HTTPS Gzip Sync + Pin Mapping\n(SyncResolutionHelper)" --> Relay
+    Phone <-- "WSS /audio Circle-Scoped Stream\n+ Telemetry WebSockets" --> Relay
+    Dash <-- "Admin Key Auth\nCircles, Safe Zones & Ring API" --> Relay
+```
+
+- **UI & State:** 100% **Kotlin** + **Jetpack Compose** (`Material 3`), reactive **StateFlow** viewmodels, **OSMDroid** offline-capable tiles, and collision-deconflicted family markers.
+- **Persistence & Safety:** **Room** SQLite with `MIGRATION_10_11` and downgrade-only destructive fallback, plus an in-memory 100-entry `AppLogger` diagnostic ring buffer.
+- **Verified Quality:** Backed by **22 Android unit test suites (77 tests)** via Robolectric/JUnit and end-to-end **Node.js admin & sync server tests**.
+
+---
+
+## Self-Host Your Own Sovereign VPS
+
+Want zero external dependencies? Deploy the included Node.js server (`server/`) on any Linux VPS or Docker host:
+
+```bash
+cd server
+npm install
+cp .env.example .env   # Set PORT and your private ADMIN_KEY
+npm start
+```
+
+Then open Kin-Tracker on your Android device, tap **Server URL** during setup (or in **Settings → Circle / System**), and enter your VPS HTTPS URL (e.g. `https://tracker.yourdomain.com`). The server also includes an interactive `/dashboard` web map and hosts your own **Over-The-Air (OTA)** update channel (`server/src/routes/updates.js`)—see [OTA_UPDATE_GUIDE.md](OTA_UPDATE_GUIDE.md) for endpoint specs.
+
+---
+
+## Build From Source (Developers)
+
+**Prerequisites:** Android Studio Ladybug+, Android SDK 36, Java JDK 17+, Node.js 20+ (for backend).
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/Viguru24/Kin-Tracker.git
 cd Kin-Tracker
 
-# 2. Build the APK
+# 2. Run Android & server test suites
+./gradlew testDebugUnitTest
+npm --prefix server test
+
+# 3. Compile the Android APK
 ./gradlew assembleDebug
 ```
-The compiled APK will be output to: `app/build/outputs/apk/debug/app-debug.apk`.
+
+Compiled APK outputs are generated under `app/build/outputs/apk/debug/`.
 
 ---
 
-## 🚀 Sovereign Over-The-Air (OTA) Update Hub
-The Kin-Tracker backend server (`server/src/routes/updates.js`) hosts the central **Sovereign OTA Update Hub** for your entire Android application ecosystem:
-- **Kin-Tracker** (`kin-tracker`)
-- **COSMO Symphony Companion** (`cosmo-companion`)
-- **Jinshin Jyutsu Android** (`jinshin-jyutsu`)
-- **Cosmo Flow Personal Assistant** (`cosmo-flow`)
-- **Cosmo Compendium Cooking App** (`cosmo-compendium`)
+## Explore More Sovereign Apps by Viguru24
 
-Check live system status anytime at [`https://api.cosmowhisper.com/updates/status`](https://api.cosmowhisper.com/updates/status).  
-To publish updates, use `.\publish-update.ps1` or double-click `PUBLISH_UPDATE.bat`.  
-See [OTA_UPDATE_GUIDE.md](OTA_UPDATE_GUIDE.md) for full endpoint specifications.
-
----
-
-## 🌟 The Ecosystem
-
-Discover other sovereign, high-performance tools by **[Viguru24](https://github.com/Viguru24)**:
-- 🎬 **[Vixz YouTube Player (Android)](https://github.com/Viguru24/YouTube)** — Ad-free YouTube player with AI summaries and fluid gestures.
-- 🌌 **[Cosmo Symphony (Windows)](https://github.com/Viguru24/Video)** — GPU-accelerated video & photo studio built with Rust & Tauri v2.
-- 🎙️ **[CosmoWhisper (Mac & Windows)](https://github.com/Viguru24/CosmoWhisper-Native)** — 100% local AI speech dictation.
+- 🎬 **[Vixz YouTube Player (Android)](https://github.com/Viguru24/YouTube)** — Ad-free YouTube client with SponsorBlock, AI video summaries, and fluid gestures.
+- 🌌 **[Cosmo Symphony (Windows)](https://github.com/Viguru24/Video)** — GPU-accelerated photo & video studio built with Rust & Tauri v2.
+- 🎙️ **[CosmoWhisper (Mac & Windows)](https://github.com/Viguru24/CosmoWhisper-Native)** — 100% offline AI voice dictation powered by local Whisper models.
 
 ---
 
 <div align="center">
-  <sub>Distributed under the MIT License • Built with ❤️ by <a href="https://github.com/Viguru24">Viguru24</a></sub>
+  <sub>Released under the MIT License • Built for family privacy by <a href="https://github.com/Viguru24">Viguru24</a></sub>
 </div>
