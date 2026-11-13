@@ -38,12 +38,12 @@ class MapMarkerRendererTest {
         val unselectedHeightDp = unselected.bitmap.height / density
 
         assertTrue(
-            "Expected compact unselected width <= 50dp, got $unselectedWidthDp",
-            unselectedWidthDp <= 50f
+            "Expected compact unselected width <= 42dp, got $unselectedWidthDp",
+            unselectedWidthDp <= 42f
         )
         assertTrue(
-            "Expected compact unselected height <= 60dp, got $unselectedHeightDp",
-            unselectedHeightDp <= 60f
+            "Expected compact unselected height <= 46dp, got $unselectedHeightDp",
+            unselectedHeightDp <= 46f
         )
         assertTrue(
             "Selected marker width should exceed unselected width",
@@ -53,6 +53,22 @@ class MapMarkerRendererTest {
             "Selected marker height should exceed unselected height",
             selected.bitmap.height > unselected.bitmap.height
         )
+
+        val clustered = MapMarkerRenderer.getOrCreateMarkerDrawable(
+            context = context,
+            colorHex = "#10B981",
+            emoji = "👩",
+            isSelected = false,
+            showStem = false
+        ) as BitmapDrawable
+        assertTrue(
+            "Clustered marker without stem should be shorter than stemmed marker",
+            clustered.bitmap.height < unselected.bitmap.height
+        )
+        val anchorV = MapMarkerRenderer.getMarkerAnchorV(context, isSelected = false, showStem = false)
+        assertTrue("Clustered marker vertical anchor should center around 0.5 (got $anchorV)", anchorV in 0.40f..0.60f)
+        val hubDot = MapMarkerRenderer.getOrCreateClusterAnchorDot(context) as BitmapDrawable
+        assertTrue("Anchor dot must remain compact (<= 14dp)", hubDot.bitmap.width / density <= 14f)
     }
 
     @Test

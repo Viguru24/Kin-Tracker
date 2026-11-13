@@ -180,7 +180,7 @@ fun computeClusterLayout(
 
     // D. Form Ad-Hoc Co-Located Clusters for members outside zones
     val visited = mutableSetOf<String>()
-    val collisionThresholdPx = 60.0 * density
+    val collisionThresholdPx = 40.0 * density
     val avgLatForAdhoc = if (unassignedMembers.isNotEmpty()) unassignedMembers[0].y else (if (homeLat != 0.0) homeLat else 51.33)
     val clusterThresholdMeters = maxOf(40.0, collisionThresholdPx * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
 
@@ -242,13 +242,12 @@ fun computeClusterLayout(
             }
         }
 
-        // Screen-space radius: 40dp radius at 135 deg / 45 deg angles ensures ~56.6dp separation
-        // With 54dp face bubbles, this leaves an intimate ~2dp gap so faces bounce off each other without overlapping!
+        // Screen-space radius scaled to compact 30dp face circles so spokes remain short & tight
         val radiusDp = when (cluster.size) {
-            2 -> 40.0
-            3 -> 44.0
-            4 -> 48.0
-            else -> maxOf(48.0, 30.0 / kotlin.math.sin(Math.PI / cluster.size))
+            2 -> 24.0
+            3 -> 25.0
+            4 -> 26.0
+            else -> maxOf(26.0, 17.5 / kotlin.math.sin(Math.PI / cluster.size))
         }
         val radiusPx = radiusDp * density
         val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
@@ -286,9 +285,8 @@ fun computeClusterLayout(
         }
     }
 
-    // Universal screen-space deconfliction pass: guarantees that NO TWO active members'
-    // face bubbles ever collide or overlap on screen, maintaining the intimate "bouncing" proximity.
-    val minMarkerSeparationPx = 54.0 * density // Minimum 54dp center-to-center separation
+    // Universal screen-space deconfliction pass: guarantees that NO TWO compact 30dp face circles overlap on screen.
+    val minMarkerSeparationPx = 33.0 * density // Minimum 33dp center-to-center separation for 30dp bubbles
     val activeIds = activeMembers.map { it.id }
     repeat(2) {
         for (i in 0 until activeIds.size) {

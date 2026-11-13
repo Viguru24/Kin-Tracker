@@ -254,8 +254,12 @@ class SafeZoneGeofenceTest {
             val screenDp = screenPixels / density
 
             assertTrue(
-                "At zoom $zoom, screen separation ($screenDp dp) must be at least 54dp so bubbles bounce off each other without overlapping",
-                screenDp >= 54.0
+                "At zoom $zoom, screen separation ($screenDp dp) must be at least 33dp so compact 30dp bubbles do not overlap",
+                screenDp >= 33.0
+            )
+            assertTrue(
+                "At zoom $zoom, screen separation ($screenDp dp) must stay compact (<= 40dp) so cluster lines stay short",
+                screenDp <= 40.0
             )
 
             // Verify they sit above Home (North) and flank horizontally (Eloise West, Dad East) creating angled spokes
@@ -327,8 +331,41 @@ class SafeZoneGeofenceTest {
         val screenDp = (distMeters / metersPerPx) / density
 
         assertTrue(
-            "Moving co-located members must be separated by at least 54dp on screen so they bounce off each other without overlapping (was $screenDp dp)",
-            screenDp >= 54.0
+            "Moving co-located members must be separated by at least 33dp on screen so compact bubbles never overlap (was $screenDp dp)",
+            screenDp >= 33.0
         )
+
+        val fiveAtHome = (1..5).map { idx ->
+            FamilyMember(
+                id = "home_$idx",
+                name = "Member$idx",
+                avatarColorHex = "#10B981",
+                y = 51.3300000,
+                x = -0.1180000,
+                statusText = "At Home",
+                speedMph = 0.0
+            )
+        }
+        val homeLayout = com.example.ui.computeClusterLayout(
+            members = fiveAtHome,
+            safeZones = emptyList(),
+            homeLat = 51.3300000,
+            homeLng = -0.1180000,
+            homeRadiusMeters = 60.0,
+            isWorkCalibrated = false,
+            workLat = 0.0,
+            workLng = 0.0,
+            workRadiusMeters = 75.0,
+            zoomLevel = 16.0,
+            density = density
+        )
+        fiveAtHome.forEach { member ->
+            val pos = homeLayout.adjustedCoordinates[member.id]!!
+            val anchor = homeLayout.clusterAnchorPoints[member.id]!!
+            val spokeMeters = com.example.data.GeoUtils.distanceMeters(anchor.latitude, anchor.longitude, pos.latitude, pos.longitude)
+            val spokeDp = (spokeMeters / com.example.ui.metersPerPixelAtZoom(anchor.latitude, 16.0)) / density
+            assertTrue("5-member home spoke must stay compact (<= 31dp), was $spokeDp dp", spokeDp <= 31.0)
+            assertTrue("Spoke length must stay positive", spokeDp >= 26.0)
+        }
     }
 }

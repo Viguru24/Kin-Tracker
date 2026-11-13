@@ -18,6 +18,143 @@ object MapMarkerRenderer {
     // 16MB LRU Cache for rendered marker drawables to eliminate frame drops & allocations
     private val markerDrawableCache = LruCache<String, Drawable>(100)
 
+    private data class MarkerGeometry(
+        val density: Float,
+        val bubblePx: Int,
+        val bubbleR: Float,
+        val stemW: Int,
+        val stemH: Int,
+        val topBadgePad: Int,
+        val timePillHeight: Int,
+        val timePillMargin: Int,
+        val bmpW: Int,
+        val bmpH: Int,
+        val cx: Float,
+        val bubbleTop: Float,
+        val bubbleBottom: Float,
+        val bubbleCy: Float,
+        val stemTipY: Float,
+        val anchorV: Float
+    )
+
+    private fun computeMarkerGeometry(
+        context: Context,
+        isSelected: Boolean,
+        relativeTime: String,
+        locationDuration: String,
+        batteryPercentage: Int,
+        weatherEmoji: String,
+        showStem: Boolean
+    ): MarkerGeometry {
+        val density = context.resources.displayMetrics.density
+        val bubbleDp = if (isSelected) 38 else 30
+        val bubblePx = (bubbleDp * density).toInt()
+        val bubbleR = bubblePx / 2f
+        val stemW = if (showStem) (6 * density).toInt() else 0
+        val stemH = if (showStem) (5 * density).toInt() else 0
+        val shadowRadius = 2.5f * density
+        val shadowDy = 1.2f * density
+        val shadowPad = (shadowRadius + shadowDy).toInt() + 2
+
+        val hasBatteryBadge = batteryPercentage in 0..100
+        val hasActivityBadge = locationDuration.startsWith("👣") ||
+            locationDuration.startsWith("🚗") ||
+            locationDuration.startsWith("🚲") ||
+            locationDuration.startsWith("🚆") ||
+            weatherEmoji == "👣" || weatherEmoji == "🚗" || weatherEmoji == "🚲" || weatherEmoji == "🚆"
+
+        val battOverhang = if (hasBatteryBadge) {
+            kotlin.math.ceil(maxOf(0f, 5.8f * density + 1.1f * density - bubbleR * 0.34f).toDouble()).toInt()
+        } else 0
+        val actOverhang = if (hasActivityBadge) {
+            kotlin.math.ceil(maxOf(0f, 6.5f * density + 1.4f * density - bubbleR * 0.30f).toDouble()).toInt()
+        } else 0
+
+        val sidePad = maxOf(shadowPad, battOverhang, actOverhang)
+        val topBadgePad = maxOf(shadowPad, actOverhang)
+
+        val timePillHeight = if (relativeTime.isNotEmpty()) kotlin.math.ceil(12.5f * density).toInt() else 0
+        val timePillMargin = if (relativeTime.isNotEmpty()) kotlin.math.ceil(2.0f * density).toInt() else 0
+        val locPillHeight = if (locationDuration.isNotEmpty()) kotlin.math.ceil(12.5f * density).toInt() else 0
+        val locPillMargin = if (locationDuration.isNotEmpty()) kotlin.math.ceil(2.0f * density).toInt() else 0
+        val bottomPad = (2 * density).toInt()
+
+        val maxPillWidth = maxOf(
+            measurePillWidthPx(relativeTime, density),
+            measurePillWidthPx(locationDuration, density)
+        )
+        val bmpW = maxOf(bubblePx + sidePad * 2, maxPillWidth + (4 * density).toInt())
+        val bmpH = topBadgePad + timePillHeight + timePillMargin + bubblePx + stemH + locPillHeight + locPillMargin + bottomPad
+        val cx = bmpW / 2f
+        val bubbleTop = topBadgePad.toFloat() + timePillHeight + timePillMargin
+        val bubbleBottom = bubbleTop + bubblePx
+        val bubbleCy = bubbleTop + bubblePx / 2f
+        val stemTipY = bubbleBottom + stemH
+        val anchorV = if (showStem) (stemTipY / bmpH.toFloat()) else (bubbleCy / bmpH.toFloat())
+
+        return MarkerGeometry(
+            density = density,
+            bubblePx = bubblePx,
+            bubbleR = bubbleR,
+            stemW = stemW,
+            stemH = stemH,
+            topBadgePad = topBadgePad,
+            timePillHeight = timePillHeight,
+            timePillMargin = timePillMargin,
+            bmpW = bmpW,
+            bmpH = bmpH,
+            cx = cx,
+            bubbleTop = bubbleTop,
+            bubbleBottom = bubbleBottom,
+            bubbleCy = bubbleCy,
+            stemTipY = stemTipY,
+            anchorV = anchorV.coerceIn(0f, 1f)
+        )
+    }
+
+    fun getMarkerAnchorV(
+        context: Context,
+        isSelected: Boolean,
+        relativeTime: String = "",
+        locationDuration: String = "",
+        batteryPercentage: Int = -1,
+        weatherEmoji: String = "",
+        showStem: Boolean = true
+    ): Float {
+        return computeMarkerGeometry(
+            context = context,
+            isSelected = isSelected,
+            relativeTime = relativeTime,
+            locationDuration = locationDuration,
+            batteryPercentage = batteryPercentage,
+            weatherEmoji = weatherEmoji,
+            showStem = showStem
+        ).anchorV
+    }
+
+    fun getOrCreateClusterAnchorDot(context: Context): Drawable {
+        val cacheKey = "CLUSTER_ANCHOR_DOT"
+        markerDrawableCache.get(cacheKey)?.let { return it }
+        val density = context.resources.displayMetrics.density
+        val sizePx = (11 * density).toInt().coerceAtLeast(6)
+        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val c = sizePx / 2f
+        val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(c, c, c, whitePaint)
+        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#10B981")
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(c, c, (c - 1.8f * density).coerceAtLeast(1f), corePaint)
+        val drawable = BitmapDrawable(context.resources, bitmap)
+        markerDrawableCache.put(cacheKey, drawable)
+        return drawable
+    }
+
     fun getOrCreateMarkerDrawable(
         context: Context,
         colorHex: String,
@@ -30,9 +167,10 @@ object MapMarkerRenderer {
         locationDuration: String = "",
         batteryPercentage: Int = -1,
         isCharging: Boolean = false,
-        animFrame: Int = 0
+        animFrame: Int = 0,
+        showStem: Boolean = true
     ): Drawable {
-        val cacheKey = "$colorHex|$emoji|$isSelected|$photoPath|$weatherEmoji|$isOffline|$relativeTime|$locationDuration|$batteryPercentage|$isCharging|$animFrame"
+        val cacheKey = "$colorHex|$emoji|$isSelected|$photoPath|$weatherEmoji|$isOffline|$relativeTime|$locationDuration|$batteryPercentage|$isCharging|$animFrame|$showStem"
         markerDrawableCache.get(cacheKey)?.let { return it }
 
         val drawable = createColoredMarkerDrawable(
@@ -47,7 +185,8 @@ object MapMarkerRenderer {
             locationDuration = locationDuration,
             batteryPercentage = batteryPercentage,
             isCharging = isCharging,
-            animFrame = animFrame
+            animFrame = animFrame,
+            showStem = showStem
         )
         markerDrawableCache.put(cacheKey, drawable)
         return drawable
@@ -191,57 +330,33 @@ object MapMarkerRenderer {
         locationDuration: String,
         batteryPercentage: Int,
         isCharging: Boolean,
-        animFrame: Int = 0
+        animFrame: Int = 0,
+        showStem: Boolean = true
     ): Drawable {
-        val density = context.resources.displayMetrics.density
-
-        // Sleek proportional circular marker sizing (36dp default, 46dp when selected)
-        val bubbleDp = if (isSelected) 46 else 36
-        val bubblePx = (bubbleDp * density).toInt()
-        val bubbleR = bubblePx / 2f
-        val stemW = (7 * density).toInt()
-        val stemH = (9 * density).toInt()
-        val shadowRadius = (3f * density)
-        val shadowDy = (1.5f * density)
-        val shadowPad = (shadowRadius + shadowDy).toInt() + 2
+        val geom = computeMarkerGeometry(
+            context = context,
+            isSelected = isSelected,
+            relativeTime = relativeTime,
+            locationDuration = locationDuration,
+            batteryPercentage = batteryPercentage,
+            weatherEmoji = weatherEmoji,
+            showStem = showStem
+        )
+        val density = geom.density
+        val bubbleR = geom.bubbleR
+        val shadowRadius = 2.5f * density
+        val shadowDy = 1.2f * density
 
         val hasBatteryBadge = batteryPercentage in 0..100
-        val isWalking = locationDuration.startsWith("👣") || weatherEmoji == "👣"
-        val isDriving = locationDuration.startsWith("🚗") || weatherEmoji == "🚗"
-        val isCycling = locationDuration.startsWith("🚲") || weatherEmoji == "🚲"
-        val isTrain = locationDuration.startsWith("🚆") || weatherEmoji == "🚆"
         val activityEmojiToDraw = when {
-            isWalking -> "👣"
-            isDriving -> "🚗"
-            isCycling -> "🚲"
-            isTrain -> "🚆"
+            locationDuration.startsWith("👣") || weatherEmoji == "👣" -> "👣"
+            locationDuration.startsWith("🚗") || weatherEmoji == "🚗" -> "🚗"
+            locationDuration.startsWith("🚲") || weatherEmoji == "🚲" -> "🚲"
+            locationDuration.startsWith("🚆") || weatherEmoji == "🚆" -> "🚆"
             else -> ""
         }
 
-        // Compute horizontal & top badge overhang so compact bubbles never clip corner badges or wide pills
-        val battOverhang = if (hasBatteryBadge) {
-            kotlin.math.ceil(maxOf(0f, 6.8f * density + 1.2f * density - bubbleR * 0.34f).toDouble()).toInt()
-        } else 0
-        val actOverhang = if (activityEmojiToDraw.isNotEmpty()) {
-            kotlin.math.ceil(maxOf(0f, 7.5f * density + 1.5f * density - bubbleR * 0.30f).toDouble()).toInt()
-        } else 0
-
-        val sidePad = maxOf(shadowPad, battOverhang, actOverhang)
-        val topBadgePad = maxOf(shadowPad, actOverhang)
-
-        val timePillHeight = if (relativeTime.isNotEmpty()) kotlin.math.ceil(13f * density).toInt() else 0
-        val timePillMargin = if (relativeTime.isNotEmpty()) kotlin.math.ceil(2.5f * density).toInt() else 0
-        val locPillHeight = if (locationDuration.isNotEmpty()) kotlin.math.ceil(13f * density).toInt() else 0
-        val locPillMargin = if (locationDuration.isNotEmpty()) kotlin.math.ceil(2f * density).toInt() else 0
-        val bottomPad = (2 * density).toInt()
-
-        val maxPillWidth = maxOf(
-            measurePillWidthPx(relativeTime, density),
-            measurePillWidthPx(locationDuration, density)
-        )
-        val bmpW = maxOf(bubblePx + sidePad * 2, maxPillWidth + (4 * density).toInt())
-        val bmpH = topBadgePad + timePillHeight + timePillMargin + bubblePx + stemH + locPillHeight + locPillMargin + bottomPad
-        val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(geom.bmpW, geom.bmpH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         val parsedColor = try {
@@ -250,12 +365,11 @@ object MapMarkerRenderer {
             Color.parseColor("#38BDF8")
         }
 
-        val cx = bmpW / 2f
-        val bubbleTop = topBadgePad.toFloat() + timePillHeight + timePillMargin
-        val bubbleBottom = bubbleTop + bubblePx
-        val bubbleCy = bubbleTop + bubblePx / 2f
-        val stemTipX = cx
-        val stemTipY = bubbleBottom + stemH
+        val cx = geom.cx
+        val bubbleTop = geom.bubbleTop
+        val bubbleBottom = geom.bubbleBottom
+        val bubbleCy = geom.bubbleCy
+        val stemTipY = geom.stemTipY
 
         // ── 1. Relative Time Pill (Top) ──
         if (relativeTime.isNotEmpty()) {
@@ -270,7 +384,7 @@ object MapMarkerRenderer {
         // ── 3. Shadow Circle ──
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
-            alpha = if (isOffline) 16 else 42
+            alpha = if (isOffline) 16 else 40
             maskFilter = BlurMaskFilter(shadowRadius, BlurMaskFilter.Blur.NORMAL)
         }
         canvas.drawCircle(cx + 1f, bubbleCy + shadowDy + 1f, bubbleR - density, shadowPaint)
@@ -289,13 +403,13 @@ object MapMarkerRenderer {
                 color = parsedColor
                 alpha = if (isOffline) 28 else 55
                 style = Paint.Style.STROKE
-                strokeWidth = 3.5f * density
+                strokeWidth = 3.0f * density
             }
             canvas.drawCircle(cx, bubbleCy, bubbleR - 0.5f * density, glowPaint)
         }
 
         // ── 6. Colored Border Ring ──
-        val ringWidth = if (isSelected) 2.8f * density else 2.0f * density
+        val ringWidth = if (isSelected) 2.5f * density else 1.8f * density
         val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = parsedColor
             style = Paint.Style.STROKE
@@ -304,8 +418,10 @@ object MapMarkerRenderer {
         }
         canvas.drawCircle(cx, bubbleCy, bubbleR - ringWidth / 2f - density * 0.5f, ringPaint)
 
-        // ── 7. Teardrop Stem ──
-        drawStem(canvas, cx, bubbleBottom, stemTipX, stemTipY, stemW, ringWidth, parsedColor, density, isOffline)
+        // ── 7. Compact Teardrop Stem (only for unclustered pins) ──
+        if (showStem && geom.stemH > 0) {
+            drawStem(canvas, cx, bubbleBottom, cx, stemTipY, geom.stemW, ringWidth, parsedColor, density, isOffline)
+        }
 
         // ── 8. Profile Photo or Emoji ──
         var drawnPhoto = false
@@ -316,7 +432,7 @@ object MapMarkerRenderer {
         if (!drawnPhoto) {
             val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 textAlign = Paint.Align.CENTER
-                textSize = (if (isSelected) 20f else 15f) * density
+                textSize = (if (isSelected) 16.5f else 12.5f) * density
                 typeface = Typeface.DEFAULT
                 alpha = if (isOffline) 105 else 255
             }
@@ -471,7 +587,7 @@ object MapMarkerRenderer {
         canvas: Canvas, cx: Float, bubbleCy: Float, bubbleR: Float,
         batteryPercentage: Int, isCharging: Boolean, density: Float
     ) {
-        val badgeRadius = 6.8f * density
+        val badgeRadius = 5.8f * density
         val bx = cx - bubbleR * 0.66f
         val by = bubbleCy + bubbleR * 0.66f
         val battColor = when {
@@ -489,12 +605,12 @@ object MapMarkerRenderer {
         val battBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = battColor
             style = Paint.Style.STROKE
-            strokeWidth = 1.1f * density
+            strokeWidth = 1.0f * density
         }
         canvas.drawCircle(bx, by, badgeRadius, battBorder)
         val battText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = battColor
-            textSize = 5.5f * density
+            textSize = 5.0f * density
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
@@ -513,7 +629,7 @@ object MapMarkerRenderer {
         density: Float,
         animFrame: Int
     ) {
-        val badgeRadius = 7.5f * density
+        val badgeRadius = 6.5f * density
         val ax = cx + bubbleR * 0.70f
         val ay = bubbleCy - bubbleR * 0.70f
 
@@ -531,13 +647,13 @@ object MapMarkerRenderer {
                 else -> Color.WHITE
             }
             style = Paint.Style.STROKE
-            strokeWidth = 1.5f * density
+            strokeWidth = 1.4f * density
         }
         canvas.drawCircle(ax, ay, badgeRadius, bgPaint)
         canvas.drawCircle(ax, ay, badgeRadius, borderPaint)
 
         val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 8f * density
+            textSize = 7f * density
             textAlign = Paint.Align.CENTER
         }
         val efm = emojiPaint.fontMetrics

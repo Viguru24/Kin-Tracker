@@ -811,7 +811,12 @@ fun RadarMap(
                 val clusters = layoutResult.clusters
                 // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
 
-                // Draw bold high-contrast angled spoke lines from place anchor to each bouncing face
+                // Draw sleek spoke lines from location dot to each compact clustered face
+                val zoneIconsDrawn = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
+                    .filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }
+                    .map { GeoPoint(it.latitude, it.longitude) } +
+                    if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) listOf(GeoPoint(workLat, workLng)) else emptyList()
+                val drawnAnchorHubs = mutableListOf<GeoPoint>()
                 for (cluster in clusters) {
                     if (cluster.size > 1) {
                         for (mId in cluster) {
@@ -821,25 +826,41 @@ fun RadarMap(
                             if (anchor != null && target != null && member != null) {
                                 val vibrantColor = getVibrantSpokeColor(member.avatarColorHex)
 
-                                // 1. Subtle neutral halo for crisp separation without heavy visual bulk
                                 val haloLine = Polyline(mapView).apply {
                                     setPoints(listOf(anchor, target))
                                     outlinePaint.color = android.graphics.Color.WHITE
-                                    outlinePaint.strokeWidth = 3.2f * density
+                                    outlinePaint.strokeWidth = 2.6f * density
                                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                                     outlinePaint.alpha = 200
                                 }
                                 mapView.overlays.add(haloLine)
 
-                                // 2. Sleek vibrant spoke in member's signature color
                                 val coreLine = Polyline(mapView).apply {
                                     setPoints(listOf(anchor, target))
                                     outlinePaint.color = vibrantColor
-                                    outlinePaint.strokeWidth = 1.8f * density
+                                    outlinePaint.strokeWidth = 1.6f * density
                                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                                     outlinePaint.alpha = 230
                                 }
                                 mapView.overlays.add(coreLine)
+
+                                val hasExistingHub = drawnAnchorHubs.any {
+                                    com.example.data.GeoUtils.distanceMeters(it.latitude, it.longitude, anchor.latitude, anchor.longitude) < 5.0
+                                } || zoneIconsDrawn.any {
+                                    com.example.data.GeoUtils.distanceMeters(it.latitude, it.longitude, anchor.latitude, anchor.longitude) < 5.0
+                                }
+                                if (!hasExistingHub) {
+                                    drawnAnchorHubs.add(anchor)
+                                    val anchorDot = object : Marker(mapView) {
+                                        override fun showInfoWindow() {}
+                                    }.apply {
+                                        position = anchor
+                                        icon = MapMarkerRenderer.getOrCreateClusterAnchorDot(context)
+                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                        setOnMarkerClickListener { _, _ -> true }
+                                    }
+                                    mapView.overlays.add(anchorDot)
+                                }
                             }
                         }
                     }
@@ -953,6 +974,8 @@ fun RadarMap(
                     val timeLabel = if (isSelected || isSos || isOffline || rawTimeLabel != "now") rawTimeLabel else ""
                     val locationDurationLabel = if (isSelected || isSos || isMovingTransit) rawDurationLabel else ""
                     val showBatteryBadge = member.id != "me" && (isSelected || isSos || member.batteryPercentage <= 25 || member.isCharging)
+                    val isInCluster = layoutResult.clusters.any { it.contains(member.id) }
+                    val batteryForBadge = if (showBatteryBadge) member.batteryPercentage else -1
 
                     val memberMarker = object : Marker(mapView) {
                         override fun showInfoWindow() {
@@ -970,11 +993,22 @@ fun RadarMap(
                             isOffline = isOffline,
                             relativeTime = timeLabel,
                             locationDuration = locationDurationLabel,
-                            batteryPercentage = if (showBatteryBadge) member.batteryPercentage else -1,
+                            batteryPercentage = batteryForBadge,
                             isCharging = member.isCharging,
-                            animFrame = animTick
+                            animFrame = animTick,
+                            showStem = !isInCluster
                         )
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setAnchor(
+                            0.5f,
+                            MapMarkerRenderer.getMarkerAnchorV(
+                                context = context,
+                                isSelected = isSelected || isSos,
+                                relativeTime = timeLabel,
+                                locationDuration = locationDurationLabel,
+                                batteryPercentage = batteryForBadge,
+                                showStem = !isInCluster
+                            )
+                        )
                         setOnMarkerClickListener { _, _ ->
                             onSelectMember(member.id)
                             isFollowingSelectedMember = true
@@ -1054,7 +1088,8 @@ fun RadarMap(
                                 context = context,
                                 colorHex = "#00E676",
                                 emoji = "🟢",
-                                isSelected = false
+                                isSelected = false,
+                                showStem = false
                             )
                             setOnMarkerClickListener { _, _ -> true }
                         }
@@ -1068,7 +1103,8 @@ fun RadarMap(
                                 context = context,
                                 colorHex = "#FF1744",
                                 emoji = "🏁",
-                                isSelected = false
+                                isSelected = false,
+                                showStem = false
                             )
                             setOnMarkerClickListener { _, _ -> true }
                         }
