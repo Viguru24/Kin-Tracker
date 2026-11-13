@@ -1,6 +1,6 @@
 # Sovereign Multi-App Over-The-Air (OTA) Update Hub
 
-The sync server in this repository (`server/src/routes/updates.js` and `server/src/server_multi_ota.js`) powers the sovereign Over-The-Air (OTA) update hub for all sovereign Android applications hosted on `https://api.cosmowhisper.com/updates`.
+The sync server in this repository (`server/src/routes/updates.js`) powers the sovereign Over-The-Air (OTA) update hub for all sovereign Android applications hosted on `https://api.cosmowhisper.com/updates`.
 
 ## Supported Applications
 | App Name | Canonical Slug | Target Package / Repo |

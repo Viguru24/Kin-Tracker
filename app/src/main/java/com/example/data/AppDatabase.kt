@@ -29,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "family_tracker_db"
                 )
                 .addMigrations(MIGRATION_10_11)
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance
                 instance

@@ -21,4 +21,6 @@ server/node_modules/
 server/package-lock.json
 server/data/
 *.apk
+.build-outputs/
+debug.keystore.base64
 
