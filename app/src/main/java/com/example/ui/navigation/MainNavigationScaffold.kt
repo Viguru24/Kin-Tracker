@@ -104,6 +104,7 @@ fun MainScreen(
     var showAddDeviceDialog by remember { mutableStateOf(false) }
     var showNotificationHistory by remember { mutableStateOf(false) }
     var isCircleDigestOpen by remember { mutableStateOf(false) }
+    var editingSafeZone by remember { mutableStateOf<com.example.data.SafeZone?>(null) }
     var showAddSafeZoneDialog by remember { mutableStateOf(false) }
 
     val shouldOpenFromIntent by shouldOpenNotificationHistoryFlow.collectAsStateWithLifecycle()
@@ -124,7 +125,7 @@ fun MainScreen(
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
-    // Full-screen SOS overlay — shown when a SOS alert is triggered
+    // Full-screen SOS overlay â€” shown when a SOS alert is triggered
     var activeSosOverlay by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -325,7 +326,7 @@ fun MainScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("🚨", fontSize = 48.sp)
+                        Text("ðŸš¨", fontSize = 48.sp)
                         Text(
                             text = "FIND MY PHONE",
                             color = Color(0xFFEF4444),
@@ -383,7 +384,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("🚨", fontSize = 16.sp, maxLines = 1, softWrap = false)
+                    Text("ðŸš¨", fontSize = 16.sp, maxLines = 1, softWrap = false)
                     Text(
                         text = "Ringing $ringingNames loudly...",
                         color = Color.White,
@@ -405,7 +406,7 @@ fun MainScreen(
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(
-                            text = "🔕 Stop Ringing",
+                            text = "ðŸ”• Stop Ringing",
                             color = Color(0xFFD32F2F),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -493,7 +494,7 @@ fun MainScreen(
                         modifier = Modifier.size(46.dp).border(1.dp, SlateBorder, CircleShape),
                         elevation = FloatingActionButtonDefaults.elevation(4.dp)
                     ) {
-                        Text("👤", fontSize = 18.sp)
+                        Text("ðŸ‘¤", fontSize = 18.sp)
                     }
                 }
             }
@@ -543,7 +544,7 @@ fun MainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("🚀", fontSize = 20.sp)
+                        Text("ðŸš€", fontSize = 20.sp)
                         Text("Kin-Tracker Update v${update.versionName}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                 },
@@ -632,7 +633,7 @@ fun MainScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.weight(1f).padding(end = 8.dp)
                         ) {
-                            Text("⚙️", fontSize = 18.sp, maxLines = 1, softWrap = false)
+                            Text("âš™ï¸", fontSize = 18.sp, maxLines = 1, softWrap = false)
                             Text(
                                 text = "Circle Settings",
                                 color = TextPrimary,
@@ -650,7 +651,7 @@ fun MainScreen(
                                 modifier = Modifier.clickable { viewModel.checkForAppUpdatesManually() }
                             ) {
                                 Text(
-                                    text = "v${com.example.BuildConfig.VERSION_NAME} • Check Update",
+                                    text = "v${com.example.BuildConfig.VERSION_NAME} â€¢ Check Update",
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
@@ -673,7 +674,7 @@ fun MainScreen(
                                 .testTag("close_settings_button")
                         ) {
                             Text(
-                                text = "◀  Map",
+                                text = "â—€  Map",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
@@ -765,6 +766,13 @@ fun MainScreen(
                                 isSettingsOpen = false
                                 showAddSafeZoneDialog = true
                             },
+                            safeZones = safeZones,
+                            onEditSafeZone = { z ->
+                                editingSafeZone = z
+                                isSettingsOpen = false
+                                showAddSafeZoneDialog = true
+                            },
+                            onDeleteSafeZone = { z -> viewModel.removeSafeZone(z) },
                             shoppingActiveCount = shoppingItems.count { !it.isChecked },
                             serverUrl = serverUrl,
                             onUpdateServerUrl = { newUrl -> viewModel.updateServerUrl(newUrl) },
@@ -779,7 +787,7 @@ fun MainScreen(
             com.example.ui.FeedbackDialog(
                 onDismiss = { isFeedbackOpen = false },
                 onFeedbackSubmitted = {
-                    viewModel.triggerUIFeedback("Thank you for your feedback! 🚀")
+                    viewModel.triggerUIFeedback("Thank you for your feedback! ðŸš€")
                 }
             )
         }
@@ -819,107 +827,15 @@ fun MainScreen(
             )
         }
 
-        if (showAddSafeZoneDialog) {
-            var newZoneName by remember { mutableStateOf("") }
-            var newZoneRadius by remember { mutableStateOf(80f) }
-            var newZoneIcon by remember { mutableStateOf("home") }
-
-            AlertDialog(
-                onDismissRequest = { showAddSafeZoneDialog = false },
-                title = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("🛡️", fontSize = 20.sp)
-                        Text(text = "Create Safe Zone", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        Text(text = "Define a new geofenced alert boundary for your circle.", color = TextSecondary, fontSize = 12.sp)
-
-                        OutlinedTextField(
-                            value = newZoneName,
-                            onValueChange = { newZoneName = it },
-                            label = { Text("Zone Name (e.g. School, Gym, Park)") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedBorderColor = RadarCyan,
-                                unfocusedBorderColor = SlateBorder
-                            ),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Column {
-                            Text(text = "Radius: ${newZoneRadius.toInt()} meters", color = TextPrimary, fontSize = 12.sp)
-                            Slider(
-                                value = newZoneRadius,
-                                onValueChange = { newZoneRadius = it },
-                                valueRange = 30f..250f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = RadarCyan,
-                                    activeTrackColor = RadarCyan
-                                )
-                            )
-                        }
-
-                        Text(text = "Select Zone Icon Type:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            listOf("home" to "🏠", "school" to "🏫", "gym" to "💪", "work" to "💼", "shop" to "🛒").forEach { (type, emoji) ->
-                                val isSelected = newZoneIcon == type
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) RadarCyan else Color(0xFFF0F2F6))
-                                        .clickable { newZoneIcon = type }
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(text = emoji, fontSize = 16.sp)
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val meLoc = members.firstOrNull { it.id == "me" }
-                            val lat = meLoc?.y ?: homeLat
-                            val lng = meLoc?.x ?: homeLng
-                            viewModel.addSafeZone(
-                                com.example.data.SafeZone(
-                                    id = "zone_" + System.currentTimeMillis(),
-                                    name = newZoneName.ifBlank { "Safe Zone" },
-                                    latitude = lat,
-                                    longitude = lng,
-                                    radiusMeters = newZoneRadius.toDouble(),
-                                    iconName = newZoneIcon
-                                )
-                            )
-                            showAddSafeZoneDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = RadarCyan)
-                    ) {
-                        Text("Save Zone", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAddSafeZoneDialog = false }) {
-                        Text("Cancel", color = TextSecondary)
-                    }
-                },
-                containerColor = CosmicSlateCard,
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
+        com.example.ui.map.AddSafeZoneDialog(
+            visible = showAddSafeZoneDialog,
+            onDismiss = { showAddSafeZoneDialog = false; editingSafeZone = null },
+            onAddSafeZone = { z -> if (editingSafeZone != null) viewModel.updateSafeZone(z) else viewModel.addSafeZone(z) },
+            members = members,
+            homeLat = homeLat,
+            homeLng = homeLng,
+            editingZone = editingSafeZone
+        )
 
         // Floating Dynamic Alerts Toast HUD Overlay (drawn last = always on top in Box)
         FloatingAlertToast(
@@ -931,7 +847,7 @@ fun MainScreen(
                 .zIndex(100f)
         )
 
-        // Full-Screen SOS Emergency Overlay — covers everything, impossible to miss
+        // Full-Screen SOS Emergency Overlay â€” covers everything, impossible to miss
         SosEmergencyOverlay(
             activeSosOverlay = activeSosOverlay,
             onDismiss = { activeSosOverlay = null },
@@ -1008,7 +924,7 @@ fun SubFamilyBubble(
             modifier = Modifier.weight(1f, fill = false)
         )
         Text(
-            text = "🗺️",
+            text = "ðŸ—ºï¸",
             fontSize = 12.sp
         )
     }

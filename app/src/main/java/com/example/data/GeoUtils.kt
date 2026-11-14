@@ -78,6 +78,29 @@ object GeoUtils {
         iconName = "school"
     )
 
+    val DEFAULT_WESTSIDE_CARE_HOME = SafeZone(
+        id = "zone_westside_care_home",
+        name = "Westside Care Home",
+        latitude = 51.3432902,
+        longitude = -0.1330773,
+        radiusMeters = 150.0,
+        iconName = "work"
+    )
+
+    val DEFAULT_WESTMINSTER_KINGSWAY_COLLEGE = SafeZone(
+        id = "zone_westminster_college",
+        name = "Westminster Kingsway College",
+        latitude = 51.4948287,
+        longitude = -0.1353383,
+        radiusMeters = 180.0,
+        iconName = "school"
+    )
+
+    val INITIAL_SEEDED_WORKPLACES: List<SafeZone> = listOf(
+        DEFAULT_WESTSIDE_CARE_HOME,
+        DEFAULT_WESTMINSTER_KINGSWAY_COLLEGE
+    )
+
     /**
      * Computes a realistic effective radius for a SafeZone so large school campuses
      * and indoor Wi-Fi/cellular triangulation drift do not cause boundary bounce.

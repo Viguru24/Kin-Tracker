@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.familytracker.lnvwe"
     minSdk = 24
     targetSdk = 36
-    versionCode = 52
-    versionName = "2.8.6"
+    versionCode = 53
+    versionName = "2.8.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

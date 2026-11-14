@@ -56,47 +56,11 @@ enum class TransitMode(val icon: String, val label: String) {
 }
 
 /**
- * Accurately determines the transit mode based on speed, railway corridor detection, and explicit status text.
+ * Accurately determines the transit mode based on speed, railway corridor detection,
+ * inertial cadence/hysteresis, and explicit status text.
  */
 fun classifyTransitMode(speedMph: Double, statusText: String = "", memberId: String = ""): TransitMode {
-    // 1. Check for manual user override if set
-    if (memberId.isNotBlank()) {
-        RailwayTransitDetector.getManualOverride(memberId)?.let { return it }
-    }
-
-    val statusLower = statusText.lowercase()
-    return when {
-        statusLower.contains("train") || statusLower.contains("transit") || statusLower.contains("rail") || statusLower.contains("metro") || statusLower.contains("subway") || statusLower.contains("tube") -> {
-            TransitMode.TRAIN
-        }
-        memberId.isNotBlank() && RailwayTransitDetector.isMemberOnRailway(memberId) && speedMph >= 1.0 -> {
-            TransitMode.TRAIN
-        }
-        statusLower.contains("bike") || statusLower.contains("bicycle") || statusLower.contains("cycling") || statusLower.contains("cycle") -> {
-            TransitMode.CYCLING
-        }
-        statusLower.contains("walk") || statusLower.contains("foot") || statusLower.contains("hiking") || statusLower.contains("steps") || statusLower.contains("run") || statusLower.contains("jog") -> {
-            TransitMode.WALKING
-        }
-        statusLower.contains("drive") || statusLower.contains("driving") || statusLower.contains("car") || statusLower.contains("motorway") || statusLower.contains("highway") -> {
-            TransitMode.DRIVING
-        }
-        speedMph < 0.6 -> {
-            TransitMode.STATIONARY
-        }
-        speedMph in 0.6..4.5 -> {
-            TransitMode.WALKING
-        }
-        speedMph in 4.51..16.0 -> {
-            TransitMode.CYCLING
-        }
-        speedMph in 16.01..80.0 -> {
-            TransitMode.DRIVING
-        }
-        else -> {
-            TransitMode.TRAIN
-        }
-    }
+    return TransitClassifier.classifyCurrent(speedMph = speedMph, statusText = statusText, memberId = memberId)
 }
 
 /**

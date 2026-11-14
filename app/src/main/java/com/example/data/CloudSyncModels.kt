@@ -3,6 +3,17 @@ package com.example.data
 import com.squareup.moshi.JsonClass
 
 @JsonClass(generateAdapter = true)
+data class CloudSafeZone(
+    val id: String = "",
+    val name: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val radiusMeters: Double = 150.0,
+    val iconName: String = "work",
+    val updatedAt: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
 data class CloudGroupPayload(
     val homeLat: Double,
     val homeLng: Double,
@@ -13,6 +24,8 @@ data class CloudGroupPayload(
     val pinCode: String = "",
     val shoppingItems: List<CloudShoppingItem> = emptyList(),
     val deletedShoppingItems: Map<String, Long> = emptyMap(),
+    val safeZones: List<CloudSafeZone> = emptyList(),
+    val deletedSafeZones: Map<String, Long> = emptyMap(),
     val workLat: Double = 0.0,
     val workLng: Double = 0.0,
     val isWorkCalibrated: Boolean = false,
@@ -95,7 +108,9 @@ data class CloudMember(
     val localIp: String = "",
     val isAudioTransmitter: Boolean = false,
     val isLocationPaused: Boolean = false,
-    val alarmRequestedAt: Long = 0L
+    val alarmRequestedAt: Long = 0L,
+    val transitMode: String = "",
+    val transitConfidence: Int = 0
 )
 
 // ============================================================================
@@ -163,7 +178,8 @@ data class CircleSyncResponse(
     val workRadiusMeters: Double = AppConfig.DEFAULT_WORK_RADIUS_METERS,
     val lastUpdated: Long = 0L,
     val members: List<CloudMember> = emptyList(),
-    val shoppingItems: List<CloudShoppingItem> = emptyList()
+    val shoppingItems: List<CloudShoppingItem> = emptyList(),
+    val safeZones: List<CloudSafeZone> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)

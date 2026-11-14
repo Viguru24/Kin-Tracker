@@ -277,6 +277,21 @@ class CloudSyncManager(
 
             val isLocPaused = prefs.getBoolean("isLocationPaused", prefs.getBoolean("is_location_paused", false))
             val isGhostMode = System.currentTimeMillis() < ghostModeExpiryTime.value
+            val selfEffectiveSpeedMph = if (isGhostMode || isLocPaused) 0.0 else meMember.speedMph
+            val selfEffectiveStatus = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else getMyActiveStatusText(meMember.statusText)
+            val selfTransitMode = if (isGhostMode || isLocPaused || selfEffectiveStatus.startsWith("At Home", ignoreCase = true) || (selfEffectiveStatus.startsWith("At ", ignoreCase = true) && selfEffectiveSpeedMph < 3.5)) {
+                com.example.data.TransitMode.STATIONARY
+            } else {
+                com.example.data.TransitClassifier.observeSample(
+                    memberId = "me",
+                    lat = meMember.y,
+                    lng = meMember.x,
+                    reportedSpeedMph = selfEffectiveSpeedMph,
+                    statusText = selfEffectiveStatus,
+                    isRailway = com.example.data.RailwayTransitDetector.isMemberOnRailway("me"),
+                    inertialHint = com.example.data.InertialActivityDetector.getRecentHint()
+                )
+            }
             val myCloudMember = CloudMember(
                 id = myCloudId,
                 name = myName,
@@ -285,8 +300,8 @@ class CloudSyncManager(
                 y = if (isGhostMode) 0.0 else meMember.y,
                 batteryPercentage = meMember.batteryPercentage,
                 isCharging = meMember.isCharging,
-                speedMph = if (isGhostMode || isLocPaused) 0.0 else meMember.speedMph,
-                statusText = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else getMyActiveStatusText(meMember.statusText),
+                speedMph = selfEffectiveSpeedMph,
+                statusText = selfEffectiveStatus,
                 isComingHome = if (isGhostMode || isLocPaused) false else meMember.isComingHome,
                 etaMinutes = if (isGhostMode || isLocPaused) 0 else meMember.etaMinutes,
                 lastActive = lastActiveTimestamp,
@@ -294,7 +309,8 @@ class CloudSyncManager(
                 locationSince = meMember.locationSince,
                 localIp = com.example.data.RoomAudioStreamManager.getLocalIpAddress(application),
                 isAudioTransmitter = com.example.data.RoomAudioStreamManager.isTransmitterActive.value,
-                isLocationPaused = isLocPaused
+                isLocationPaused = isLocPaused,
+                transitMode = selfTransitMode.name
             )
 
             // Sync and Merge Shopping items with cloud tombstones
@@ -307,6 +323,15 @@ class CloudSyncManager(
             )
             val finalShoppingList = shoppingSyncResult.finalItems
             val mergedDeletions = shoppingSyncResult.mergedDeletions
+
+            // Sync and Merge custom Safe Zones across the circle using LWW timestamps + tombstones
+            val safeZoneMetaPrefs = application.getSharedPreferences("safe_zone_sync_meta", android.content.Context.MODE_PRIVATE)
+            val safeZoneSyncResult = SyncResolutionHelper.syncSafeZonesWithDatabase(
+                repository = repository,
+                metaPrefs = safeZoneMetaPrefs,
+                incomingZones = payload?.safeZones ?: emptyList(),
+                incomingDeletions = payload?.deletedSafeZones ?: emptyMap()
+            )
 
             val newPayload = if (payload != null) {
                 if (payload.isHomeCalibrated && payload.homeLat != 0.0 && payload.homeLng != 0.0) {
@@ -429,6 +454,8 @@ class CloudSyncManager(
                     members = updatedMembers,
                     shoppingItems = finalShoppingList,
                     deletedShoppingItems = mergedDeletions,
+                    safeZones = safeZoneSyncResult.finalZones,
+                    deletedSafeZones = safeZoneSyncResult.mergedDeletions,
                     completedTrips = emptyList() // CRITICAL: Never re-upload 90KB completed trip breadcrumbs
                 )
             } else {
@@ -445,6 +472,8 @@ class CloudSyncManager(
                     members = mapOf(myCloudId to myCloudMember),
                     shoppingItems = finalShoppingList,
                     deletedShoppingItems = mergedDeletions,
+                    safeZones = safeZoneSyncResult.finalZones,
+                    deletedSafeZones = safeZoneSyncResult.mergedDeletions,
                     completedTrips = emptyList()
                 )
             }
@@ -466,8 +495,12 @@ class CloudSyncManager(
                 myCloudMember.isLocationPaused,
                 myCloudMember.isAudioTransmitter,
                 myCloudMember.localIp,
+                myCloudMember.transitMode,
                 finalShoppingList.size,
-                mergedDeletions.size
+                mergedDeletions.size,
+                safeZoneSyncResult.finalZones.size,
+                safeZoneSyncResult.finalZones.maxOfOrNull { it.updatedAt } ?: 0L,
+                safeZoneSyncResult.mergedDeletions.size
             ).joinToString("|")
             val shouldPut = !pullOnly && (
                 payload == null ||
@@ -858,6 +891,15 @@ class CloudSyncManager(
                 repository.updateMember(mappedLocal)
                 if (mappedLocal.x != 0.0 && mappedLocal.y != 0.0) {
                     repository.recordBreadcrumbThrottled(mappedLocal.id, mappedLocal.y, mappedLocal.x, mappedLocal.speedMph)
+                    com.example.data.TransitClassifier.observeSample(
+                        memberId = mappedLocal.id,
+                        lat = mappedLocal.y,
+                        lng = mappedLocal.x,
+                        reportedSpeedMph = mappedLocal.speedMph,
+                        statusText = mappedLocal.statusText,
+                        isRailway = com.example.data.RailwayTransitDetector.isMemberOnRailway(mappedLocal.id),
+                        cloudTransitMode = cloudM.transitMode
+                    )
                     com.example.data.RailwayTransitDetector.checkRailwayCorridorAsync(
                         memberId = mappedLocal.id,
                         lat = mappedLocal.y,

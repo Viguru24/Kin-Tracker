@@ -585,6 +585,15 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
                     val newLng = if (isLegacyCoord) com.example.data.GeoUtils.DEFAULT_WOODCOTE_HIGH_SCHOOL.longitude else highSchoolMatch.longitude
                     repository.insertSafeZone(highSchoolMatch.copy(latitude = newLat, longitude = newLng, radiusMeters = maxOf(highSchoolMatch.radiusMeters, 220.0)))
                 }
+
+                // 3. Seed family workplaces (Westside Care Home, Westminster Kingsway College) unless deleted by the user
+                val metaPrefs = getApplication<Application>().getSharedPreferences("safe_zone_sync_meta", android.content.Context.MODE_PRIVATE)
+                for (seed in com.example.data.GeoUtils.INITIAL_SEEDED_WORKPLACES) {
+                    val present = existingZones.any { it.id == seed.id }
+                    if (!present && !com.example.data.sync.SyncResolutionHelper.isSafeZoneDeleted(metaPrefs, seed.id)) {
+                        repository.insertSafeZone(seed)
+                    }
+                }
             } catch (_: Exception) {}
 
             val prefs = getApplication<Application>().getSharedPreferences("kintracker_prefs", android.content.Context.MODE_PRIVATE)
@@ -1878,17 +1887,32 @@ class FamilyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun safeZoneMetaPrefs() = getApplication<Application>().getSharedPreferences("safe_zone_sync_meta", android.content.Context.MODE_PRIVATE)
+
     fun addSafeZone(zone: SafeZone) {
         viewModelScope.launch {
             repository.insertSafeZone(zone)
+            com.example.data.sync.SyncResolutionHelper.recordSafeZoneUpsert(safeZoneMetaPrefs(), zone.id)
+            cloudSyncManager.triggerSyncNow(pullOnly = false, bypassThrottle = true)
             repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "created safe zone: ${zone.name}", iconName = "check_in"))
             _uiEvents.emit("Safe Zone ${zone.name} created successfully.")
+        }
+    }
+
+    fun updateSafeZone(zone: SafeZone) {
+        viewModelScope.launch {
+            repository.insertSafeZone(zone)
+            com.example.data.sync.SyncResolutionHelper.recordSafeZoneUpsert(safeZoneMetaPrefs(), zone.id)
+            cloudSyncManager.triggerSyncNow(pullOnly = false, bypassThrottle = true)
+            _uiEvents.emit("Safe Zone ${zone.name} updated.")
         }
     }
 
     fun removeSafeZone(zone: SafeZone) {
         viewModelScope.launch {
             repository.deleteSafeZone(zone)
+            com.example.data.sync.SyncResolutionHelper.recordSafeZoneDeletion(safeZoneMetaPrefs(), zone.id)
+            cloudSyncManager.triggerSyncNow(pullOnly = false, bypassThrottle = true)
             repository.insertLog(ActivityLog(memberId = "system", memberName = "System", actionText = "deleted safe zone: ${zone.name}", iconName = "away"))
             _uiEvents.emit("Safe Zone ${zone.name} deleted.")
         }

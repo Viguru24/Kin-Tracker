@@ -124,6 +124,7 @@ object BackgroundSyncProcessor {
             speedMph = resolvedSelfSpeed
         )
         if (!isAtHome && !isAtSafeZone) {
+            InertialActivityDetector.maybeSampleBurst(context, speedMph)
             RailwayTransitDetector.checkRailwayCorridorAsync("me", location.latitude, location.longitude, speedMph)
         }
 
@@ -357,6 +358,22 @@ object BackgroundSyncProcessor {
             val isGhostMode = System.currentTimeMillis() < ghostExpiry
 
             val isLocPaused = prefs.getBoolean("isLocationPaused", prefs.getBoolean("is_location_paused", false))
+            val selfEffectiveSpeedMph = if (isGhostMode || isAtHome || isAtSafeZone || isLocPaused) 0.0 else speedMph
+            val selfEffectiveStatus = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else status
+            val selfTransitMode = if (isAtHome || isAtSafeZone || isLocPaused || isGhostMode) {
+                TransitMode.STATIONARY
+            } else {
+                TransitClassifier.observeSample(
+                    memberId = "me",
+                    lat = targetY,
+                    lng = targetX,
+                    reportedSpeedMph = selfEffectiveSpeedMph,
+                    statusText = selfEffectiveStatus,
+                    isRailway = RailwayTransitDetector.isMemberOnRailway("me"),
+                    inertialHint = InertialActivityDetector.getRecentHint()
+                )
+            }
+
             val myCloudMember = CloudMember(
                 id = myCloudId,
                 name = myName,
@@ -365,8 +382,8 @@ object BackgroundSyncProcessor {
                 y = if (isGhostMode) 0.0 else targetY,
                 batteryPercentage = batteryPct,
                 isCharging = isCharging,
-                speedMph = if (isGhostMode || isAtHome || isAtSafeZone || isLocPaused) 0.0 else speedMph,
-                statusText = if (isLocPaused) "⏸️ Paused (Battery Saver)" else if (isGhostMode) "Ghost Mode Active (Location Paused)" else status,
+                speedMph = selfEffectiveSpeedMph,
+                statusText = selfEffectiveStatus,
                 isComingHome = false,
                 etaMinutes = 0,
                 lastActive = lastActiveTimestamp,
@@ -374,7 +391,8 @@ object BackgroundSyncProcessor {
                 locationSince = resolvedLocationSince,
                 localIp = RoomAudioStreamManager.getLocalIpAddress(context),
                 isAudioTransmitter = RoomAudioStreamManager.isTransmitterActive.value,
-                isLocationPaused = isLocPaused
+                isLocationPaused = isLocPaused,
+                transitMode = selfTransitMode.name
             )
 
             // 3. Sync and Merge Shopping items in background with cloud tombstones
@@ -387,6 +405,16 @@ object BackgroundSyncProcessor {
             )
             val finalShoppingList = shoppingSyncResult.finalItems
             val mergedDeletions = shoppingSyncResult.mergedDeletions
+
+            // 3b. Sync and Merge custom Safe Zones across the circle using LWW timestamps + tombstones
+            val safeZoneMetaPrefs = context.getSharedPreferences("safe_zone_sync_meta", Context.MODE_PRIVATE)
+            val safeZoneSyncResult = SyncResolutionHelper.syncSafeZonesWithDatabase(
+                repository = repository,
+                metaPrefs = safeZoneMetaPrefs,
+                incomingZones = payload?.safeZones ?: emptyList(),
+                incomingDeletions = payload?.deletedSafeZones ?: emptyMap()
+            )
+            val syncedCustomSafeZones = try { repository.getAllSafeZonesOnce() } catch (_: Exception) { customSafeZones }
 
             // 4. Clean up stale / duplicate devices in cloud payload
             val updatedMembers = payload?.members?.toMutableMap() ?: mutableMapOf()
@@ -441,6 +469,8 @@ object BackgroundSyncProcessor {
                     members = updatedMembers,
                     shoppingItems = finalShoppingList,
                     deletedShoppingItems = mergedDeletions,
+                    safeZones = safeZoneSyncResult.finalZones,
+                    deletedSafeZones = safeZoneSyncResult.mergedDeletions,
                     completedTrips = emptyList() // CRITICAL: Never re-upload 90KB completed trip breadcrumbs
                 )
             } else {
@@ -452,6 +482,8 @@ object BackgroundSyncProcessor {
                     members = mapOf(myCloudId to myCloudMember),
                     shoppingItems = finalShoppingList,
                     deletedShoppingItems = mergedDeletions,
+                    safeZones = safeZoneSyncResult.finalZones,
+                    deletedSafeZones = safeZoneSyncResult.mergedDeletions,
                     completedTrips = emptyList()
                 )
             }
@@ -536,7 +568,7 @@ object BackgroundSyncProcessor {
                 val matchedSafeZone = GeoUtils.matchSafeZone(
                     lat = effY,
                     lng = effX,
-                    customZones = customSafeZones,
+                    customZones = syncedCustomSafeZones,
                     currentStatusText = prevOrCurrentStatus,
                     speedMph = cloudM.speedMph
                 )
@@ -626,6 +658,15 @@ object BackgroundSyncProcessor {
                     repository.insertFamilyMembers(listOf(mappedMember))
                 }
                 if (mappedMember.x != 0.0 && mappedMember.y != 0.0) {
+                    TransitClassifier.observeSample(
+                        memberId = mappedMember.id,
+                        lat = mappedMember.y,
+                        lng = mappedMember.x,
+                        reportedSpeedMph = mappedMember.speedMph,
+                        statusText = mappedMember.statusText,
+                        isRailway = RailwayTransitDetector.isMemberOnRailway(mappedMember.id),
+                        cloudTransitMode = cloudM.transitMode
+                    )
                     RailwayTransitDetector.checkRailwayCorridorAsync(
                         memberId = mappedMember.id,
                         lat = mappedMember.y,

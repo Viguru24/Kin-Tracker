@@ -92,6 +92,9 @@ fun SettingsHub(
     onOpenCircleDigest: (() -> Unit)? = null,
     onOpenShoppingList: (() -> Unit)? = null,
     onOpenAddSafeZone: (() -> Unit)? = null,
+    safeZones: List<com.example.data.SafeZone> = emptyList(),
+    onEditSafeZone: ((com.example.data.SafeZone) -> Unit)? = null,
+    onDeleteSafeZone: ((com.example.data.SafeZone) -> Unit)? = null,
     shoppingActiveCount: Int = 0,
     onLoadTrips: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -186,7 +189,11 @@ fun SettingsHub(
                     workRadiusMeters = workRadiusMeters,
                     onUpdateWorkRadius = onUpdateWorkRadius,
                     onCalibrateWork = onCalibrateWork,
-                    onClearWork = onClearWork
+                    onClearWork = onClearWork,
+                    safeZones = safeZones,
+                    onAddPlace = onOpenAddSafeZone,
+                    onEditPlace = onEditSafeZone,
+                    onDeletePlace = onDeleteSafeZone
                 )
                 SettingsTab.ALERTS -> AlertsTabContent(
                     isDepartureAlertsEnabled = isDepartureAlertsEnabled,
