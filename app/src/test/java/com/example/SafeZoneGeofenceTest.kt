@@ -249,9 +249,8 @@ class SafeZoneGeofenceTest {
                 posDad!!.latitude, posDad.longitude,
                 posEloise!!.latitude, posEloise.longitude
             )
-            val metersPerPx = com.example.ui.metersPerPixelAtZoom((posDad.latitude + posEloise.latitude) / 2.0, zoom)
-            val screenPixels = distMeters / metersPerPx
-            val screenDp = screenPixels / density
+            val metersPerDp = com.example.ui.metersPerPixelAtZoom((posDad.latitude + posEloise.latitude) / 2.0, zoom)
+            val screenDp = distMeters / metersPerDp
 
             assertTrue(
                 "At zoom $zoom, screen separation ($screenDp dp) must be at least 33dp so compact 30dp bubbles do not overlap",
@@ -327,8 +326,8 @@ class SafeZoneGeofenceTest {
             posDad!!.latitude, posDad.longitude,
             posEloise!!.latitude, posEloise.longitude
         )
-        val metersPerPx = com.example.ui.metersPerPixelAtZoom(51.3500000, zoom)
-        val screenDp = (distMeters / metersPerPx) / density
+        val metersPerDp = com.example.ui.metersPerPixelAtZoom(51.3500000, zoom)
+        val screenDp = distMeters / metersPerDp
 
         assertTrue(
             "Moving co-located members must be separated by at least 33dp on screen so compact bubbles never overlap (was $screenDp dp)",
@@ -363,7 +362,7 @@ class SafeZoneGeofenceTest {
             val pos = homeLayout.adjustedCoordinates[member.id]!!
             val anchor = homeLayout.clusterAnchorPoints[member.id]!!
             val spokeMeters = com.example.data.GeoUtils.distanceMeters(anchor.latitude, anchor.longitude, pos.latitude, pos.longitude)
-            val spokeDp = (spokeMeters / com.example.ui.metersPerPixelAtZoom(anchor.latitude, 16.0)) / density
+            val spokeDp = spokeMeters / com.example.ui.metersPerPixelAtZoom(anchor.latitude, 16.0)
             assertTrue("5-member home spoke must stay compact (<= 31dp), was $spokeDp dp", spokeDp <= 31.0)
             assertTrue("Spoke length must stay positive", spokeDp >= 26.0)
         }

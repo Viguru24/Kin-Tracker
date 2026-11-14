@@ -37,12 +37,12 @@ fun statusIndicatesTravel(m: FamilyMember): Boolean {
 }
 
 /**
- * Calculates ground resolution (meters per screen pixel) at a given latitude and map zoom level.
- * Used for dynamic, zoom-adaptive marker deconfliction so faces NEVER overlap at ANY zoom level.
+ * Calculates ground resolution (meters per DP) at a given latitude and MapLibre zoom level.
+ * MapLibre uses a 512dp world tile at zoom 0 (78271.51696 m/dp at equator).
  */
 fun metersPerPixelAtZoom(latitude: Double, zoom: Double): Double {
     val cosLat = kotlin.math.cos(Math.toRadians(latitude)).coerceAtLeast(0.01)
-    return (156543.03392 * cosLat) / Math.pow(2.0, zoom.coerceIn(2.0, 21.0))
+    return (78271.51696 * cosLat) / Math.pow(2.0, zoom.coerceIn(2.0, 21.0))
 }
 
 /**
@@ -248,9 +248,8 @@ fun computeClusterLayout(
             4 -> 26.0
             else -> maxOf(26.0, 17.5 / kotlin.math.sin(Math.PI / cluster.size))
         }
-        val radiusPx = radiusDp * density
-        val metersPerPx = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
-        val spreadRadiusMeters = radiusPx * metersPerPx
+        val metersPerDp = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
+        val spreadRadiusMeters = radiusDp * metersPerDp
 
         val cosLat = kotlin.math.cos(Math.toRadians(anchorGeo.latitude)).coerceAtLeast(0.01)
 
@@ -285,7 +284,7 @@ fun computeClusterLayout(
     }
 
     // Universal screen-space deconfliction pass: guarantees that NO TWO compact 30dp face circles overlap on screen.
-    val minMarkerSeparationPx = 33.0 * density // Minimum 33dp center-to-center separation for 30dp bubbles
+    val minMarkerSeparationDp = 33.0 // Minimum 33dp center-to-center separation for 30dp bubbles
     val activeIds = activeMembers.map { it.id }
     repeat(2) {
         for (i in 0 until activeIds.size) {
@@ -296,8 +295,8 @@ fun computeClusterLayout(
                 val posB = adjustedCoordinates[idB] ?: continue
 
                 val avgLat = (posA.latitude + posB.latitude) / 2.0
-                val metersPerPx = metersPerPixelAtZoom(avgLat, zoomLevel)
-                val minSeparationMeters = minMarkerSeparationPx * metersPerPx
+                val metersPerDp = metersPerPixelAtZoom(avgLat, zoomLevel)
+                val minSeparationMeters = minMarkerSeparationDp * metersPerDp
                 val distM = com.example.data.GeoUtils.distanceMeters(posA.latitude, posA.longitude, posB.latitude, posB.longitude)
 
                 if (distM < minSeparationMeters) {

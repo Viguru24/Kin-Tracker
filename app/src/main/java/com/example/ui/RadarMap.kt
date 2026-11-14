@@ -632,6 +632,13 @@ fun RadarMap(
                             }
                         }
 
+                        map.addOnCameraMoveListener {
+                            val z = map.cameraPosition.zoom
+                            if (kotlin.math.abs(z - mapZoomLevel) > 0.15) {
+                                mapZoomLevel = z
+                            }
+                        }
+
                         map.addOnCameraIdleListener {
                             isUserInteractingWithMap = false
                             val z = map.cameraPosition.zoom
