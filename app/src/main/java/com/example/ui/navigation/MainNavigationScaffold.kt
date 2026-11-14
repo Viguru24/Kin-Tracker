@@ -125,7 +125,7 @@ fun MainScreen(
 
     // Top toast alert notification channel overlay
     var activeAlertMessage by remember { mutableStateOf<String?>(null) }
-    // Full-screen SOS overlay â€” shown when a SOS alert is triggered
+    // Full-screen SOS overlay — shown when a SOS alert is triggered
     var activeSosOverlay by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -326,7 +326,7 @@ fun MainScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("ðŸš¨", fontSize = 48.sp)
+                        Text("🚨", fontSize = 48.sp)
                         Text(
                             text = "FIND MY PHONE",
                             color = Color(0xFFEF4444),
@@ -384,7 +384,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("ðŸš¨", fontSize = 16.sp, maxLines = 1, softWrap = false)
+                    Text("🚨", fontSize = 16.sp, maxLines = 1, softWrap = false)
                     Text(
                         text = "Ringing $ringingNames loudly...",
                         color = Color.White,
@@ -406,7 +406,7 @@ fun MainScreen(
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(
-                            text = "ðŸ”• Stop Ringing",
+                            text = "🔕 Stop Ringing",
                             color = Color(0xFFD32F2F),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -494,7 +494,7 @@ fun MainScreen(
                         modifier = Modifier.size(46.dp).border(1.dp, SlateBorder, CircleShape),
                         elevation = FloatingActionButtonDefaults.elevation(4.dp)
                     ) {
-                        Text("ðŸ‘¤", fontSize = 18.sp)
+                        Text("👤", fontSize = 18.sp)
                     }
                 }
             }
@@ -544,7 +544,7 @@ fun MainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("ðŸš€", fontSize = 20.sp)
+                        Text("🚀", fontSize = 20.sp)
                         Text("Kin-Tracker Update v${update.versionName}", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                 },
@@ -630,14 +630,14 @@ fun MainScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f).padding(end = 6.dp)
                         ) {
-                            Text("âš™ï¸", fontSize = 18.sp, maxLines = 1, softWrap = false)
+                            Text("⚙️", fontSize = 16.sp, maxLines = 1, softWrap = false)
                             Text(
                                 text = "Circle Settings",
                                 color = TextPrimary,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 softWrap = false,
@@ -651,7 +651,7 @@ fun MainScreen(
                                 modifier = Modifier.clickable { viewModel.checkForAppUpdatesManually() }
                             ) {
                                 Text(
-                                    text = "v${com.example.BuildConfig.VERSION_NAME} â€¢ Check Update",
+                                    text = "v${com.example.BuildConfig.VERSION_NAME} • Update",
                                     color = RadarCyan,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
@@ -674,7 +674,7 @@ fun MainScreen(
                                 .testTag("close_settings_button")
                         ) {
                             Text(
-                                text = "â—€  Map",
+                                text = "◀  Map",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
@@ -787,7 +787,7 @@ fun MainScreen(
             com.example.ui.FeedbackDialog(
                 onDismiss = { isFeedbackOpen = false },
                 onFeedbackSubmitted = {
-                    viewModel.triggerUIFeedback("Thank you for your feedback! ðŸš€")
+                    viewModel.triggerUIFeedback("Thank you for your feedback! 🚀")
                 }
             )
         }
@@ -847,7 +847,7 @@ fun MainScreen(
                 .zIndex(100f)
         )
 
-        // Full-Screen SOS Emergency Overlay â€” covers everything, impossible to miss
+        // Full-Screen SOS Emergency Overlay — covers everything, impossible to miss
         SosEmergencyOverlay(
             activeSosOverlay = activeSosOverlay,
             onDismiss = { activeSosOverlay = null },
@@ -924,7 +924,7 @@ fun SubFamilyBubble(
             modifier = Modifier.weight(1f, fill = false)
         )
         Text(
-            text = "ðŸ—ºï¸",
+            text = "🗺️",
             fontSize = 12.sp
         )
     }
