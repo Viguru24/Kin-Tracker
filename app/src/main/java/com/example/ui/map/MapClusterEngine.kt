@@ -179,9 +179,9 @@ fun computeClusterLayout(
 
     // D. Form Ad-Hoc Co-Located Clusters for members outside zones
     val visited = mutableSetOf<String>()
-    val collisionThresholdPx = 40.0 * density
+    val collisionThresholdDp = 50.0
     val avgLatForAdhoc = if (unassignedMembers.isNotEmpty()) unassignedMembers[0].y else (if (homeLat != 0.0) homeLat else 51.33)
-    val clusterThresholdMeters = maxOf(40.0, collisionThresholdPx * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
+    val clusterThresholdMeters = maxOf(40.0, collisionThresholdDp * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
 
     for (i in unassignedMembers.indices) {
         val m1 = unassignedMembers[i]

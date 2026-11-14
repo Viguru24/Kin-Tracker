@@ -193,7 +193,8 @@ fun RadarMap(
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var mapLibreRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var activeStyleMode by remember { mutableStateOf<String?>(null) }
-    var motionFrameTick by remember { mutableStateOf(0) }
+    val latestMemberIconMeta = remember { java.util.concurrent.ConcurrentHashMap<String, Pair<String, Boolean>>() }
+    val latestStaticCenterFeatures = remember { java.util.concurrent.CopyOnWriteArrayList<org.maplibre.geojson.Feature>() }
     var isCameraFollowingMe by remember { mutableStateOf(false) }
     var isFollowingSelectedMember by remember { mutableStateOf(true) }
     var mapZoomLevel by remember { mutableStateOf(15.5) }
@@ -376,12 +377,12 @@ fun RadarMap(
     val currentSafeZones by rememberUpdatedState(safeZones)
     val currentOnSelectMember by rememberUpdatedState(onSelectMember)
 
-    // High-frequency (30 FPS) continuous road interpolation & camera follow engine
+    // High-frequency (60 FPS) continuous road interpolation & camera follow engine
     LaunchedEffect(isSettingsOpen) {
         if (isSettingsOpen) return@LaunchedEffect
         var lastFrameTime = android.os.SystemClock.uptimeMillis()
         while (isActive) {
-            kotlinx.coroutines.delay(33) // ~30 FPS smooth motion for GeoJSON symbol updates
+            kotlinx.coroutines.delay(16) // ~60 FPS smooth gliding
             val now = android.os.SystemClock.uptimeMillis()
             val dt = ((now - lastFrameTime) / 1000.0).coerceIn(0.005, 0.08)
             lastFrameTime = now
@@ -401,29 +402,24 @@ fun RadarMap(
                     val stepM = catchupSpeedMps * dt
 
                     if (distToTargetM > stepM && distToTargetM > 0.2) {
-                        // Smoothly advance toward target
                         val frac = (stepM / distToTargetM).coerceIn(0.0, 1.0)
                         val nextLat = curLat + (tgtLat - curLat) * frac
                         val nextLng = curLng + (tgtLng - curLng) * frac
                         state.currentGeo = LatLng(nextLat, nextLng)
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
-                    } else {
-                        // Reached target
+                    } else if (distToTargetM > 0.05) {
                         state.currentGeo = state.targetGeo
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
                     }
-                } else {
-                    // Stationary: ease gently to settled target
-                    if (distToTargetM > 0.1) {
-                        val factor = (6.0 * dt).coerceIn(0.0, 1.0)
-                        val nextLat = if (distToTargetM < 0.25) tgtLat else curLat + (tgtLat - curLat) * factor
-                        val nextLng = if (distToTargetM < 0.25) tgtLng else curLng + (tgtLng - curLng) * factor
-                        state.currentGeo = LatLng(nextLat, nextLng)
-                        visualCoordinates[mId] = state.currentGeo
-                        anyMoved = true
-                    }
+                } else if (distToTargetM > 0.1) {
+                    val factor = (6.0 * dt).coerceIn(0.0, 1.0)
+                    val nextLat = if (distToTargetM < 0.25) tgtLat else curLat + (tgtLat - curLat) * factor
+                    val nextLng = if (distToTargetM < 0.25) tgtLng else curLng + (tgtLng - curLng) * factor
+                    state.currentGeo = LatLng(nextLat, nextLng)
+                    visualCoordinates[mId] = state.currentGeo
+                    anyMoved = true
                 }
 
                 // Smooth camera follow for selected member when follow mode is active
@@ -433,18 +429,28 @@ fun RadarMap(
                     mId.contains(selId, ignoreCase = true) || 
                     selId.contains(mId, ignoreCase = true)
                 )
-                if (isThisMemberSelected && currentIsFollowingSelectedMember && !currentIsRouteTrailEnabled) {
+                if (anyMoved && isThisMemberSelected && currentIsFollowingSelectedMember && !currentIsRouteTrailEnabled) {
                     if (!currentIsUserInteractingWithMap) {
-                        mapLibreRef?.let { map ->
-                            map.moveCamera(CameraUpdateFactory.newLatLng(state.currentGeo))
-                            anyMoved = true
-                        }
+                        mapLibreRef?.moveCamera(CameraUpdateFactory.newLatLng(state.currentGeo))
                     }
                 }
             }
 
             if (anyMoved) {
-                motionFrameTick++
+                val style = mapLibreRef?.style
+                if (style != null && style.isFullyLoaded) {
+                    val centerList = ArrayList<org.maplibre.geojson.Feature>(latestStaticCenterFeatures)
+                    val stemList = ArrayList<org.maplibre.geojson.Feature>()
+                    latestMemberIconMeta.forEach { (mId, meta) ->
+                        val pos = visualCoordinates[mId] ?: memberVisualStates[mId]?.currentGeo ?: return@forEach
+                        val feature = MapLibreOverlayManager.markerFeature(
+                            pos.latitude, pos.longitude, meta.first, "member", mId
+                        )
+                        if (meta.second) stemList.add(feature) else centerList.add(feature)
+                    }
+                    MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_MARKERS_CENTER, centerList)
+                    MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_MARKERS_STEM, stemList)
+                }
             }
         }
     }
@@ -709,8 +715,7 @@ fun RadarMap(
                 }
             },
             update = { _ ->
-                // Read reactive state so Compose re-runs overlay sync on zoom, motion, and data changes
-                @Suppress("UNUSED_VARIABLE") val tick = motionFrameTick
+                // Read reactive state so Compose re-runs overlay sync on zoom and data changes
                 @Suppress("UNUSED_VARIABLE") val currentZoom = mapZoomLevel
                 val map = mapLibreRef ?: return@AndroidView
 
@@ -945,6 +950,7 @@ fun RadarMap(
                     val feature = MapLibreOverlayManager.markerFeature(
                         displayGeo.latitude, displayGeo.longitude, memberIconId, "member", member.id
                     )
+                    latestMemberIconMeta[member.id] = Pair(memberIconId, showStem)
                     if (showStem) {
                         stemMarkerFeatures.add(feature)
                     } else {
@@ -1023,6 +1029,8 @@ fun RadarMap(
                     }
                 }
 
+                latestStaticCenterFeatures.clear()
+                latestStaticCenterFeatures.addAll(centerMarkerFeatures.filter { it.getStringProperty("kind") != "member" })
                 MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_ZONES_FILL, zoneFillFeatures)
                 MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_ZONES_LINE, zoneLineFeatures)
                 MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_LINES_HALO, haloLineFeatures)
