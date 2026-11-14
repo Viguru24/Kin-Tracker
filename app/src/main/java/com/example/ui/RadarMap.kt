@@ -703,7 +703,7 @@ fun RadarMap(
 
                 // 1. Safe Zones geofences & markers (excluding Home)
                 com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
-                    .filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }
+                    .filter { it.iconName.lowercase() != "home" && !it.name.trim().equals("home", ignoreCase = true) }
                     .forEach { zone ->
                         zoneFillFeatures.add(
                             MapLibreOverlayManager.circlePolygonFeature(
@@ -760,7 +760,7 @@ fun RadarMap(
                 val clusters = layoutResult.clusters
 
                 val zoneIconsDrawn = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
-                    .filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }
+                    .filter { it.iconName.lowercase() != "home" && !it.name.trim().equals("home", ignoreCase = true) }
                     .map { LatLng(it.latitude, it.longitude) } +
                     if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) listOf(LatLng(workLat, workLng)) else emptyList()
                 val drawnAnchorHubs = mutableListOf<LatLng>()
