@@ -132,7 +132,10 @@ fun CircleTabContent(
                 text = "CONNECTED FAMILY MEMBERS (${members.size})",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = SecondarySlate
+                color = SecondarySlate,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
             )
             if (onCleanDuplicates != null) {
                 Surface(
@@ -146,6 +149,8 @@ fun CircleTabContent(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = RadarCyan,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }

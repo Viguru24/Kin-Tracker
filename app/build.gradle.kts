@@ -83,7 +83,7 @@ secrets {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-  implementation(libs.osmdroid.android)
+  implementation(libs.maplibre.android)
   implementation(libs.androidx.exifinterface)
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))

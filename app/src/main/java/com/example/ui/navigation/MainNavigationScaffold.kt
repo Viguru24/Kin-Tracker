@@ -664,7 +664,7 @@ fun MainScreen(
                         Button(
                             onClick = { isSettingsOpen = false },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF5D2EE6),
+                                containerColor = Color(0xFF059669),
                                 contentColor = Color.White
                             ),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),

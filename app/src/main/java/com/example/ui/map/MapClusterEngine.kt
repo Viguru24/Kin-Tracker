@@ -4,22 +4,21 @@ import com.example.data.FamilyMember
 import com.example.data.SafeZone
 import com.example.data.TransitMode
 import com.example.data.classifyTransitMode
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.overlay.Marker
+import org.maplibre.android.geometry.LatLng
 
 data class MemberVisualState(
-    var currentGeo: GeoPoint,
-    var targetGeo: GeoPoint,
+    var currentGeo: LatLng,
+    var targetGeo: LatLng,
     var speedMph: Double,
     var bearingDeg: Double,
     var lastTargetUpdateTime: Long,
     var isMoving: Boolean,
-    var markerRef: Marker? = null
+    var markerRef: Any? = null
 )
 
 data class ClusterLayoutResult(
-    val adjustedCoordinates: Map<String, GeoPoint>,
-    val clusterAnchorPoints: Map<String, GeoPoint>,
+    val adjustedCoordinates: Map<String, LatLng>,
+    val clusterAnchorPoints: Map<String, LatLng>,
     val clusters: List<List<String>>,
     /** memberId -> barrier key ("home", "zone:<id>", "work") for members locked stationary inside a barrier. */
     val barrierMembership: Map<String, String> = emptyMap()
@@ -79,8 +78,8 @@ fun computeClusterLayout(
     zoomLevel: Double = 15.5,
     density: Float = 3.0f
 ): ClusterLayoutResult {
-    val adjustedCoordinates = mutableMapOf<String, GeoPoint>()
-    val clusterAnchorPoints = mutableMapOf<String, GeoPoint>()
+    val adjustedCoordinates = mutableMapOf<String, LatLng>()
+    val clusterAnchorPoints = mutableMapOf<String, LatLng>()
     val clusters = mutableListOf<List<String>>()
     val barrierMembership = mutableMapOf<String, String>()
 
@@ -134,7 +133,7 @@ fun computeClusterLayout(
         }
 
         if (isActivelyMoving) {
-            adjustedCoordinates[m.id] = GeoPoint(m.y, m.x)
+            adjustedCoordinates[m.id] = LatLng(m.y, m.x)
             return@forEach
         }
 
@@ -156,7 +155,7 @@ fun computeClusterLayout(
     if (homeClusterMembers.size > 1) {
         clusters.add(homeClusterMembers.sorted())
     } else if (homeClusterMembers.size == 1) {
-        adjustedCoordinates[homeClusterMembers[0]] = GeoPoint(homeLat, homeLng)
+        adjustedCoordinates[homeClusterMembers[0]] = LatLng(homeLat, homeLng)
     }
 
     // B. Form Safe Zone Clusters (including default Woodcote school zones)
@@ -166,7 +165,7 @@ fun computeClusterLayout(
             if (zoneMembers.size > 1) {
                 clusters.add(zoneMembers.sorted())
             } else if (zoneMembers.size == 1) {
-                adjustedCoordinates[zoneMembers[0]] = GeoPoint(zone.latitude, zone.longitude)
+                adjustedCoordinates[zoneMembers[0]] = LatLng(zone.latitude, zone.longitude)
             }
         }
     }
@@ -175,7 +174,7 @@ fun computeClusterLayout(
     if (workClusterMembers.size > 1) {
         clusters.add(workClusterMembers.sorted())
     } else if (workClusterMembers.size == 1) {
-        adjustedCoordinates[workClusterMembers[0]] = GeoPoint(workLat, workLng)
+        adjustedCoordinates[workClusterMembers[0]] = LatLng(workLat, workLng)
     }
 
     // D. Form Ad-Hoc Co-Located Clusters for members outside zones
@@ -212,7 +211,7 @@ fun computeClusterLayout(
         } else {
             val mId = currentCluster[0]
             val member = activeMembers.first { it.id == mId }
-            adjustedCoordinates[mId] = GeoPoint(member.y, member.x)
+            adjustedCoordinates[mId] = LatLng(member.y, member.x)
         }
     }
 
@@ -227,9 +226,9 @@ fun computeClusterLayout(
         val isWorkCluster = cluster.any { workClusterMembers.contains(it) }
 
         val anchorGeo = when {
-            isHomeCluster && homeLat != 0.0 && homeLng != 0.0 -> GeoPoint(homeLat, homeLng)
-            matchedZone != null -> GeoPoint(matchedZone.latitude, matchedZone.longitude)
-            isWorkCluster && workLat != 0.0 && workLng != 0.0 -> GeoPoint(workLat, workLng)
+            isHomeCluster && homeLat != 0.0 && homeLng != 0.0 -> LatLng(homeLat, homeLng)
+            matchedZone != null -> LatLng(matchedZone.latitude, matchedZone.longitude)
+            isWorkCluster && workLat != 0.0 && workLng != 0.0 -> LatLng(workLat, workLng)
             else -> {
                 var sumLat = 0.0
                 var sumLng = 0.0
@@ -238,7 +237,7 @@ fun computeClusterLayout(
                     sumLat += member.y
                     sumLng += member.x
                 }
-                GeoPoint(sumLat / cluster.size, sumLng / cluster.size)
+                LatLng(sumLat / cluster.size, sumLng / cluster.size)
             }
         }
 
@@ -279,7 +278,7 @@ fun computeClusterLayout(
             val deltaLat = (spreadRadiusMeters * kotlin.math.sin(angle)) / 111139.0
             val deltaLng = (spreadRadiusMeters * kotlin.math.cos(angle)) / (111139.0 * cosLat)
 
-            val orbitGeo = GeoPoint(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
+            val orbitGeo = LatLng(anchorGeo.latitude + deltaLat, anchorGeo.longitude + deltaLng)
             adjustedCoordinates[mId] = orbitGeo
             clusterAnchorPoints[mId] = anchorGeo
         }
@@ -308,8 +307,8 @@ fun computeClusterLayout(
                     if (distM < 0.1) {
                         // Exactly co-located (e.g. sharing car or identical GPS): spread horizontally (West/East)
                         val shiftLng = neededShiftM / (111139.0 * cosLat)
-                        adjustedCoordinates[idA] = GeoPoint(posA.latitude, posA.longitude - shiftLng)
-                        adjustedCoordinates[idB] = GeoPoint(posB.latitude, posB.longitude + shiftLng)
+                        adjustedCoordinates[idA] = LatLng(posA.latitude, posA.longitude - shiftLng)
+                        adjustedCoordinates[idB] = LatLng(posB.latitude, posB.longitude + shiftLng)
                     } else {
                         // Push apart along their existing separation axis
                         val dLat = posB.latitude - posA.latitude
@@ -318,8 +317,8 @@ fun computeClusterLayout(
                         val shiftLat = (neededShiftM * kotlin.math.sin(angle)) / 111139.0
                         val shiftLng = (neededShiftM * kotlin.math.cos(angle)) / (111139.0 * cosLat)
 
-                        adjustedCoordinates[idA] = GeoPoint(posA.latitude - shiftLat, posA.longitude - shiftLng)
-                        adjustedCoordinates[idB] = GeoPoint(posB.latitude + shiftLat, posB.longitude + shiftLng)
+                        adjustedCoordinates[idA] = LatLng(posA.latitude - shiftLat, posA.longitude - shiftLng)
+                        adjustedCoordinates[idB] = LatLng(posB.latitude + shiftLat, posB.longitude + shiftLng)
                     }
                 }
             }

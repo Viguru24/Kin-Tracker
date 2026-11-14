@@ -56,7 +56,7 @@ import android.location.LocationManager
 import android.os.BatteryManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import org.osmdroid.config.Configuration
+import org.maplibre.android.MapLibre
 import java.io.File
 import android.speech.tts.TextToSpeech
 import java.util.Locale
@@ -384,21 +384,10 @@ class MainActivity : ComponentActivity() {
             shouldOpenNotificationHistoryFlow.value = true
         }
         
-        // Safely configure OSMDroid prior to UI rendering to prevent storage write permission crashes
+        // Initialize MapLibre SDK prior to UI rendering
         try {
-            Configuration.getInstance().load(applicationContext, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-            Configuration.getInstance().userAgentValue = packageName
-            val cacheDir = File(filesDir, "osmdroid")
-            if (!cacheDir.exists()) {
-                cacheDir.mkdirs()
-            }
-            Configuration.getInstance().osmdroidTileCache = cacheDir
-            Configuration.getInstance().osmdroidBasePath = cacheDir
-            // Keep viewed map tiles on the phone (persistent storage, large cache, 60-day expiry) so they are not re-downloaded
-            Configuration.getInstance().tileFileSystemCacheMaxBytes = 2000L * 1024 * 1024
-            Configuration.getInstance().tileFileSystemCacheTrimBytes = 1700L * 1024 * 1024
-            Configuration.getInstance().expirationOverrideDuration = 60L * 24 * 60 * 60 * 1000
-        } catch (e: Exception) {
+            MapLibre.getInstance(applicationContext)
+        } catch (_: Exception) {
             // Safe fallback
         }
 

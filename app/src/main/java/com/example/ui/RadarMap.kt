@@ -58,16 +58,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import androidx.compose.runtime.rememberCoroutineScope
-import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.tileprovider.tilesource.XYTileSource
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.views.CustomZoomButtonsController
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.Polygon
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
 import java.io.File
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -79,27 +79,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import java.io.FileOutputStream
-
-/**
- * Map tile provider is controlled from the VPS remote config (map.provider): "esri_street" (default) or
- * "osm" for the classic OpenStreetMap (Mapnik) tiles. Change it on the server to switch everyone instantly.
- */
-
-/** Esri World Street Map: clean, Google-Maps-like free basemap (no API key). Esri tile URLs use z/y/x order. */
-private val cartoVoyagerTileSource = object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
-    "EsriWorldStreet", 0, 19, 256, ".png",
-    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"),
-    "Tiles © Esri"
-) {
-    override fun getTileURLString(pMapTileIndex: Long): String =
-        baseUrl +
-            org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex) + "/" +
-            org.osmdroid.util.MapTileIndex.getY(pMapTileIndex) + "/" +
-            org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
-}
-
-private val kinBaseTileSource
-    get() = if (com.example.data.RemoteConfig.mapProvider.equals("osm", ignoreCase = true)) TileSourceFactory.MAPNIK else cartoVoyagerTileSource
 
 
 
@@ -210,8 +189,11 @@ fun RadarMap(
     )
 
 
-    // Remember the MapView reference to trigger zoom & camera animations from Compose UI blocks
+    // Remember the MapView & MapLibreMap references to trigger zoom & camera animations from Compose UI blocks
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
+    var mapLibreRef by remember { mutableStateOf<MapLibreMap?>(null) }
+    var activeStyleMode by remember { mutableStateOf<String?>(null) }
+    var motionFrameTick by remember { mutableStateOf(0) }
     var isCameraFollowingMe by remember { mutableStateOf(false) }
     var isFollowingSelectedMember by remember { mutableStateOf(true) }
     var mapZoomLevel by remember { mutableStateOf(15.5) }
@@ -225,11 +207,11 @@ fun RadarMap(
             onRequestTripRouteSnap(trip)
             val snapped = snappedTripRoutes[trip.id]
             val points = if (!snapped.isNullOrEmpty()) {
-                snapped.map { GeoPoint(it.first, it.second) }
+                snapped.map { LatLng(it.first, it.second) }
             } else if (trip.breadcrumbs.isNotEmpty()) {
-                trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
+                trip.breadcrumbs.map { LatLng(it.lat, it.lng) }
             } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
-                listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
+                listOf(LatLng(trip.startLat, trip.startLng), LatLng(trip.endLat, trip.endLng))
             } else {
                 emptyList()
             }
@@ -240,13 +222,11 @@ fun RadarMap(
                 val maxLng = points.maxOf { it.longitude }
                 val latSpan = (maxLat - minLat).coerceAtLeast(0.008)
                 val lngSpan = (maxLng - minLng).coerceAtLeast(0.008)
-                val box = org.osmdroid.util.BoundingBox(
-                    maxLat + latSpan * 0.35,
-                    maxLng + lngSpan * 0.35,
-                    minLat - latSpan * 0.35,
-                    minLng - lngSpan * 0.35
-                )
-                mapViewRef?.zoomToBoundingBox(box, true, 400)
+                val bounds = LatLngBounds.Builder()
+                    .include(LatLng(maxLat + latSpan * 0.35, maxLng + lngSpan * 0.35))
+                    .include(LatLng(minLat - latSpan * 0.35, minLng - lngSpan * 0.35))
+                    .build()
+                mapLibreRef?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 400)
             }
         }
     }
@@ -264,27 +244,7 @@ fun RadarMap(
         }
     }
 
-    // Synchronize OSMDroid Global configurations safely
-    LaunchedEffect(Unit) {
-        try {
-            Configuration.getInstance().load(context.applicationContext, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-            Configuration.getInstance().userAgentValue = context.packageName
-            val cacheDir = File(context.filesDir, "osmdroid")
-            if (!cacheDir.exists()) {
-                cacheDir.mkdirs()
-            }
-            Configuration.getInstance().osmdroidTileCache = cacheDir
-            Configuration.getInstance().osmdroidBasePath = cacheDir
-            // Keep viewed map tiles on the phone (persistent storage, large cache, 60-day expiry) so they are not re-downloaded
-            Configuration.getInstance().tileFileSystemCacheMaxBytes = 2000L * 1024 * 1024
-            Configuration.getInstance().tileFileSystemCacheTrimBytes = 1700L * 1024 * 1024
-            Configuration.getInstance().expirationOverrideDuration = 60L * 24 * 60 * 60 * 1000
-        } catch (e: Exception) {
-            // Safe fallback
-        }
-    }
-
-    val visualCoordinates = remember { java.util.concurrent.ConcurrentHashMap<String, GeoPoint>() }
+    val visualCoordinates = remember { java.util.concurrent.ConcurrentHashMap<String, LatLng>() }
     val memberVisualStates = remember { mutableMapOf<String, MemberVisualState>() }
 
     // Sticky barrier membership carried between layout passes (hysteresis so faces don't re-slot on GPS drift)
@@ -353,7 +313,7 @@ fun RadarMap(
                     m.speedMph >= 1.5
                 }
 
-                val assignedClusterPos = adjustedCoordinates[m.id] ?: GeoPoint(m.y, m.x)
+                val assignedClusterPos = adjustedCoordinates[m.id] ?: LatLng(m.y, m.x)
 
                 if (state == null) {
                     val initialGeo = assignedClusterPos
@@ -373,7 +333,6 @@ fun RadarMap(
                         state.speedMph = 0.0
                         state.targetGeo = assignedClusterPos
                         state.currentGeo = assignedClusterPos
-                        state.markerRef?.position = assignedClusterPos
                         visualCoordinates[m.id] = assignedClusterPos
                     } else {
                         // Truly moving outside barrier or actively walking/traveling
@@ -400,7 +359,6 @@ fun RadarMap(
                                 state.speedMph = 0.0
                                 state.targetGeo = assignedClusterPos
                                 state.currentGeo = assignedClusterPos
-                                state.markerRef?.position = assignedClusterPos
                                 visualCoordinates[m.id] = assignedClusterPos
                             }
                         }
@@ -415,19 +373,18 @@ fun RadarMap(
     val currentIsRouteTrailEnabled by rememberUpdatedState(isRouteTrailEnabled)
     val currentIsUserInteractingWithMap by rememberUpdatedState(isUserInteractingWithMap)
 
-    // High-frequency (60 FPS) continuous road interpolation & camera follow engine
+    // High-frequency (30 FPS) continuous road interpolation & camera follow engine
     LaunchedEffect(isSettingsOpen) {
         if (isSettingsOpen) return@LaunchedEffect
         var lastFrameTime = android.os.SystemClock.uptimeMillis()
         while (isActive) {
-            kotlinx.coroutines.delay(16) // ~60 FPS smooth motion
+            kotlinx.coroutines.delay(33) // ~30 FPS smooth motion for GeoJSON symbol updates
             val now = android.os.SystemClock.uptimeMillis()
             val dt = ((now - lastFrameTime) / 1000.0).coerceIn(0.005, 0.08)
             lastFrameTime = now
 
             var anyMoved = false
             memberVisualStates.forEach { (mId, state) ->
-                val marker = state.markerRef ?: return@forEach
                 val curLat = state.currentGeo.latitude
                 val curLng = state.currentGeo.longitude
                 val tgtLat = state.targetGeo.latitude
@@ -445,14 +402,12 @@ fun RadarMap(
                         val frac = (stepM / distToTargetM).coerceIn(0.0, 1.0)
                         val nextLat = curLat + (tgtLat - curLat) * frac
                         val nextLng = curLng + (tgtLng - curLng) * frac
-                        state.currentGeo = GeoPoint(nextLat, nextLng)
-                        marker.position = state.currentGeo
+                        state.currentGeo = LatLng(nextLat, nextLng)
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
                     } else {
                         // Reached target
                         state.currentGeo = state.targetGeo
-                        marker.position = state.currentGeo
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
                     }
@@ -462,8 +417,7 @@ fun RadarMap(
                         val factor = (6.0 * dt).coerceIn(0.0, 1.0)
                         val nextLat = if (distToTargetM < 0.25) tgtLat else curLat + (tgtLat - curLat) * factor
                         val nextLng = if (distToTargetM < 0.25) tgtLng else curLng + (tgtLng - curLng) * factor
-                        state.currentGeo = GeoPoint(nextLat, nextLng)
-                        marker.position = state.currentGeo
+                        state.currentGeo = LatLng(nextLat, nextLng)
                         visualCoordinates[mId] = state.currentGeo
                         anyMoved = true
                     }
@@ -478,8 +432,8 @@ fun RadarMap(
                 )
                 if (isThisMemberSelected && currentIsFollowingSelectedMember && !currentIsRouteTrailEnabled) {
                     if (!currentIsUserInteractingWithMap) {
-                        mapViewRef?.let { map ->
-                            map.controller.setCenter(state.currentGeo)
+                        mapLibreRef?.let { map ->
+                            map.moveCamera(CameraUpdateFactory.newLatLng(state.currentGeo))
                             anyMoved = true
                         }
                     }
@@ -487,7 +441,7 @@ fun RadarMap(
             }
 
             if (anyMoved) {
-                mapViewRef?.postInvalidate()
+                motionFrameTick++
             }
         }
     }
@@ -513,26 +467,24 @@ fun RadarMap(
                 it.name.equals(selectedMemberId, ignoreCase = true) 
             }
             if (m != null && m.x != 0.0 && m.y != 0.0) {
-                mapViewRef?.let { map ->
-                    val targetGeo = visualCoordinates[m.id] ?: GeoPoint(m.y, m.x)
-                    map.controller.animateTo(targetGeo)
-                    if (map.zoomLevelDouble < 12.0) {
-                        map.controller.setZoom(16.0)
-                    }
+                mapLibreRef?.let { map ->
+                    val targetGeo = visualCoordinates[m.id] ?: LatLng(m.y, m.x)
+                    val targetZoom = maxOf(map.cameraPosition.zoom, 16.0).takeIf { map.cameraPosition.zoom < 12.0 }
+                        ?: map.cameraPosition.zoom
+                    map.animateCamera(CameraUpdateFactory.newLatLngZoom(targetGeo, targetZoom), 400)
                 }
             }
         } else {
             // Show All Members on Map: fit all active members in view
             val validMembers = members.filter { it.x != 0.0 && it.y != 0.0 }
             if (validMembers.isNotEmpty()) {
-                mapViewRef?.let { map ->
+                mapLibreRef?.let { map ->
                     val minLat = validMembers.minOf { it.y }
                     val maxLat = validMembers.maxOf { it.y }
                     val minLng = validMembers.minOf { it.x }
                     val maxLng = validMembers.maxOf { it.x }
                     val centerLat = (minLat + maxLat) / 2.0
                     val centerLng = (minLng + maxLng) / 2.0
-                    map.controller.animateTo(GeoPoint(centerLat, centerLng))
                     val maxDiff = maxOf(maxLat - minLat, maxLng - minLng)
                     val zoomLevel = when {
                         maxDiff > 0.5 -> 10.0
@@ -540,7 +492,7 @@ fun RadarMap(
                         maxDiff > 0.05 -> 13.0
                         else -> 14.2
                     }
-                    map.controller.setZoom(zoomLevel)
+                    map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(centerLat, centerLng), zoomLevel), 400)
                 }
             }
         }
@@ -578,7 +530,7 @@ fun RadarMap(
                 ?: emptyList()
             if (points.size >= 2) {
                 lastAutoFittedTrailKey = fitKey
-                mapViewRef?.let { map ->
+                mapLibreRef?.let { map ->
                     val minLat = points.minOf { it.first }
                     val maxLat = points.maxOf { it.first }
                     val minLng = points.minOf { it.second }
@@ -586,12 +538,15 @@ fun RadarMap(
                     val latMargin = maxOf((maxLat - minLat) * 0.35, 0.008)
                     val lngMargin = maxOf((maxLng - minLng) * 0.35, 0.008)
                     try {
-                        val box = BoundingBox(maxLat + latMargin, maxLng + lngMargin, minLat - latMargin, minLng - lngMargin)
-                        map.zoomToBoundingBox(box, true, 120)
+                        val bounds = LatLngBounds.Builder()
+                            .include(LatLng(maxLat + latMargin, maxLng + lngMargin))
+                            .include(LatLng(minLat - latMargin, minLng - lngMargin))
+                            .build()
+                        map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 80), 400)
                     } catch (e: Exception) {
                         val centerLat = (minLat + maxLat) / 2.0
                         val centerLng = (minLng + maxLng) / 2.0
-                        map.controller.animateTo(GeoPoint(centerLat, centerLng))
+                        map.animateCamera(CameraUpdateFactory.newLatLng(LatLng(centerLat, centerLng)), 400)
                     }
                 }
             }
@@ -603,9 +558,7 @@ fun RadarMap(
     LaunchedEffect(me?.y, me?.x, isCameraFollowingMe) {
         if (isCameraFollowingMe && me != null && me.y != 0.0 && me.x != 0.0) {
             if (!isUserInteractingWithMap) {
-                mapViewRef?.let { map ->
-                    map.controller.animateTo(GeoPoint(me.y, me.x))
-                }
+                mapLibreRef?.animateCamera(CameraUpdateFactory.newLatLng(LatLng(me.y, me.x)), 300)
             }
         }
     }
@@ -614,12 +567,30 @@ fun RadarMap(
     LaunchedEffect(selectedMember?.y, selectedMember?.x, selectedMemberId, isFollowingSelectedMember) {
         if (isFollowingSelectedMember && selectedMember != null && selectedMember.x != 0.0 && selectedMember.y != 0.0 && !isRouteTrailEnabled) {
             if (!isUserInteractingWithMap) {
-                mapViewRef?.let { map ->
-                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                    map.controller.setCenter(targetGeo)
-                    mapViewRef?.postInvalidate()
+                mapLibreRef?.let { map ->
+                    val targetGeo = visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
+                    map.moveCamera(CameraUpdateFactory.newLatLng(targetGeo))
                 }
             }
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, mapViewRef) {
+        val mv = mapViewRef
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mv?.onStart()
+                Lifecycle.Event.ON_RESUME -> mv?.onResume()
+                Lifecycle.Event.ON_PAUSE -> mv?.onPause()
+                Lifecycle.Event.ON_STOP -> mv?.onStop()
+                Lifecycle.Event.ON_DESTROY -> mv?.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -633,190 +604,167 @@ fun RadarMap(
             factory = { ctx ->
                 MapView(ctx).apply {
                     clipToOutline = true
-                    setTileSource(kinBaseTileSource)
-                    setMultiTouchControls(true)
-                    zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-
-                    val touchSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
-                    var touchDownX = 0f
-                    var touchDownY = 0f
-                    var isMultiTouchGesture = false
-                    var hasZoomedInCurrentGesture = false
-                    var wasFollowingSelectedAtDown = false
-                    var wasFollowingMeAtDown = false
-
-                    // Allow panning and swiping on the Map without losing follow on pinch/zoom
-                    setOnTouchListener { v, event ->
-                        when (event.actionMasked) {
-                            android.view.MotionEvent.ACTION_DOWN -> {
-                                touchDownX = event.x
-                                touchDownY = event.y
-                                isMultiTouchGesture = false
-                                hasZoomedInCurrentGesture = false
-                                wasFollowingSelectedAtDown = isFollowingSelectedMember
-                                wasFollowingMeAtDown = isCameraFollowingMe
-                                isUserInteractingWithMap = true
-                                v.parent?.requestDisallowInterceptTouchEvent(true)
-                            }
-                            android.view.MotionEvent.ACTION_POINTER_DOWN -> {
-                                // Multi-finger touch: pinch-to-zoom in progress!
-                                isMultiTouchGesture = true
-                                // Preserve follow state across pinch zooms
-                                if (wasFollowingSelectedAtDown) isFollowingSelectedMember = true
-                                if (wasFollowingMeAtDown) isCameraFollowingMe = true
-                            }
-                            android.view.MotionEvent.ACTION_MOVE -> {
-                                if (event.pointerCount > 1) {
-                                    isMultiTouchGesture = true
-                                }
-                                if (!isMultiTouchGesture && !hasZoomedInCurrentGesture) {
-                                    val dx = Math.abs(event.x - touchDownX)
-                                    val dy = Math.abs(event.y - touchDownY)
-                                    if (dx > touchSlop * 3.5f || dy > touchSlop * 3.5f) {
-                                        // User is deliberately single-finger panning the map away: release camera lock!
-                                        isFollowingSelectedMember = false
-                                        isCameraFollowingMe = false
-                                    }
-                                }
-                            }
-                            android.view.MotionEvent.ACTION_POINTER_UP -> {
-                                isMultiTouchGesture = true
-                            }
-                            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                                v.parent?.requestDisallowInterceptTouchEvent(false)
-                                isUserInteractingWithMap = false
-
-                                if (isMultiTouchGesture || hasZoomedInCurrentGesture) {
-                                    // Pinch zoom or gesture zoom completed! Retain follow at the newly chosen zoom level!
-                                    if (wasFollowingSelectedAtDown) {
-                                        isFollowingSelectedMember = true
-                                    }
-                                    if (wasFollowingMeAtDown) {
-                                        isCameraFollowingMe = true
-                                    }
-
-                                    // Center camera directly on target at this newly zoomed level
-                                    val targetGeo = if (wasFollowingSelectedAtDown && selectedMember != null) {
-                                        visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                                    } else if (wasFollowingMeAtDown && me != null) {
-                                        GeoPoint(me.y, me.x)
-                                    } else null
-
-                                    if (targetGeo != null) {
-                                        controller.setCenter(targetGeo)
-                                        postInvalidate()
-                                    }
-                                }
-
-                                isMultiTouchGesture = false
-                                hasZoomedInCurrentGesture = false
-                            }
-                        }
-                        false
-                    }
-
-                    // Target CR8 4DS by default and zoom closer
-                    controller.setZoom(15.5)
-                    controller.setCenter(GeoPoint(homeLat, homeLng))
+                    onCreate(null)
+                    onStart()
+                    onResume()
                     mapViewRef = this
 
-                    addMapListener(object : org.osmdroid.events.MapListener {
-                        override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean = false
-                        override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
-                            mapZoomLevel = zoomLevelDouble
-                            hasZoomedInCurrentGesture = true
-                            if (!isUserInteractingWithMap) {
-                                if (isFollowingSelectedMember && selectedMember != null) {
-                                    val targetGeo = visualCoordinates[selectedMember.id] ?: GeoPoint(selectedMember.y, selectedMember.x)
-                                    post { controller.setCenter(targetGeo) }
-                                } else if (isCameraFollowingMe && me != null) {
-                                    post { controller.setCenter(GeoPoint(me.y, me.x)) }
+                    getMapAsync { map ->
+                        mapLibreRef = map
+                        map.uiSettings.isCompassEnabled = false
+                        map.uiSettings.isLogoEnabled = false
+                        map.uiSettings.isAttributionEnabled = true
+                        map.cameraPosition = CameraPosition.Builder()
+                            .target(LatLng(homeLat, homeLng))
+                            .zoom(15.5)
+                            .build()
+
+                        activeStyleMode = mapTypeMode
+                        map.setStyle(MapLibreOverlayManager.styleUrlForMode(mapTypeMode)) { style ->
+                            MapLibreOverlayManager.ensureLayers(style)
+                        }
+
+                        map.addOnCameraMoveStartedListener { reason ->
+                            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                isUserInteractingWithMap = true
+                                isFollowingSelectedMember = false
+                                isCameraFollowingMe = false
+                            }
+                        }
+
+                        map.addOnCameraIdleListener {
+                            isUserInteractingWithMap = false
+                            val z = map.cameraPosition.zoom
+                            if (kotlin.math.abs(z - mapZoomLevel) > 0.05) {
+                                mapZoomLevel = z
+                            }
+                        }
+
+                        map.addOnMapClickListener { latLng ->
+                            val screenPoint = map.projection.toScreenLocation(latLng)
+                            val hitFeatures = map.queryRenderedFeatures(
+                                screenPoint,
+                                MapLibreOverlayManager.LAYER_MARKERS_STEM,
+                                MapLibreOverlayManager.LAYER_MARKERS_CENTER
+                            )
+                            val firstHit = hitFeatures.firstOrNull()
+                            if (firstHit != null) {
+                                val kind = firstHit.getStringProperty("kind")
+                                val hitId = firstHit.getStringProperty("id")
+                                if (kind == "member" && hitId != null) {
+                                    val tappedMember = members.firstOrNull { it.id == hitId }
+                                    if (tappedMember != null) {
+                                        onSelectMember(tappedMember.id)
+                                        isFollowingSelectedMember = true
+                                        val targetGeo = visualCoordinates[tappedMember.id] ?: LatLng(tappedMember.y, tappedMember.x)
+                                        val targetZoom = if (map.cameraPosition.zoom < 12.0) 16.0 else map.cameraPosition.zoom
+                                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(targetGeo, targetZoom), 400)
+                                        memberForContextMenu = tappedMember
+                                        return@addOnMapClickListener true
+                                    }
+                                } else if (kind == "zone" && hitId != null) {
+                                    val tappedZone = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
+                                        .firstOrNull { it.id == hitId }
+                                    if (tappedZone != null) {
+                                        zoneToDelete = tappedZone
+                                        return@addOnMapClickListener true
+                                    }
                                 }
                             }
-                            return true
+                            false
                         }
-                    })
+                    }
                 }
             },
-            update = { mapView ->
-                // Accessing mapZoomLevel here ensures the update block recomposes on zoom events
-                val currentZoom = mapZoomLevel
-                org.osmdroid.views.overlay.infowindow.InfoWindow.closeAllInfoWindowsOn(mapView)
-                mapView.overlays.clear()
+            update = { _ ->
+                // Read reactive state so Compose re-runs overlay sync on zoom, motion, and data changes
+                @Suppress("UNUSED_VARIABLE") val tick = motionFrameTick
+                @Suppress("UNUSED_VARIABLE") val currentZoom = mapZoomLevel
+                val map = mapLibreRef ?: return@AndroidView
 
-                val density = context.resources.displayMetrics.density
-
-                // 1. Calculate people currently At Home
-                val atHomeMembers = members.filter { member ->
-                    val dist = kotlin.math.hypot(member.x - homeLng, member.y - homeLat) * 111.0
-                    dist < 0.05 || member.statusText.contains("At Home")
-                }
-                val atHomeNames = atHomeMembers.joinToString(", ") { it.name }
-                val atHomeEmojis = atHomeMembers.map { if (it.avatarEmoji.isNotBlank()) it.avatarEmoji else it.name.first().toString() }.joinToString(" ")
-
-                // Draw custom Safe Zones geofences (excluding Home to keep map clean)
-                com.example.data.GeoUtils.withDefaultSafeZones(safeZones).filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }.forEach { zone ->
-                    val zoneCircle = Polygon(mapView).apply {
-                        points = Polygon.pointsAsCircle(GeoPoint(zone.latitude, zone.longitude), zone.radiusMeters)
-                        fillPaint.color = android.graphics.Color.parseColor("#00E676") // Light green
-                        fillPaint.alpha = 20
-                        outlinePaint.color = android.graphics.Color.parseColor("#00C853") // Green border
-                        outlinePaint.strokeWidth = 2.0f * density
-                        outlinePaint.alpha = 110
+                if (activeStyleMode != mapTypeMode) {
+                    activeStyleMode = mapTypeMode
+                    map.setStyle(MapLibreOverlayManager.styleUrlForMode(mapTypeMode)) { loadedStyle ->
+                        MapLibreOverlayManager.ensureLayers(loadedStyle)
                     }
-                    mapView.overlays.add(zoneCircle)
-                    
-                    val zoneMarker = object : Marker(mapView) {
-                        override fun showInfoWindow() {}
-                    }.apply {
-                        position = GeoPoint(zone.latitude, zone.longitude)
-                        icon = MapMarkerRenderer.getOrCreateZoneIcon(context, zone.name, zone.iconName)
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                        setOnMarkerClickListener { _, _ ->
-                            zoneToDelete = zone
-                            true
+                    return@AndroidView
+                }
+
+                val style = map.style ?: return@AndroidView
+                if (!style.isFullyLoaded) return@AndroidView
+                MapLibreOverlayManager.ensureLayers(style)
+
+                val zoneFillFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+                val zoneLineFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+                val haloLineFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+                val coreLineFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+                val centerMarkerFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+                val stemMarkerFeatures = mutableListOf<org.maplibre.geojson.Feature>()
+
+                // 1. Safe Zones geofences & markers (excluding Home)
+                com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
+                    .filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }
+                    .forEach { zone ->
+                        zoneFillFeatures.add(
+                            MapLibreOverlayManager.circlePolygonFeature(
+                                zone.latitude, zone.longitude, zone.radiusMeters, "#00E676", 0.08f
+                            )
+                        )
+                        zoneLineFeatures.add(
+                            MapLibreOverlayManager.circleOutlineFeature(
+                                zone.latitude, zone.longitude, zone.radiusMeters, "#00C853", 2.0f, 0.43f
+                            )
+                        )
+                        val zoneIconId = "zone_${zone.id}_${zone.name}_${zone.iconName}"
+                        if (style.getImage(zoneIconId) == null) {
+                            MapLibreOverlayManager.registerDrawable(
+                                style,
+                                zoneIconId,
+                                MapMarkerRenderer.getOrCreateZoneIcon(context, zone.name, zone.iconName)
+                            )
                         }
+                        centerMarkerFeatures.add(
+                            MapLibreOverlayManager.markerFeature(zone.latitude, zone.longitude, zoneIconId, "zone", zone.id)
+                        )
                     }
-                    mapView.overlays.add(zoneMarker)
-                }
 
-                // Draw Work Area geofence & marker if calibrated
+                // 2. Work Area geofence & marker if calibrated
                 if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) {
-                    val workCircle = Polygon(mapView).apply {
-                        points = Polygon.pointsAsCircle(GeoPoint(workLat, workLng), workRadiusMeters)
-                        fillPaint.color = android.graphics.Color.parseColor("#0284C7") // Sky/Cyan
-                        fillPaint.alpha = 25
-                        outlinePaint.color = android.graphics.Color.parseColor("#0EA5E9")
-                        outlinePaint.strokeWidth = 2.0f * density
-                        outlinePaint.alpha = 130
+                    zoneFillFeatures.add(
+                        MapLibreOverlayManager.circlePolygonFeature(
+                            workLat, workLng, workRadiusMeters, "#0284C7", 0.10f
+                        )
+                    )
+                    zoneLineFeatures.add(
+                        MapLibreOverlayManager.circleOutlineFeature(
+                            workLat, workLng, workRadiusMeters, "#0EA5E9", 2.0f, 0.51f
+                        )
+                    )
+                    val workIconId = "zone_work_Work_work"
+                    if (style.getImage(workIconId) == null) {
+                        MapLibreOverlayManager.registerDrawable(
+                            style,
+                            workIconId,
+                            MapMarkerRenderer.getOrCreateZoneIcon(context, "Work", "work")
+                        )
                     }
-                    mapView.overlays.add(workCircle)
-
-                    val workMarker = object : Marker(mapView) {
-                        override fun showInfoWindow() {}
-                    }.apply {
-                        position = GeoPoint(workLat, workLng)
-                        icon = MapMarkerRenderer.getOrCreateZoneIcon(context, "Work", "work")
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    }
-                    mapView.overlays.add(workMarker)
+                    centerMarkerFeatures.add(
+                        MapLibreOverlayManager.markerFeature(workLat, workLng, workIconId, "work", "work")
+                    )
                 }
 
-
-
-                // --- LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
+                // 3. Co-located Cluster Spokes & Anchor Dots
                 val layoutResult = sharedClusterLayout
                 val adjustedCoordinates = layoutResult.adjustedCoordinates
                 val clusterAnchorPoints = layoutResult.clusterAnchorPoints
                 val clusters = layoutResult.clusters
-                // --- END OF LIFE360-STYLE CO-LOCATED CLUSTER & DECONFLICTION ENGINE ---
 
-                // Draw sleek spoke lines from location dot to each compact clustered face
                 val zoneIconsDrawn = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
                     .filter { it.iconName.lowercase() != "home" && !it.name.lowercase().contains("home") }
-                    .map { GeoPoint(it.latitude, it.longitude) } +
-                    if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) listOf(GeoPoint(workLat, workLng)) else emptyList()
-                val drawnAnchorHubs = mutableListOf<GeoPoint>()
+                    .map { LatLng(it.latitude, it.longitude) } +
+                    if (isWorkCalibrated && workLat != 0.0 && workLng != 0.0) listOf(LatLng(workLat, workLng)) else emptyList()
+                val drawnAnchorHubs = mutableListOf<LatLng>()
+
                 for (cluster in clusters) {
                     if (cluster.size > 1) {
                         for (mId in cluster) {
@@ -824,25 +772,15 @@ fun RadarMap(
                             val target = adjustedCoordinates[mId]
                             val member = members.firstOrNull { it.id == mId }
                             if (anchor != null && target != null && member != null) {
-                                val vibrantColor = getVibrantSpokeColor(member.avatarColorHex)
-
-                                val haloLine = Polyline(mapView).apply {
-                                    setPoints(listOf(anchor, target))
-                                    outlinePaint.color = android.graphics.Color.WHITE
-                                    outlinePaint.strokeWidth = 2.6f * density
-                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                    outlinePaint.alpha = 200
-                                }
-                                mapView.overlays.add(haloLine)
-
-                                val coreLine = Polyline(mapView).apply {
-                                    setPoints(listOf(anchor, target))
-                                    outlinePaint.color = vibrantColor
-                                    outlinePaint.strokeWidth = 1.6f * density
-                                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                    outlinePaint.alpha = 230
-                                }
-                                mapView.overlays.add(coreLine)
+                                val vibrantColorHex = MapLibreOverlayManager.intColorToHex(
+                                    getVibrantSpokeColor(member.avatarColorHex)
+                                )
+                                haloLineFeatures.add(
+                                    MapLibreOverlayManager.lineFeature(listOf(anchor, target), "#FFFFFF", 3.0f, 0.78f)
+                                )
+                                coreLineFeatures.add(
+                                    MapLibreOverlayManager.lineFeature(listOf(anchor, target), vibrantColorHex, 1.8f, 0.90f)
+                                )
 
                                 val hasExistingHub = drawnAnchorHubs.any {
                                     com.example.data.GeoUtils.distanceMeters(it.latitude, it.longitude, anchor.latitude, anchor.longitude) < 5.0
@@ -851,26 +789,27 @@ fun RadarMap(
                                 }
                                 if (!hasExistingHub) {
                                     drawnAnchorHubs.add(anchor)
-                                    val anchorDot = object : Marker(mapView) {
-                                        override fun showInfoWindow() {}
-                                    }.apply {
-                                        position = anchor
-                                        icon = MapMarkerRenderer.getOrCreateClusterAnchorDot(context)
-                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                        setOnMarkerClickListener { _, _ -> true }
+                                    val anchorIconId = "cluster_anchor_dot"
+                                    if (style.getImage(anchorIconId) == null) {
+                                        MapLibreOverlayManager.registerDrawable(
+                                            style,
+                                            anchorIconId,
+                                            MapMarkerRenderer.getOrCreateClusterAnchorDot(context)
+                                        )
                                     }
-                                    mapView.overlays.add(anchorDot)
+                                    centerMarkerFeatures.add(
+                                        MapLibreOverlayManager.markerFeature(anchor.latitude, anchor.longitude, anchorIconId, "anchor", "anchor_${drawnAnchorHubs.size}")
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                // Filter out paused devices — remove from screen temporarily until un-pause
+                // 4. Active Family Members, Rings, Trails & Avatar Markers
                 val activeMembersOnMap = members.filter {
                     !(it.isLocationPaused || (it.id == "me" && isLocationPaused) || it.statusText.contains("Paused", ignoreCase = true))
                 }
-                // Draw "me" first so other family members are drawn on top of "me" (z-order dominance)
                 val sortedMembers = activeMembersOnMap.sortedWith(Comparator { m1, m2 ->
                     when {
                         m1.id == "me" && m2.id != "me" -> -1
@@ -879,92 +818,62 @@ fun RadarMap(
                     }
                 })
 
-                // 3. Draw active family members and connect transit paths
                 sortedMembers.forEach { member ->
-
                     val visualGeo = memberVisualStates[member.id]?.currentGeo
                     val isDeconflicted = layoutResult.barrierMembership.containsKey(member.id) ||
                         layoutResult.clusters.any { it.contains(member.id) }
-                    // For deconflicted members, immediately use zoom-adapted coordinate to eliminate zoom lag
                     val displayGeo = if (isDeconflicted) {
-                        adjustedCoordinates[member.id] ?: visualGeo ?: GeoPoint(member.y, member.x)
+                        adjustedCoordinates[member.id] ?: visualGeo ?: LatLng(member.y, member.x)
                     } else {
-                        visualGeo ?: adjustedCoordinates[member.id] ?: GeoPoint(member.y, member.x)
+                        visualGeo ?: adjustedCoordinates[member.id] ?: LatLng(member.y, member.x)
                     }
                     if (isDeconflicted) {
                         visualCoordinates[member.id] = displayGeo
                         memberVisualStates[member.id]?.let { vs ->
                             vs.currentGeo = displayGeo
                             vs.targetGeo = displayGeo
-                            vs.markerRef?.position = displayGeo
                         }
                     }
-                    val trueGeo = visualGeo ?: GeoPoint(member.y, member.x)
+                    val trueGeo = visualGeo ?: LatLng(member.y, member.x)
                     val isAway = homeLat != 0.0 && homeLng != 0.0 && (kotlin.math.hypot(member.y - homeLat, member.x - homeLng) * 111.0 > 0.06)
                     val isSelected = member.id == selectedMemberId ||
-                            (selectedMemberId != null && (member.id.contains(selectedMemberId) || selectedMemberId.contains(member.id) || member.name.equals(selectedMember?.name, ignoreCase = true)))
+                        (selectedMemberId != null && (member.id.contains(selectedMemberId) || selectedMemberId.contains(member.id) || member.name.equals(selectedMember?.name, ignoreCase = true)))
 
                     val memberColor = try {
                         android.graphics.Color.parseColor(member.avatarColorHex)
                     } catch (e: Exception) { android.graphics.Color.BLUE }
+                    val memberColorHex = MapLibreOverlayManager.intColorToHex(memberColor)
 
-                    // Draw a subtle ring around the true location (Only for 'me' to avoid map clutter)
                     if (member.id == "me") {
-                        val ring = Polygon(mapView).apply {
-                            points = Polygon.pointsAsCircle(trueGeo, 60.0) // 60 meters radius
-                            fillPaint.color = android.graphics.Color.TRANSPARENT
-                            outlinePaint.color = memberColor
-                            outlinePaint.strokeWidth = 1.4f * density
-                            outlinePaint.alpha = 55 // Light translucent outline ring
-                        }
-                        mapView.overlays.add(ring)
+                        zoneLineFeatures.add(
+                            MapLibreOverlayManager.circleOutlineFeature(
+                                trueGeo.latitude, trueGeo.longitude, 60.0, memberColorHex, 1.5f, 0.22f
+                            )
+                        )
                     }
 
-                    // Draw visual breadcrumb trails showing previous location history ONLY when enabled & member is selected or away!
                     if (isRouteTrailEnabled && (isSelected || (selectedMemberId == null && isAway))) {
-                        val recordedPoints = com.example.ui.map.TrailRouteEngine.findTrailForMember(locationTrails, member)
+                        val trailPoints = com.example.ui.map.TrailRouteEngine.findTrailForMember(locationTrails, member)
                             ?: emptyList()
-                        val trailPoints = if (recordedPoints.size >= 2) {
-                            recordedPoints
-                        } else {
-                            emptyList()
-                        }
-
                         if (trailPoints.size >= 2) {
-                            val glowPolyline = Polyline(mapView).apply {
-                                val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
-                                setPoints(geoPoints)
-                                outlinePaint.color = android.graphics.Color.WHITE
-                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                outlinePaint.strokeWidth = 9.0f * density
-                                outlinePaint.alpha = 180
-                            }
-                            mapView.overlays.add(glowPolyline)
-
-                            val trailPolyline = Polyline(mapView).apply {
-                                val geoPoints = trailPoints.map { GeoPoint(it.first, it.second) }
-                                setPoints(geoPoints)
-                                outlinePaint.color = memberColor
-                                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                                outlinePaint.strokeWidth = 6.0f * density
-                                outlinePaint.alpha = 255
-                            }
-                            mapView.overlays.add(trailPolyline)
+                            val latLngs = trailPoints.map { LatLng(it.first, it.second) }
+                            haloLineFeatures.add(
+                                MapLibreOverlayManager.lineFeature(latLngs, "#FFFFFF", 9.0f, 0.70f)
+                            )
+                            coreLineFeatures.add(
+                                MapLibreOverlayManager.lineFeature(latLngs, memberColorHex, 6.0f, 1.0f)
+                            )
                         }
                     }
 
-                    // Draw the face bubble markers on the very top layer (at displayGeo)
                     val isSos = member.statusText.contains("🚨 EMERGENCY SOS ACTIVE") || member.statusText.contains("🚨 SOS")
                     val markerLabel = if (isSos) "🚨" else if (member.avatarEmoji.isNotBlank()) member.avatarEmoji else (member.name.firstOrNull()?.toString() ?: "M")
                     val markerColorHex = if (isSos) "#FF1744" else member.avatarColorHex
                     val isOffline = member.batteryPercentage <= 5
 
-                    // Live relative time badge from the stored lastActive timestamp
                     val rawTimeLabel = if (member.id == "me") "now"
-                                       else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
-                                       else "now"
-
-                    // Location duration / transit pill; hide stationary clutter unless selected/SOS
+                        else if (member.lastActive > 0L) formatTimeAgo(member.lastActive)
+                        else "now"
                     val rawDurationLabel = formatTransitBadge(member.speedMph, member.statusText, member.locationSince, member.id)
                     val isMovingTransit = rawDurationLabel.startsWith("👣") ||
                         rawDurationLabel.startsWith("🚗") ||
@@ -976,55 +885,41 @@ fun RadarMap(
                     val showBatteryBadge = member.id != "me" && (isSelected || isSos || member.batteryPercentage <= 25 || member.isCharging)
                     val isInCluster = layoutResult.clusters.any { it.contains(member.id) }
                     val batteryForBadge = if (showBatteryBadge) member.batteryPercentage else -1
+                    val showStem = !isInCluster
 
-                    val memberMarker = object : Marker(mapView) {
-                        override fun showInfoWindow() {
-                            // No-op: completely suppress default grey speech bubbles
-                        }
-                    }.apply {
-                        position = displayGeo
-                        icon = MapMarkerRenderer.getOrCreateMarkerDrawable(
-                            context = context,
-                            colorHex = markerColorHex,
-                            emoji = markerLabel,
-                            isSelected = isSelected || isSos,
-                            photoPath = member.photoPath,
-                            weatherEmoji = "",
-                            isOffline = isOffline,
-                            relativeTime = timeLabel,
-                            locationDuration = locationDurationLabel,
-                            batteryPercentage = batteryForBadge,
-                            isCharging = member.isCharging,
-                            animFrame = animTick,
-                            showStem = !isInCluster
-                        )
-                        setAnchor(
-                            0.5f,
-                            MapMarkerRenderer.getMarkerAnchorV(
+                    val memberIconId = "m_${member.id}_${markerColorHex}_${markerLabel}_${isSelected || isSos}_${member.photoPath ?: ""}_${isOffline}_${timeLabel}_${locationDurationLabel}_${batteryForBadge}_${member.isCharging}_${animTick}_${showStem}"
+                    if (style.getImage(memberIconId) == null) {
+                        MapLibreOverlayManager.registerDrawable(
+                            style,
+                            memberIconId,
+                            MapMarkerRenderer.getOrCreateMarkerDrawable(
                                 context = context,
+                                colorHex = markerColorHex,
+                                emoji = markerLabel,
                                 isSelected = isSelected || isSos,
+                                photoPath = member.photoPath,
+                                weatherEmoji = "",
+                                isOffline = isOffline,
                                 relativeTime = timeLabel,
                                 locationDuration = locationDurationLabel,
                                 batteryPercentage = batteryForBadge,
-                                showStem = !isInCluster
+                                isCharging = member.isCharging,
+                                animFrame = animTick,
+                                showStem = showStem
                             )
                         )
-                        setOnMarkerClickListener { _, _ ->
-                            onSelectMember(member.id)
-                            isFollowingSelectedMember = true
-                            mapViewRef?.let { map ->
-                                val targetGeo = visualCoordinates[member.id] ?: GeoPoint(member.y, member.x)
-                                map.controller.animateTo(targetGeo)
-                                if (map.zoomLevelDouble < 12.0) {
-                                    map.controller.setZoom(16.0)
-                                }
-                            }
-                            memberForContextMenu = member
-                            true
-                        }
                     }
-                    mapView.overlays.add(memberMarker)
-                    val visualState = memberVisualStates.getOrPut(member.id) {
+
+                    val feature = MapLibreOverlayManager.markerFeature(
+                        displayGeo.latitude, displayGeo.longitude, memberIconId, "member", member.id
+                    )
+                    if (showStem) {
+                        stemMarkerFeatures.add(feature)
+                    } else {
+                        centerMarkerFeatures.add(feature)
+                    }
+
+                    memberVisualStates.getOrPut(member.id) {
                         MemberVisualState(
                             currentGeo = displayGeo,
                             targetGeo = displayGeo,
@@ -1034,21 +929,20 @@ fun RadarMap(
                             isMoving = false
                         )
                     }
-                    visualState.markerRef = memberMarker
                 }
 
-                // 4. Draw Selected Trip Route History (Life360 Route Playback)
+                // 5. Selected Trip Route History (Life360 Route Playback)
                 selectedTrip?.let { trip ->
                     val snapped = snappedTripRoutes[trip.id]
                     val rawPoints = if (trip.breadcrumbs.isNotEmpty()) {
-                        trip.breadcrumbs.map { GeoPoint(it.lat, it.lng) }
+                        trip.breadcrumbs.map { LatLng(it.lat, it.lng) }
                     } else if (trip.startLat != 0.0 && trip.endLat != 0.0) {
-                        listOf(GeoPoint(trip.startLat, trip.startLng), GeoPoint(trip.endLat, trip.endLng))
+                        listOf(LatLng(trip.startLat, trip.startLng), LatLng(trip.endLat, trip.endLng))
                     } else {
                         emptyList()
                     }
                     val tripPoints = if (!snapped.isNullOrEmpty() && snapped.size >= 2) {
-                        snapped.map { GeoPoint(it.first, it.second) }
+                        snapped.map { LatLng(it.first, it.second) }
                     } else if (trip.transitMode.equals("TRAIN", ignoreCase = true)) {
                         rawPoints
                     } else if (rawPoints.size >= 3 && !com.example.ui.map.TrailRouteEngine.hasSparseGaps(rawPoints.map { Pair(it.latitude, it.longitude) })) {
@@ -1058,104 +952,51 @@ fun RadarMap(
                     }
 
                     if (tripPoints.size >= 2) {
-                        // High-contrast outer glow
-                        val tripGlow = Polyline(mapView).apply {
-                            setPoints(tripPoints)
-                            outlinePaint.color = android.graphics.Color.WHITE
-                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            outlinePaint.strokeWidth = 11.0f * density
-                            outlinePaint.alpha = 210
-                        }
-                        mapView.overlays.add(tripGlow)
-
+                        haloLineFeatures.add(
+                            MapLibreOverlayManager.lineFeature(tripPoints, "#FFFFFF", 11.0f, 0.82f)
+                        )
                         val isTrain = trip.transitMode.equals("TRAIN", ignoreCase = true)
-                        val tripColor = if (isTrain) android.graphics.Color.parseColor("#0D9488") else android.graphics.Color.parseColor("#00E5FF")
+                        val tripColorHex = if (isTrain) "#0D9488" else "#00E5FF"
+                        coreLineFeatures.add(
+                            MapLibreOverlayManager.lineFeature(tripPoints, tripColorHex, 6.5f, 1.0f)
+                        )
 
-                        val tripRoute = Polyline(mapView).apply {
-                            setPoints(tripPoints)
-                            outlinePaint.color = tripColor
-                            outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                            outlinePaint.strokeWidth = 6.5f * density
-                            outlinePaint.alpha = 255
-                        }
-                        mapView.overlays.add(tripRoute)
-
-                        // Start Pin
-                        val startMarker = Marker(mapView).apply {
-                            position = tripPoints.first()
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = MapMarkerRenderer.getOrCreateMarkerDrawable(
-                                context = context,
-                                colorHex = "#00E676",
-                                emoji = "🟢",
-                                isSelected = false,
-                                showStem = false
+                        val startIconId = "trip_start_pin"
+                        if (style.getImage(startIconId) == null) {
+                            MapLibreOverlayManager.registerDrawable(
+                                style,
+                                startIconId,
+                                MapMarkerRenderer.getOrCreateMarkerDrawable(
+                                    context = context, colorHex = "#00E676", emoji = "🟢", isSelected = false, showStem = false
+                                )
                             )
-                            setOnMarkerClickListener { _, _ -> true }
                         }
-                        mapView.overlays.add(startMarker)
+                        centerMarkerFeatures.add(
+                            MapLibreOverlayManager.markerFeature(tripPoints.first().latitude, tripPoints.first().longitude, startIconId, "pin", "trip_start")
+                        )
 
-                        // End Pin
-                        val endMarker = Marker(mapView).apply {
-                            position = tripPoints.last()
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                            icon = MapMarkerRenderer.getOrCreateMarkerDrawable(
-                                context = context,
-                                colorHex = "#FF1744",
-                                emoji = "🏁",
-                                isSelected = false,
-                                showStem = false
+                        val endIconId = "trip_end_pin"
+                        if (style.getImage(endIconId) == null) {
+                            MapLibreOverlayManager.registerDrawable(
+                                style,
+                                endIconId,
+                                MapMarkerRenderer.getOrCreateMarkerDrawable(
+                                    context = context, colorHex = "#FF1744", emoji = "🏁", isSelected = false, showStem = false
+                                )
                             )
-                            setOnMarkerClickListener { _, _ -> true }
                         }
-                        mapView.overlays.add(endMarker)
+                        centerMarkerFeatures.add(
+                            MapLibreOverlayManager.markerFeature(tripPoints.last().latitude, tripPoints.last().longitude, endIconId, "pin", "trip_end")
+                        )
                     }
                 }
 
-                // Apply OpenStreetMap customizable styling options using tile sources and matrices
-                when (mapTypeMode) {
-                    "streets" -> {
-                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
-                            mapView.setTileSource(kinBaseTileSource)
-                        }
-                        // Standard crisp full-color streets
-                        mapView.overlayManager.tilesOverlay.setColorFilter(null)
-                    }
-                    "hybrid" -> {
-                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
-                            mapView.setTileSource(kinBaseTileSource)
-                        }
-                        // Cyberpunk Midnight Dark matrix filter
-                        val matrix = floatArrayOf(
-                            -0.85f, 0f, 0f, 0f, 255f,
-                            0f, -0.85f, 0f, 0f, 255f,
-                            0f, 0f, -0.55f, 0f, 255f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                        mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
-                    }
-                    "radar" -> {
-                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
-                            mapView.setTileSource(kinBaseTileSource)
-                        }
-                        // High-tech Retro Sonar green matrix filter
-                        val matrix = floatArrayOf(
-                            0f, 0f, 0f, 0f, 0f,
-                            0f, 1.4f, 0f, 0f, 40f,
-                            0f, 0f, 0f, 0f, 0f,
-                            -1f, -1f, -1f, 1.2f, 255f
-                        )
-                        mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(matrix))
-                    }
-                    else -> {
-                        if (mapView.tileProvider.tileSource.name() != kinBaseTileSource.name()) {
-                            mapView.setTileSource(kinBaseTileSource)
-                        }
-                        mapView.overlayManager.tilesOverlay.setColorFilter(null)
-                    }
-                }
-
-                mapView.invalidate()
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_ZONES_FILL, zoneFillFeatures)
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_ZONES_LINE, zoneLineFeatures)
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_LINES_HALO, haloLineFeatures)
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_LINES_CORE, coreLineFeatures)
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_MARKERS_CENTER, centerMarkerFeatures)
+                MapLibreOverlayManager.updateSource(style, MapLibreOverlayManager.SOURCE_MARKERS_STEM, stemMarkerFeatures)
             }
         )
 
@@ -1195,12 +1036,10 @@ fun RadarMap(
                 onFollowMember = {
                     isFollowingSelectedMember = true
                     if (selectedMember != null && selectedMember.x != 0.0 && selectedMember.y != 0.0) {
-                        mapViewRef?.let { map ->
-                            val targetGeo = visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
-                            map.controller.animateTo(targetGeo)
-                            if (map.zoomLevelDouble < 12.0) {
-                                map.controller.setZoom(16.0)
-                            }
+                        mapLibreRef?.let { map ->
+                            val targetGeo = visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
+                            val targetZoom = if (map.cameraPosition.zoom < 12.0) 16.0 else map.cameraPosition.zoom
+                            map.animateCamera(CameraUpdateFactory.newLatLngZoom(targetGeo, targetZoom), 400)
                         }
                     }
                 },
@@ -1259,30 +1098,34 @@ fun RadarMap(
         MapControlsOverlay(
             isCameraFollowingMe = isCameraFollowingMe,
             onZoomIn = {
-                mapViewRef?.let { map ->
-                    map.controller.zoomIn()
-                    mapZoomLevel = map.zoomLevelDouble + 1.0
+                mapLibreRef?.let { map ->
+                    val newZoom = (map.cameraPosition.zoom + 1.0).coerceAtMost(20.0)
+                    mapZoomLevel = newZoom
                     val target = if (isFollowingSelectedMember && selectedMember != null) {
-                        visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
+                        visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
                     } else if (isCameraFollowingMe && me != null) {
-                        org.osmdroid.util.GeoPoint(me.y, me.x)
-                    } else null
+                        LatLng(me.y, me.x)
+                    } else map.cameraPosition.target
                     if (target != null) {
-                        map.controller.setCenter(target)
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, newZoom), 250)
+                    } else {
+                        map.animateCamera(CameraUpdateFactory.zoomTo(newZoom), 250)
                     }
                 }
             },
             onZoomOut = {
-                mapViewRef?.let { map ->
-                    map.controller.zoomOut()
-                    mapZoomLevel = (map.zoomLevelDouble - 1.0).coerceAtLeast(2.0)
+                mapLibreRef?.let { map ->
+                    val newZoom = (map.cameraPosition.zoom - 1.0).coerceAtLeast(2.0)
+                    mapZoomLevel = newZoom
                     val target = if (isFollowingSelectedMember && selectedMember != null) {
-                        visualCoordinates[selectedMember.id] ?: org.osmdroid.util.GeoPoint(selectedMember.y, selectedMember.x)
+                        visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
                     } else if (isCameraFollowingMe && me != null) {
-                        org.osmdroid.util.GeoPoint(me.y, me.x)
-                    } else null
+                        LatLng(me.y, me.x)
+                    } else map.cameraPosition.target
                     if (target != null) {
-                        map.controller.setCenter(target)
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, newZoom), 250)
+                    } else {
+                        map.animateCamera(CameraUpdateFactory.zoomTo(newZoom), 250)
                     }
                 }
             },
@@ -1294,11 +1137,9 @@ fun RadarMap(
                     if (isCameraFollowingMe) {
                         isFollowingSelectedMember = true
                     }
-                    mapViewRef?.let {
-                        it.controller.animateTo(org.osmdroid.util.GeoPoint(meLoc.y, meLoc.x))
-                        if (it.zoomLevelDouble < 12.0) {
-                            it.controller.setZoom(15.5)
-                        }
+                    mapLibreRef?.let { map ->
+                        val targetZoom = if (map.cameraPosition.zoom < 12.0) 15.5 else map.cameraPosition.zoom
+                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(meLoc.y, meLoc.x), targetZoom), 400)
                     }
                 }
             },
