@@ -8,6 +8,7 @@ const {
     classifyTransitMode,
     enrichMemberState,
     processTripLifecycle,
+    reconcileCoTravelingCompanions,
     loadCompletedTrips
 } = require('../src/tripTransitEngine');
 
@@ -268,5 +269,90 @@ describe('Server TripTransitEngine', () => {
         };
         const result = enrichMemberState('token1', 'device_annette', incomingStillAtSchool, storedAtSchool, home, [woodcoteSchool]);
         assert.strictEqual(result.locationSince, arrivalTime, 'locationSince must be preserved while staying at the same place');
+    });
+
+    it('should suppress single-tick zero-speed cell tower bounce and couple co-traveling companions (Annette & Isabel)', () => {
+        const now = Date.now();
+        const storedAnnette = {
+            id: 'device_annette_d97b0a',
+            name: 'Annette',
+            x: -0.1102770,
+            y: 51.3260479,
+            speedMph: 0.0,
+            transitMode: 'STATIONARY',
+            lastActive: now - 20000
+        };
+        // Sudden 370m zero-speed cell jump in 20s
+        const incomingCellBounce = {
+            id: 'device_annette_d97b0a',
+            name: 'Annette',
+            x: -0.1080836,
+            y: 51.3281267,
+            speedMph: 0.0,
+            statusText: 'Stationary'
+        };
+        const held = enrichMemberState('81e5632c_pin_group', 'device_annette_d97b0a', incomingCellBounce, storedAnnette, home, [woodcoteSchool]);
+        assert.strictEqual(held.y, storedAnnette.y, 'Single-tick zero-speed cell bounce must be held at previous coordinates');
+        assert.strictEqual(held.x, storedAnnette.x);
+
+        // Co-travel coupling: Annette has fresh GPS, Isabel's pocket phone lags 45s behind by 150m
+        const members = {
+            device_annette_d97b0a: {
+                id: 'device_annette_d97b0a',
+                name: 'Annette',
+                y: 51.3260528,
+                x: -0.1102785,
+                speedMph: 1.4,
+                transitMode: 'WALKING',
+                statusText: 'Walking (1.4 mph)',
+                lastActive: now
+            },
+            device_isabel_4ec9dd: {
+                id: 'device_isabel_4ec9dd',
+                name: 'Isabel',
+                y: 51.3260034,
+                x: -0.1101554,
+                speedMph: 0.0,
+                transitMode: 'STATIONARY',
+                statusText: 'Stationary',
+                lastActive: now - 5000
+            }
+        };
+        // Step 1: Confirm pair when 7m apart
+        reconcileCoTravelingCompanions('81e5632c_pin_group', members, home, [woodcoteSchool]);
+
+        // Step 2: Isabel's pocket phone reports a lagging/drifted coordinate 140m behind 30s older than Annette
+        members.device_isabel_4ec9dd.y = 51.3247862;
+        members.device_isabel_4ec9dd.x = -0.1124929;
+        members.device_isabel_4ec9dd.lastActive = now - 35000;
+        reconcileCoTravelingCompanions('81e5632c_pin_group', members, home, [woodcoteSchool]);
+
+        assert.strictEqual(members.device_isabel_4ec9dd.y, members.device_annette_d97b0a.y, 'Lagging pocket phone must stay coupled with co-traveling companion');
+        assert.strictEqual(members.device_isabel_4ec9dd.x, members.device_annette_d97b0a.x);
+    });
+
+    it('should suppress long-range (>1km) single-tick cell-tower teleport spikes', () => {
+        const now = Date.now();
+        const storedAnnette = {
+            id: 'device_annette_d97b0a',
+            name: 'Annette',
+            x: -0.1153264,
+            y: 51.3306103,
+            speedMph: 0.4,
+            transitMode: 'STATIONARY',
+            lastActive: now - 5000
+        };
+        // Sudden 1.8km jump in 5 seconds (cell tower / stale GPS spike)
+        const spike = {
+            id: 'device_annette_d97b0a',
+            name: 'Annette',
+            x: -0.0950000,
+            y: 51.3410000,
+            speedMph: 2.0,
+            statusText: 'Live GPS'
+        };
+        const held = enrichMemberState('81e5632c_pin_group', 'device_annette_d97b0a', spike, storedAnnette, home, [woodcoteSchool]);
+        assert.strictEqual(held.y, storedAnnette.y, 'Long-range 5s teleport spike must be held at previous coordinates');
+        assert.strictEqual(held.x, storedAnnette.x);
     });
 });

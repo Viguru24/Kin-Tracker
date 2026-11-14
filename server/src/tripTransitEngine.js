@@ -243,27 +243,59 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
         }
     }
 
-    // 3. Check Active Movement
+    // 3. Check Active Movement & Suppress Single-Tick Zero-Speed Cell/Stale Jumps
+    const nowMs = Date.now();
     const prevLat = stored ? (Number(stored.y) || lat) : lat;
     const prevLng = stored ? (Number(stored.x) || lng) : lng;
-    const movedM = distMeters(lat, lng, prevLat, prevLng);
+    let effectiveLat = lat;
+    let effectiveLng = lng;
+    let movedM = distMeters(effectiveLat, effectiveLng, prevLat, prevLng);
+
+    if (stored && stored.lastActive > 0 && prevLat && prevLng) {
+        const elapsedMs = Math.max(0, nowMs - Number(stored.lastActive));
+        const impliedMps = elapsedMs > 0 ? (movedM / Math.max(1.0, elapsedMs / 1000.0)) : 0;
+        // Single-tick cellular sector bounce, stale cached GPS jump, or impossible teleport spike:
+        // 1) Stationary (speed < 0.8 mph) yet jumps >= 70m at > 1.8 m/s within 3 minutes (any distance)
+        // 2) Implausible > 45 m/s (~100 mph) teleport >= 350m within 60s when reported speed < 45 mph
+        const isZeroSpeedJump = speed < 0.8 && movedM >= 70 && elapsedMs > 0 && elapsedMs < 180000 && impliedMps > 1.8;
+        const isTeleportSpike = movedM >= 350 && elapsedMs > 0 && elapsedMs < 60000 && impliedMps > 45.0 && speed < 45.0;
+        if (isZeroSpeedJump || isTeleportSpike) {
+            const pending = stored._pendingCellJump;
+            const confirmRadiusM = isTeleportSpike ? 250 : 75;
+            const confirmedBySecondTick = pending &&
+                (nowMs - (pending.time || 0) < 180000) &&
+                distMeters(lat, lng, pending.lat, pending.lng) <= confirmRadiusM;
+            if (!confirmedBySecondTick) {
+                out._pendingCellJump = { lat, lng, time: nowMs };
+                effectiveLat = prevLat;
+                effectiveLng = prevLng;
+                out.y = prevLat;
+                out.x = prevLng;
+                movedM = 0;
+            } else {
+                delete out._pendingCellJump;
+            }
+        } else {
+            delete out._pendingCellJump;
+        }
+    }
 
     const prevMode = stored?.transitMode || 'STATIONARY';
-    const transitMode = classifyTransitMode(speed, lat, lng, memberId, prevMode);
+    const transitMode = classifyTransitMode(speed, effectiveLat, effectiveLng, memberId, prevMode);
     out.transitMode = transitMode;
 
     if (transitMode === 'STATIONARY' || (speed < 1.0 && movedM < 25)) {
         if (!out.statusText || /Live GPS|tracking|away/i.test(out.statusText)) {
-            const place = resolveOriginName(lat, lng, home, safeZones);
+            const place = resolveOriginName(effectiveLat, effectiveLng, home, safeZones);
             out.statusText = (place !== 'their location') ? `At ${place}` : 'Stationary';
         }
-        out.lastStationaryLat = lat;
-        out.lastStationaryLng = lng;
+        out.lastStationaryLat = effectiveLat;
+        out.lastStationaryLng = effectiveLng;
         out.transitMode = 'STATIONARY';
 
         const now = Date.now();
         const prevStationaryDistM = stored?.lastStationaryLat && stored?.lastStationaryLng
-            ? distMeters(lat, lng, stored.lastStationaryLat, stored.lastStationaryLng)
+            ? distMeters(effectiveLat, effectiveLng, stored.lastStationaryLat, stored.lastStationaryLng)
             : movedM;
         const wasStationaryNearby = stored && stored.transitMode === 'STATIONARY' && prevStationaryDistM <= 150;
 
@@ -492,6 +524,115 @@ function processTripLifecycle(token, memberId, out, stored, home, safeZones) {
     return { completedTrip: finishedTrip, alertEvent };
 }
 
+// Track recently co-located away-from-home companion pairs: `${token}:${idA}:${idB}` -> timestamp
+const coTravelPairs = new Map();
+
+function isInsideNamedBarrier(lat, lng, home, safeZones) {
+    if (!lat || !lng) return false;
+    if (home && home.lat && home.lng) {
+        if (distMeters(lat, lng, home.lat, home.lng) <= (home.radius || 150) + 50) return true;
+    }
+    const allZones = [...(safeZones || []), ...DEFAULT_SAFE_ZONES];
+    for (const z of allZones) {
+        if (distMeters(lat, lng, z.latitude, z.longitude) <= (z.radiusMeters || 160) + 50) return true;
+    }
+    return false;
+}
+
+// Known coarse cellular mast centroids in Purley/Coulsdon where indoor phones drop when losing satellite lock
+const KNOWN_COARSE_CELL_MASTS = [
+    { lat: 51.3281267, lng: -0.1080836, radiusM: 35 }
+];
+
+function isOnCoarseCellMast(lat, lng) {
+    if (!lat || !lng) return false;
+    return KNOWN_COARSE_CELL_MASTS.some(m => distMeters(lat, lng, m.lat, m.lng) <= m.radiusM);
+}
+
+/**
+ * Reconciles co-traveling companions (e.g. parent + child out and about together)
+ * so a pocket phone whose GPS lags behind or suffers a cell-tower bounce does not
+ * visually drift away from the active companion on family maps.
+ */
+function reconcileCoTravelingCompanions(token, membersMap, home, safeZones) {
+    if (!membersMap || typeof membersMap !== 'object') return membersMap;
+    const ids = Object.keys(membersMap);
+    const now = Date.now();
+
+    for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+            const mA = membersMap[ids[i]];
+            const mB = membersMap[ids[j]];
+            if (!mA || !mB || !mA.y || !mA.x || !mB.y || !mB.x) continue;
+            if (mA.isLocationPaused || mB.isLocationPaused) continue;
+
+            const idA = String(mA.id || ids[i]).toLowerCase();
+            const idB = String(mB.id || ids[j]).toLowerCase();
+            const nameA = String(mA.name || '').toLowerCase();
+            const nameB = String(mB.name || '').toLowerCase();
+            if (idA.includes('tab') || idB.includes('tab') || nameA.includes('tab') || nameB.includes('tab')) continue;
+
+            const pairKey = [ids[i], ids[j]].sort().join(':');
+            const fullKey = `${token || 'default'}:${pairKey}`;
+
+            const aInBarrier = isInsideNamedBarrier(mA.y, mA.x, home, safeZones);
+            const bInBarrier = isInsideNamedBarrier(mB.y, mB.x, home, safeZones);
+            if (aInBarrier || bInBarrier) {
+                coTravelPairs.delete(fullKey);
+                continue;
+            }
+
+            const distM = distMeters(mA.y, mA.x, mB.y, mB.x);
+            const ageA = now - (Number(mA.lastActive) || 0);
+            const ageB = now - (Number(mB.lastActive) || 0);
+
+            // Confirm co-travel when both are outside barriers and within 220m of each other
+            if (distM <= 220 && ageA < 25 * 60 * 1000 && ageB < 25 * 60 * 1000) {
+                coTravelPairs.set(fullKey, now);
+            }
+
+            const lastPairedAt = coTravelPairs.get(fullKey) || 0;
+            const isRecentlyPaired = (now - lastPairedAt) <= 30 * 60 * 1000 || distM <= 220;
+
+            if (isRecentlyPaired && distM > 8 && distM <= 250) {
+                const aOnCellMast = isOnCoarseCellMast(mA.y, mA.x);
+                const bOnCellMast = isOnCoarseCellMast(mB.y, mB.x);
+
+                // Prefer the member NOT stuck on a coarse cellular mast; otherwise prefer the fresher/actively-moving member
+                let aIsLeader;
+                if (aOnCellMast !== bOnCellMast) {
+                    aIsLeader = !aOnCellMast;
+                } else {
+                    aIsLeader = (Number(mA.lastActive) || 0) >= (Number(mB.lastActive) || 0);
+                }
+
+                const leader = aIsLeader ? mA : mB;
+                const follower = aIsLeader ? mB : mA;
+                const leaderAgeMs = now - (Number(leader.lastActive) || 0);
+                const lagMs = Math.max(0, (Number(leader.lastActive) || 0) - (Number(follower.lastActive) || 0));
+                const followerOnCellMast = isOnCoarseCellMast(follower.y, follower.x);
+
+                if (leaderAgeMs <= 15 * 60 * 1000 && (followerOnCellMast || lagMs >= 25000)) {
+                    follower.y = leader.y;
+                    follower.x = leader.x;
+                    if (Number(leader.speedMph) >= 0.8) {
+                        follower.speedMph = leader.speedMph;
+                        follower.transitMode = leader.transitMode;
+                        follower.statusText = leader.statusText;
+                        follower.locationSince = 0;
+                    } else if (leader.statusText) {
+                        follower.statusText = leader.statusText;
+                    }
+                    coTravelPairs.set(fullKey, now);
+                }
+            } else if (distM > 350 && ageA < 60000 && ageB < 60000) {
+                coTravelPairs.delete(fullKey);
+            }
+        }
+    }
+    return membersMap;
+}
+
 module.exports = {
     distMeters,
     calcBearing,
@@ -502,6 +643,7 @@ module.exports = {
     classifyTransitMode,
     enrichMemberState,
     processTripLifecycle,
+    reconcileCoTravelingCompanions,
     loadCompletedTrips,
     KNOWN_HUBS,
     DEFAULT_SAFE_ZONES
