@@ -194,4 +194,60 @@ class LocationArbitrationAndHomeGeofenceTest {
         assertEquals("me must move to church coordinate instead of snapping to Home", churchLat, updatedMe!!.y, 0.0001)
         assertFalse("Status must not claim At Home at 150m when radius is 60m", updatedMe.statusText.contains("At Home", ignoreCase = true))
     }
+
+    @Test
+    fun testCoLocatedCompanionsOutsideZonesStayPairedSideBySideWithoutDriftingUp() {
+        val homeLat = 51.330000
+        val homeLng = -0.118000
+
+        // Annette and Isabel are out and about together ~600m away from Home.
+        // Annette's phone reports walking speed (1.2 mph) while Isabel's pocket phone reports 0.0 mph slightly North.
+        val annette = FamilyMember(
+            id = "device_annette_d97b0a",
+            name = "Annette",
+            avatarColorHex = "#E53935",
+            x = -0.1102785,
+            y = 51.3260528,
+            batteryPercentage = 55,
+            speedMph = 1.2,
+            statusText = "Walking (1.2 mph)"
+        )
+        val isabel = FamilyMember(
+            id = "device_isabel_4ec9dd",
+            name = "Isabel",
+            avatarColorHex = "#3949AB",
+            x = -0.1101554,
+            y = 51.3260834,
+            batteryPercentage = 44,
+            speedMph = 0.0,
+            statusText = "Stationary"
+        )
+
+        val layout = computeClusterLayout(
+            members = listOf(annette, isabel),
+            safeZones = emptyList(),
+            homeLat = homeLat,
+            homeLng = homeLng,
+            homeRadiusMeters = 60.0,
+            isWorkCalibrated = false,
+            workLat = 0.0,
+            workLng = 0.0,
+            workRadiusMeters = 75.0,
+            zoomLevel = 16.0
+        )
+
+        assertEquals(
+            "Annette and Isabel out and about together must stay in the same co-located cluster",
+            layout.barrierMembership["device_annette_d97b0a"],
+            layout.barrierMembership["device_isabel_4ec9dd"]
+        )
+        val annettePos = layout.adjustedCoordinates["device_annette_d97b0a"]!!
+        val isabelPos = layout.adjustedCoordinates["device_isabel_4ec9dd"]!!
+        assertEquals(
+            "Paired companions must sit side-by-side at the exact same latitude (never pushing Isabel UP)",
+            annettePos.latitude,
+            isabelPos.latitude,
+            1e-6
+        )
+    }
 }

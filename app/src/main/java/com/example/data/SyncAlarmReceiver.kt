@@ -35,11 +35,19 @@ class SyncAlarmReceiver : BroadcastReceiver() {
                         context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
                     } else true
                     
-                    if (hasFine) {
-                        bestLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    }
-                    if (bestLocation == null && hasCoarse) {
-                        bestLocation = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    val gpsLoc = if (hasFine) {
+                        locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    } else null
+                    val netLoc = if (hasCoarse || hasFine) {
+                        locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                    } else null
+                    val candidate = GeoUtils.pickBetterLocation(gpsLoc, netLoc)
+                    if (candidate != null) {
+                        val ageMs = if (candidate.time > 0L) System.currentTimeMillis() - candidate.time else 0L
+                        // Only accept fresh, arbitrated OS locations so a stale cached GPS fix never snaps a moving phone backwards
+                        if (ageMs <= 2 * 60 * 1000L && GeoUtils.acceptLocationUpdate(candidate)) {
+                            bestLocation = candidate
+                        }
                     }
                 } catch (e: Exception) {}
 

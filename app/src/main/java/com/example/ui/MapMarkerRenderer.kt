@@ -79,14 +79,22 @@ object MapMarkerRenderer {
         val locPillMargin = if (locationDuration.isNotEmpty()) kotlin.math.ceil(2.0f * density).toInt() else 0
         val bottomPad = (2 * density).toInt()
 
+        // When rendering a center-anchored clustered marker (showStem == false) that has a top or bottom pill,
+        // balance top and bottom pill space so the avatar circle stays dead-center at bmpH / 2f and never shifts UP/DOWN.
+        val hasAnyPill = relativeTime.isNotEmpty() || locationDuration.isNotEmpty()
+        val rawTopSpace = topBadgePad + timePillHeight + timePillMargin
+        val rawBottomSpace = stemH + locPillHeight + locPillMargin + bottomPad
+        val effectiveTopSpace = if (!showStem && hasAnyPill) maxOf(rawTopSpace, rawBottomSpace) else rawTopSpace
+        val effectiveBottomSpace = if (!showStem && hasAnyPill) maxOf(rawTopSpace, rawBottomSpace) else rawBottomSpace
+
         val maxPillWidth = maxOf(
             measurePillWidthPx(relativeTime, density),
             measurePillWidthPx(locationDuration, density)
         )
         val bmpW = maxOf(bubblePx + sidePad * 2, maxPillWidth + (4 * density).toInt())
-        val bmpH = topBadgePad + timePillHeight + timePillMargin + bubblePx + stemH + locPillHeight + locPillMargin + bottomPad
+        val bmpH = effectiveTopSpace + bubblePx + effectiveBottomSpace
         val cx = bmpW / 2f
-        val bubbleTop = topBadgePad.toFloat() + timePillHeight + timePillMargin
+        val bubbleTop = effectiveTopSpace.toFloat()
         val bubbleBottom = bubbleTop + bubblePx
         val bubbleCy = bubbleTop + bubblePx / 2f
         val stemTipY = bubbleBottom + stemH

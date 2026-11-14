@@ -26,7 +26,7 @@ class LocationUpdateReceiver : BroadcastReceiver() {
                     intent.getParcelableExtra(LocationManager.KEY_LOCATION_CHANGED) as? Location
                 }
                 
-                if (location != null) {
+                if (location != null && GeoUtils.acceptLocationUpdate(location)) {
                     BackgroundSyncProcessor.processLocationUpdate(context, location)
                 }
             } catch (e: Exception) {

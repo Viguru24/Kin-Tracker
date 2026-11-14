@@ -125,8 +125,22 @@ fun computeClusterLayout(
         val inAnyBarrier = isHome || matchedZone != null || isInsideWork
 
         // Inside a barrier, ignore low GPS-noise speeds; only explicit travel or a real speed breaks the lock.
+        // Outside a barrier, keep co-located companions (e.g. parent & child walking or out together) eligible for
+        // co-located side-by-side clustering unless they are solo-traveling away from everyone.
+        val wasInAdhocCluster = prevBarrier?.startsWith("adhoc:") == true
+        val adhocRetentionRadiusM = maxOf(65.0, 68.0 * metersPerPixelAtZoom(m.y, zoomLevel))
+        val adhocFormationRadiusM = maxOf(45.0, 52.0 * metersPerPixelAtZoom(m.y, zoomLevel))
+        val hasNearbyCompanionOutsideBarrier = !inAnyBarrier && activeMembers.any { other ->
+            if (other.id == m.id) return@any false
+            val samePrevAdhoc = wasInAdhocCluster && previousBarrierMembership[other.id] == prevBarrier
+            val thresholdM = if (samePrevAdhoc) adhocRetentionRadiusM else adhocFormationRadiusM
+            com.example.data.GeoUtils.distanceMeters(m.y, m.x, other.y, other.x) <= thresholdM
+        }
+
         val isActivelyMoving = if (inAnyBarrier) {
             m.isComingHome || (!(atHomeStatus || atSafeZoneStatus) && (statusIndicatesTravel(m) || m.speedMph >= barrierBreakoutSpeedMph))
+        } else if (hasNearbyCompanionOutsideBarrier) {
+            false
         } else {
             m.isComingHome || m.speedMph >= 0.6 || statusIndicatesTravel(m) ||
                 classifyTransitMode(m.speedMph, m.statusText, m.id) != TransitMode.STATIONARY
@@ -194,8 +208,17 @@ fun computeClusterLayout(
             val m2 = unassignedMembers[j]
             if (visited.contains(m2.id)) continue
 
+            val samePrevAdhoc = previousBarrierMembership[m1.id] != null &&
+                previousBarrierMembership[m1.id]?.startsWith("adhoc:") == true &&
+                previousBarrierMembership[m1.id] == previousBarrierMembership[m2.id]
+            val effectiveThresholdMeters = if (samePrevAdhoc) {
+                maxOf(clusterThresholdMeters + 25.0, 68.0 * metersPerPixelAtZoom(avgLatForAdhoc, zoomLevel))
+            } else {
+                clusterThresholdMeters
+            }
+
             val distM = com.example.data.GeoUtils.distanceMeters(m1.y, m1.x, m2.y, m2.x)
-            if (distM < clusterThresholdMeters) {
+            if (distM < effectiveThresholdMeters) {
                 currentCluster.add(m2.id)
                 visited.add(m2.id)
             }
@@ -303,21 +326,19 @@ fun computeClusterLayout(
                     val neededShiftM = (minSeparationMeters - distM) / 2.0 + 1.0
                     val cosLat = kotlin.math.cos(Math.toRadians(avgLat)).coerceAtLeast(0.01)
 
-                    if (distM < 0.1) {
-                        // Exactly co-located (e.g. sharing car or identical GPS): spread horizontally (West/East)
-                        val shiftLng = neededShiftM / (111139.0 * cosLat)
+                    // Spread overlapping markers horizontally (West/East) so neither marker is pushed vertically UP above the other
+                    val shiftLng = neededShiftM / (111139.0 * cosLat)
+                    val westFirst = if ( kotlin.math.abs(posA.longitude - posB.longitude) > 1e-7 ) {
+                        posA.longitude <= posB.longitude
+                    } else {
+                        idA <= idB
+                    }
+                    if (westFirst) {
                         adjustedCoordinates[idA] = LatLng(posA.latitude, posA.longitude - shiftLng)
                         adjustedCoordinates[idB] = LatLng(posB.latitude, posB.longitude + shiftLng)
                     } else {
-                        // Push apart along their existing separation axis
-                        val dLat = posB.latitude - posA.latitude
-                        val dLng = (posB.longitude - posA.longitude) * cosLat
-                        val angle = kotlin.math.atan2(dLat, dLng)
-                        val shiftLat = (neededShiftM * kotlin.math.sin(angle)) / 111139.0
-                        val shiftLng = (neededShiftM * kotlin.math.cos(angle)) / (111139.0 * cosLat)
-
-                        adjustedCoordinates[idA] = LatLng(posA.latitude - shiftLat, posA.longitude - shiftLng)
-                        adjustedCoordinates[idB] = LatLng(posB.latitude + shiftLat, posB.longitude + shiftLng)
+                        adjustedCoordinates[idA] = LatLng(posA.latitude, posA.longitude + shiftLng)
+                        adjustedCoordinates[idB] = LatLng(posB.latitude, posB.longitude - shiftLng)
                     }
                 }
             }

@@ -185,15 +185,15 @@ object BackgroundSyncProcessor {
         }
 
         val hasStatusCategoryChanged = extractStatusCategory(status) != extractStatusCategory(lastSyncStatus)
-        val isUserMovingFast = speedMph >= 1.5 || distMovedM >= 60.0
+        val isUserMovingFast = speedMph >= 0.8 || distMovedM >= 25.0
 
-        // Adaptive moving interval: 30s on Wi-Fi, 45s on cellular data to preserve mobile data caps
-        val minMovingInterval = if (isMetered) 45_000L else 30_000L
+        // Adaptive moving interval: 10s on Wi-Fi, 15s on cellular data so walking companions stay tightly synced
+        val minMovingInterval = if (isMetered) 15_000L else 10_000L
         val isMovingThrottled = isUserMovingFast && timeSinceLastSync < minMovingInterval
 
-        // Stationary threshold: ignore minor indoor GPS drift under 60m (80m on metered cellular)
-        val minStationaryDist = if (isMetered) 80.0 else 60.0
-        val hasMovedSignificantly = if (isUserMovingFast) distMovedM >= 25.0 else distMovedM >= minStationaryDist
+        // Stationary threshold: sync whenever member moves >= 25m (30m on metered cellular) so pocket phones don't lag 80m behind
+        val minStationaryDist = if (isMetered) 30.0 else 25.0
+        val hasMovedSignificantly = if (isUserMovingFast) distMovedM >= 15.0 else distMovedM >= minStationaryDist
 
         // Battery threshold: only wake network on >= 5% change or charging toggle
         val hasBatteryChangedSignificantly = (lastSyncBattery == -1 || Math.abs(batteryPct - lastSyncBattery) >= 5 || isCharging != lastSyncCharging)

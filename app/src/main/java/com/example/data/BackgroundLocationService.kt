@@ -51,7 +51,8 @@ class BackgroundLocationService : Service() {
             withWakeLock(15_000L) {
                 // Smart Adaptive movement detection: boost tracking rate when on the move
                 val speedMph = (location.speed * 2.23694f).toDouble()
-                val distM = if (lastObservedLat != 0.0 && lastObservedLng != 0.0) {
+                val hadBaseline = lastObservedLat != 0.0 && lastObservedLng != 0.0
+                val distM = if (hadBaseline) {
                     val x = (location.longitude - lastObservedLng) * 111000.0 * Math.cos(Math.toRadians(location.latitude))
                     val y = (location.latitude - lastObservedLat) * 111000.0
                     Math.hypot(x, y)
@@ -59,7 +60,12 @@ class BackgroundLocationService : Service() {
 
                 val now = System.currentTimeMillis()
                 val isAccurate = !location.hasAccuracy() || location.accuracy <= 150f
-                if (isAccurate && (speedMph >= 1.5 || distM > 35.0)) {
+                if (!hadBaseline && isAccurate) {
+                    // Always seed baseline coordinates on the first accurate fix so pocket-phone displacement is detected
+                    lastObservedLat = location.latitude
+                    lastObservedLng = location.longitude
+                }
+                if (isAccurate && (speedMph >= 1.2 || distM > 22.0)) {
                     lastMovementTime = now
                     lastObservedLat = location.latitude
                     lastObservedLng = location.longitude
@@ -67,8 +73,8 @@ class BackgroundLocationService : Service() {
                         isUserMoving = true
                         restartLocationUpdates()
                     }
-                } else if (isUserMoving && (now - lastMovementTime) > 120_000L) {
-                    // 2 minutes of stillness: switch back to power saving
+                } else if (isUserMoving && (now - lastMovementTime) > 180_000L) {
+                    // 3 minutes of stillness: switch back to power saving
                     isUserMoving = false
                     lastObservedLat = location.latitude
                     lastObservedLng = location.longitude
@@ -238,17 +244,17 @@ class BackgroundLocationService : Service() {
 
             // Smart Adaptive intervals:
             // Foreground: 2s, 0m (smooth interactive map)
-            // Moving: 10s, 15m (accurate road tracking while conserving power)
-            // Stationary: 120s, 40m (power saving, GPS noise immunity)
+            // Moving: 6s, 10m (accurate walking/driving tracking for co-traveling family members)
+            // Stationary: 30s, 20m (responsive pocket-phone wake-up without excessive drain)
             val interval = when {
                 isAppInForeground -> 2000L
-                isUserMoving -> 10000L
-                else -> 120000L
+                isUserMoving -> 6000L
+                else -> 30000L
             }
             val minDistance = when {
                 isAppInForeground -> 0.0f
-                isUserMoving -> 15.0f
-                else -> 40.0f
+                isUserMoving -> 10.0f
+                else -> 20.0f
             }
 
             if (hasFine && isGpsEnabled) {
@@ -264,11 +270,26 @@ class BackgroundLocationService : Service() {
                     // Safe fallback
                 }
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && (hasFine || hasCoarse)) {
+                try {
+                    if (locationManager?.isProviderEnabled(LocationManager.FUSED_PROVIDER) == true) {
+                        locationManager?.requestLocationUpdates(
+                            LocationManager.FUSED_PROVIDER,
+                            interval,
+                            minDistance,
+                            directLocationListener,
+                            Looper.getMainLooper()
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Safe fallback
+                }
+            }
             if ((hasFine || hasCoarse) && isNetworkEnabled) {
                 try {
                     val hasActiveGps = hasFine && isGpsEnabled
-                    val netInterval = if (isAppInForeground && hasActiveGps) 15000L else if (isAppInForeground) 2000L else if (isUserMoving) 10000L else 60000L
-                    val netDistance = if (isAppInForeground && hasActiveGps) 25.0f else if (isAppInForeground) 0.0f else if (isUserMoving) 15.0f else 40.0f
+                    val netInterval = if (isAppInForeground && hasActiveGps) 15000L else if (isAppInForeground) 2000L else if (isUserMoving) 8000L else 30000L
+                    val netDistance = if (isAppInForeground && hasActiveGps) 20.0f else if (isAppInForeground) 0.0f else if (isUserMoving) 10.0f else 20.0f
                     locationManager?.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
                         netInterval,

@@ -303,8 +303,11 @@ fun RadarMap(
                     m.statusText.contains("transit", ignoreCase = true) ||
                     m.statusText.contains("commute", ignoreCase = true)
 
-                // Locked = parked inside Home / Safe Zone / Work per the shared sticky layout
-                val isLocked = clusterLayout.barrierMembership.containsKey(m.id)
+                // Locked = parked inside Home / Safe Zone / Work (or stationary inside an ad-hoc cluster)
+                val barrierKey = clusterLayout.barrierMembership[m.id]
+                val isInsidePlaceBarrier = barrierKey != null && !barrierKey.startsWith("adhoc:")
+                val isInAdhocCluster = barrierKey != null && barrierKey.startsWith("adhoc:")
+                val isLocked = isInsidePlaceBarrier || (isInAdhocCluster && !isActivelyTraveling)
 
                 val isReportedMoving = if (isLocked) {
                     false
@@ -329,7 +332,7 @@ fun RadarMap(
                     visualCoordinates[m.id] = initialGeo
                 } else {
                     if (isLocked) {
-                        // Locked static inside barrier or cluster — snap immediately to assigned deconflicted slot
+                        // Locked static inside barrier or stationary cluster — snap immediately to assigned deconflicted slot
                         state.isMoving = false
                         state.speedMph = 0.0
                         state.targetGeo = assignedClusterPos
@@ -338,15 +341,15 @@ fun RadarMap(
                     } else {
                         // Truly moving outside barrier or actively walking/traveling
                         val distMovedM = com.example.data.GeoUtils.distanceMeters(
-                            state.currentGeo.latitude, state.currentGeo.longitude,
-                            m.y, m.x
+                            state.targetGeo.latitude, state.targetGeo.longitude,
+                            assignedClusterPos.latitude, assignedClusterPos.longitude
                         )
                         // Allow small walking steps (0.3m) when walking/traveling, suppress jitter (3.0m) when stationary
                         val minMovementMeters = if (isReportedMoving) 0.3 else 3.0
                         if (distMovedM >= minMovementMeters) {
-                            val dLat = m.y - state.currentGeo.latitude
-                            val dLng = m.x - state.currentGeo.longitude
-                            val cosLat = kotlin.math.cos(Math.toRadians(m.y))
+                            val dLat = assignedClusterPos.latitude - state.currentGeo.latitude
+                            val dLng = assignedClusterPos.longitude - state.currentGeo.longitude
+                            val cosLat = kotlin.math.cos(Math.toRadians(assignedClusterPos.latitude))
                             val rawBearing = Math.toDegrees(kotlin.math.atan2(dLng * cosLat, dLat))
                             state.bearingDeg = (rawBearing + 360.0) % 360.0
                             state.targetGeo = assignedClusterPos
@@ -356,9 +359,9 @@ fun RadarMap(
                             state.isMoving = true
                         } else {
                             state.isMoving = isReportedMoving
+                            state.targetGeo = assignedClusterPos
                             if (!isReportedMoving) {
                                 state.speedMph = 0.0
-                                state.targetGeo = assignedClusterPos
                                 state.currentGeo = assignedClusterPos
                                 visualCoordinates[m.id] = assignedClusterPos
                             }
