@@ -47,7 +47,7 @@ object MapMarkerRenderer {
         showStem: Boolean
     ): MarkerGeometry {
         val density = context.resources.displayMetrics.density
-        val bubbleDp = if (isSelected) 38 else 30
+        val bubbleDp = if (isSelected) 48 else 40
         val bubblePx = (bubbleDp * density).toInt()
         val bubbleR = bubblePx / 2f
         val stemW = if (showStem) (6 * density).toInt() else 0

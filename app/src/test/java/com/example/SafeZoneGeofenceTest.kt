@@ -253,12 +253,12 @@ class SafeZoneGeofenceTest {
             val screenDp = distMeters / metersPerDp
 
             assertTrue(
-                "At zoom $zoom, screen separation ($screenDp dp) must be at least 33dp so compact 30dp bubbles do not overlap",
-                screenDp >= 33.0
+                "At zoom $zoom, screen separation ($screenDp dp) must be at least 43dp so 40dp bubbles do not overlap",
+                screenDp >= 43.0
             )
             assertTrue(
-                "At zoom $zoom, screen separation ($screenDp dp) must stay compact (<= 40dp) so cluster lines stay short",
-                screenDp <= 40.0
+                "At zoom $zoom, screen separation ($screenDp dp) must stay compact (<= 52dp) so cluster lines stay short",
+                screenDp <= 52.0
             )
 
             // Verify they sit above Home (North) and flank horizontally (Eloise West, Dad East) creating angled spokes
@@ -330,8 +330,8 @@ class SafeZoneGeofenceTest {
         val screenDp = distMeters / metersPerDp
 
         assertTrue(
-            "Moving co-located members must be separated by at least 33dp on screen so compact bubbles never overlap (was $screenDp dp)",
-            screenDp >= 33.0
+            "Moving co-located members must be separated by at least 43dp on screen so 40dp bubbles never overlap (was $screenDp dp)",
+            screenDp >= 43.0
         )
 
         val fiveAtHome = (1..5).map { idx ->
@@ -363,8 +363,8 @@ class SafeZoneGeofenceTest {
             val anchor = homeLayout.clusterAnchorPoints[member.id]!!
             val spokeMeters = com.example.data.GeoUtils.distanceMeters(anchor.latitude, anchor.longitude, pos.latitude, pos.longitude)
             val spokeDp = spokeMeters / com.example.ui.metersPerPixelAtZoom(anchor.latitude, 16.0)
-            assertTrue("5-member home spoke must stay compact (<= 31dp), was $spokeDp dp", spokeDp <= 31.0)
-            assertTrue("Spoke length must stay positive", spokeDp >= 26.0)
+            assertTrue("5-member home spoke must stay compact (<= 40dp), was $spokeDp dp", spokeDp <= 40.0)
+            assertTrue("Spoke length must stay positive", spokeDp >= 32.0)
         }
     }
 }

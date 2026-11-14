@@ -5,9 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -21,8 +19,6 @@ import com.example.ui.theme.*
 @Composable
 fun MapControlsOverlay(
     isCameraFollowingMe: Boolean,
-    onZoomIn: () -> Unit,
-    onZoomOut: () -> Unit,
     onWhereAmINow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -34,46 +30,6 @@ fun MapControlsOverlay(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         horizontalAlignment = Alignment.End
     ) {
-        // ZOOM IN (+) FAB
-        Surface(
-            modifier = Modifier
-                .size(46.dp)
-                .clickable { onZoomIn() },
-            color = CosmicSlateCard,
-            shape = CircleShape,
-            border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 6.dp
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Zoom In",
-                    tint = RadarCyan,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        // ZOOM OUT (-) FAB
-        Surface(
-            modifier = Modifier
-                .size(46.dp)
-                .clickable { onZoomOut() },
-            color = CosmicSlateCard,
-            shape = CircleShape,
-            border = BorderStroke(1.dp, SlateBorder),
-            shadowElevation = 6.dp
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                Icon(
-                    imageVector = Icons.Default.Remove,
-                    contentDescription = "Zoom Out",
-                    tint = RadarCyan,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
         // WHERE AM I NOW (FIND ME ON MAP) FAB
         Surface(
             modifier = Modifier

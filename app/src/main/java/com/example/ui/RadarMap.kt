@@ -372,6 +372,9 @@ fun RadarMap(
     val currentIsFollowingSelectedMember by rememberUpdatedState(isFollowingSelectedMember)
     val currentIsRouteTrailEnabled by rememberUpdatedState(isRouteTrailEnabled)
     val currentIsUserInteractingWithMap by rememberUpdatedState(isUserInteractingWithMap)
+    val currentMembers by rememberUpdatedState(members)
+    val currentSafeZones by rememberUpdatedState(safeZones)
+    val currentOnSelectMember by rememberUpdatedState(onSelectMember)
 
     // High-frequency (30 FPS) continuous road interpolation & camera follow engine
     LaunchedEffect(isSettingsOpen) {
@@ -649,19 +652,41 @@ fun RadarMap(
 
                         map.addOnMapClickListener { latLng ->
                             val screenPoint = map.projection.toScreenLocation(latLng)
+                            val hitSlop = 20f * density
+                            val hitBox = android.graphics.RectF(
+                                screenPoint.x - hitSlop,
+                                screenPoint.y - hitSlop,
+                                screenPoint.x + hitSlop,
+                                screenPoint.y + hitSlop
+                            )
                             val hitFeatures = map.queryRenderedFeatures(
-                                screenPoint,
+                                hitBox,
                                 MapLibreOverlayManager.LAYER_MARKERS_STEM,
                                 MapLibreOverlayManager.LAYER_MARKERS_CENTER
                             )
-                            val firstHit = hitFeatures.firstOrNull()
+                            val firstHit = hitFeatures
+                                .filter {
+                                    val k = it.getStringProperty("kind")
+                                    k == "member" || k == "zone"
+                                }
+                                .minByOrNull { feature ->
+                                    val pt = feature.geometry() as? org.maplibre.geojson.Point
+                                    if (pt != null) {
+                                        val fp = map.projection.toScreenLocation(LatLng(pt.latitude(), pt.longitude()))
+                                        val dx = fp.x - screenPoint.x
+                                        val dy = fp.y - screenPoint.y
+                                        dx * dx + dy * dy
+                                    } else {
+                                        Float.MAX_VALUE
+                                    }
+                                }
                             if (firstHit != null) {
                                 val kind = firstHit.getStringProperty("kind")
                                 val hitId = firstHit.getStringProperty("id")
                                 if (kind == "member" && hitId != null) {
-                                    val tappedMember = members.firstOrNull { it.id == hitId }
+                                    val tappedMember = currentMembers.firstOrNull { it.id == hitId }
                                     if (tappedMember != null) {
-                                        onSelectMember(tappedMember.id)
+                                        currentOnSelectMember(tappedMember.id)
                                         isFollowingSelectedMember = true
                                         val targetGeo = visualCoordinates[tappedMember.id] ?: LatLng(tappedMember.y, tappedMember.x)
                                         val targetZoom = if (map.cameraPosition.zoom < 12.0) 16.0 else map.cameraPosition.zoom
@@ -670,7 +695,7 @@ fun RadarMap(
                                         return@addOnMapClickListener true
                                     }
                                 } else if (kind == "zone" && hitId != null) {
-                                    val tappedZone = com.example.data.GeoUtils.withDefaultSafeZones(safeZones)
+                                    val tappedZone = com.example.data.GeoUtils.withDefaultSafeZones(currentSafeZones)
                                         .firstOrNull { it.id == hitId }
                                     if (tappedZone != null) {
                                         zoneToDelete = tappedZone
@@ -1104,38 +1129,6 @@ fun RadarMap(
 
         MapControlsOverlay(
             isCameraFollowingMe = isCameraFollowingMe,
-            onZoomIn = {
-                mapLibreRef?.let { map ->
-                    val newZoom = (map.cameraPosition.zoom + 1.0).coerceAtMost(20.0)
-                    mapZoomLevel = newZoom
-                    val target = if (isFollowingSelectedMember && selectedMember != null) {
-                        visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
-                    } else if (isCameraFollowingMe && me != null) {
-                        LatLng(me.y, me.x)
-                    } else map.cameraPosition.target
-                    if (target != null) {
-                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, newZoom), 250)
-                    } else {
-                        map.animateCamera(CameraUpdateFactory.zoomTo(newZoom), 250)
-                    }
-                }
-            },
-            onZoomOut = {
-                mapLibreRef?.let { map ->
-                    val newZoom = (map.cameraPosition.zoom - 1.0).coerceAtLeast(2.0)
-                    mapZoomLevel = newZoom
-                    val target = if (isFollowingSelectedMember && selectedMember != null) {
-                        visualCoordinates[selectedMember.id] ?: LatLng(selectedMember.y, selectedMember.x)
-                    } else if (isCameraFollowingMe && me != null) {
-                        LatLng(me.y, me.x)
-                    } else map.cameraPosition.target
-                    if (target != null) {
-                        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, newZoom), 250)
-                    } else {
-                        map.animateCamera(CameraUpdateFactory.zoomTo(newZoom), 250)
-                    }
-                }
-            },
             onWhereAmINow = {
                 val meLoc = members.firstOrNull { it.id == "me" }
                 if (meLoc != null && meLoc.y != 0.0 && meLoc.x != 0.0) {

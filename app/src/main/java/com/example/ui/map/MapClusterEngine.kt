@@ -241,12 +241,12 @@ fun computeClusterLayout(
             }
         }
 
-        // Screen-space radius scaled to compact 30dp face circles so spokes remain short & tight
+        // Screen-space radius scaled to 40dp face circles so spokes remain short & tight without overlap
         val radiusDp = when (cluster.size) {
-            2 -> 24.0
-            3 -> 25.0
-            4 -> 26.0
-            else -> maxOf(26.0, 17.5 / kotlin.math.sin(Math.PI / cluster.size))
+            2 -> 31.0
+            3 -> 31.5
+            4 -> 32.5
+            else -> maxOf(32.5, 22.5 / kotlin.math.sin(Math.PI / cluster.size))
         }
         val metersPerDp = metersPerPixelAtZoom(anchorGeo.latitude, zoomLevel)
         val spreadRadiusMeters = radiusDp * metersPerDp
@@ -283,8 +283,8 @@ fun computeClusterLayout(
         }
     }
 
-    // Universal screen-space deconfliction pass: guarantees that NO TWO compact 30dp face circles overlap on screen.
-    val minMarkerSeparationDp = 33.0 // Minimum 33dp center-to-center separation for 30dp bubbles
+    // Universal screen-space deconfliction pass: guarantees that NO TWO 40dp face circles overlap on screen.
+    val minMarkerSeparationDp = 43.0 // Minimum 43dp center-to-center separation for 40dp bubbles
     val activeIds = activeMembers.map { it.id }
     repeat(2) {
         for (i in 0 until activeIds.size) {

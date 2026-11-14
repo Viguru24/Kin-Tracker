@@ -38,12 +38,12 @@ class MapMarkerRendererTest {
         val unselectedHeightDp = unselected.bitmap.height / density
 
         assertTrue(
-            "Expected compact unselected width <= 42dp, got $unselectedWidthDp",
-            unselectedWidthDp <= 42f
+            "Expected unselected width <= 54dp, got $unselectedWidthDp",
+            unselectedWidthDp <= 54f
         )
         assertTrue(
-            "Expected compact unselected height <= 46dp, got $unselectedHeightDp",
-            unselectedHeightDp <= 46f
+            "Expected unselected height <= 58dp, got $unselectedHeightDp",
+            unselectedHeightDp <= 58f
         )
         assertTrue(
             "Selected marker width should exceed unselected width",
