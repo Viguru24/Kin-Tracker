@@ -78,7 +78,7 @@ Commercial tracking apps sell your family's movement history to third-party data
 
 | Capability | Life360 Gold ($14.99+/mo) | Apple Find My | 🛰️ **Kin-Tracker v2.8.3** |
 | :--- | :---: | :---: | :---: |
-| **Cost Forever** | `$180+/yr` | Free (Apple hardware lock-in) | **$0 Forever (MIT Open Source)** |
+| **Cost Forever** | `$180+/yr` | Free (Apple hardware lock-in) | **$0 Forever (GPLv3 Open Source)** |
 | **Location Privacy** | Third-party broker history | Apple Cloud | **Zero Brokers • Self-Hostable VPS** |
 | **Unlimited Safe Zones (Geofences)** | ❌ Paywalled (2 free only) | ⚠️ Basic alerts | **✅ Unlimited (Home, School, Work, Custom)** |
 | **Find My Phone Through Silent + `STOP` UI** | ⚠️ App-only ping | ✅ iOS only | **✅ High-Priority Alarm + Full-Screen STOP** |
@@ -170,7 +170,7 @@ Compiled APK outputs are generated under `app/build/outputs/apk/debug/`.
 ---
 
 <div align="center">
-  <sub>Released under the MIT License • Built for family privacy by <a href="https://github.com/Viguru24">Viguru24</a></sub>
+  <sub>Released under the GNU GPL v3.0 License • Built for family privacy by <a href="https://github.com/Viguru24">Viguru24</a></sub>
 </div>
 
 ---
