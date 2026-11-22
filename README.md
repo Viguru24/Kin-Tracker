@@ -5,10 +5,11 @@
 <br/>
 
 [![Download Latest APK](https://img.shields.io/badge/📥_Download_Latest_APK-v2.8.3_(Android_8.0+)-10B981?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases/latest)
+[![Obtainium Auto-Update](https://img.shields.io/badge/⚡_Obtainium-Auto--Update-8B5CF6?style=for-the-badge&logo=android&logoColor=white)](https://apps.obtainium.imranr.dev/add?r=https://github.com/Viguru24/Kin-Tracker)
 [![All Releases](https://img.shields.io/badge/GitHub_Releases-Changelog_&_APKs-18181B?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Viguru24/Kin-Tracker/releases)
 [![Privacy](https://img.shields.io/badge/Data_Brokers-Zero_(100%25_Private)-14B8A6?style=for-the-badge&logo=shield&logoColor=white)](#why-families-switch-from-life360)
 [![Kotlin & Compose](https://img.shields.io/badge/Kotlin_2.0+-Jetpack_Compose-06B6D4?style=for-the-badge&logo=kotlin&logoColor=white)](#architecture--security)
-[![License](https://img.shields.io/badge/License-MIT_Free_Forever-27272A?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3_Free_Forever-27272A?style=for-the-badge)](LICENSE)
 
 <br/>
 
