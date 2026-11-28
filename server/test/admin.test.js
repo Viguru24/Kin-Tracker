@@ -155,7 +155,22 @@ async function runTests() {
         assert.strictEqual(ringRes.statusCode, 200);
         assert.strictEqual(ringRes.body.isRinging, true);
         assert.strictEqual(ringRes.body.member.statusText, '🚨 ALARM');
-        console.log('   ✅ Remote Ring Phone triggered.');
+        assert(Number(ringRes.body.member.alarmRequestedAt) > 0, 'ring must set alarmRequestedAt timestamp');
+        assert.strictEqual(ringRes.body.alarmRequestedAt, ringRes.body.member.alarmRequestedAt);
+
+        // Verify stale snapshot with older lastActive cannot wipe active alarm
+        const db = require('../src/db');
+        const beforeStale = db.getMember('device_test_1');
+        db.saveMember({
+            ...beforeStale,
+            statusText: 'At Home (Live GPS)',
+            alarmRequestedAt: 0,
+            lastActive: beforeStale.lastActive - 5000
+        });
+        const afterStale = db.getMember('device_test_1');
+        assert.strictEqual(afterStale.statusText, '🚨 ALARM', 'stale snapshot must not overwrite active alarm');
+        assert(Number(afterStale.alarmRequestedAt) > 0, 'stale snapshot must not clear alarmRequestedAt');
+        console.log('   ✅ Remote Ring Phone triggered with alarmRequestedAt and stale-overwrite protection.');
 
         const stopRingRes = await makeRequest('/api/admin/members/device_test_1/stop-ring', {
             method: 'POST',
@@ -164,7 +179,8 @@ async function runTests() {
         assert.strictEqual(stopRingRes.statusCode, 200);
         assert.strictEqual(stopRingRes.body.isRinging, false);
         assert.strictEqual(stopRingRes.body.member.statusText, 'Active');
-        console.log('   ✅ Remote Stop Ringing executed and status restored.');
+        assert.strictEqual(stopRingRes.body.member.alarmRequestedAt, 0, 'stop-ring must clear alarmRequestedAt to 0');
+        console.log('   ✅ Remote Stop Ringing executed and status/alarmRequestedAt restored.');
 
         // 9. Event Stream Log check
         console.log('9️⃣ Testing Event Stream Log API...');

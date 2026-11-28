@@ -25,6 +25,7 @@ data class SafeZoneSyncResult(
 object SyncResolutionHelper {
     private const val TOMBSTONE_RETENTION_MS = 30L * 24 * 60 * 60 * 1000L
     private const val ALARM_ACTIVE_WINDOW_MS = 60_000L
+    private const val ALARM_FUTURE_SKEW_MS = 30_000L
 
     fun isValidSyncToken(token: String?): Boolean {
         return !token.isNullOrBlank() &&
@@ -56,8 +57,9 @@ object SyncResolutionHelper {
     ): Boolean {
         return members.any { member ->
             val isSameDevice = isMyCloudEntry(member, myCloudId, myDeviceUuid, myDeviceName)
+            val ageMs = nowMs - member.alarmRequestedAt
             val isAlarmActive = member.statusText == "🚨 ALARM" ||
-                (member.alarmRequestedAt > 0L && (nowMs - member.alarmRequestedAt) in 0L..ALARM_ACTIVE_WINDOW_MS)
+                (member.alarmRequestedAt > 0L && ageMs in -ALARM_FUTURE_SKEW_MS..ALARM_ACTIVE_WINDOW_MS)
             isSameDevice && isAlarmActive
         }
     }

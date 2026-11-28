@@ -355,4 +355,50 @@ describe('Server TripTransitEngine', () => {
         assert.strictEqual(held.y, storedAnnette.y, 'Long-range 5s teleport spike must be held at previous coordinates');
         assert.strictEqual(held.x, storedAnnette.x);
     });
+
+    it('should preserve 🚨 ALARM statusText and alarmRequestedAt at Home, at SafeZones, and while moving', () => {
+        const now = Date.now();
+        const atHomeRing = enrichMemberState('token1', 'device_dad_336a12', {
+            id: 'device_dad_336a12',
+            name: 'Dad',
+            x: home.lng,
+            y: home.lat,
+            speedMph: 0.0,
+            statusText: '🚨 ALARM',
+            alarmRequestedAt: now
+        }, null, home, [woodcoteSchool]);
+        assert.strictEqual(atHomeRing.statusText, '🚨 ALARM');
+        assert.strictEqual(atHomeRing.alarmRequestedAt, now);
+
+        const atSchoolRing = enrichMemberState('token1', 'device_eloise', {
+            id: 'device_eloise',
+            name: 'Eloise',
+            x: woodcoteSchool.longitude,
+            y: woodcoteSchool.latitude,
+            speedMph: 0.0,
+            statusText: 'At Woodcote High School',
+            alarmRequestedAt: now
+        }, null, home, [woodcoteSchool]);
+        assert.strictEqual(atSchoolRing.statusText, '🚨 ALARM');
+        assert.strictEqual(atSchoolRing.alarmRequestedAt, now);
+
+        const drivingRing = enrichMemberState('token1', 'device_annette', {
+            id: 'device_annette',
+            name: 'Annette',
+            x: -0.1300,
+            y: 51.3298,
+            speedMph: 28.0,
+            statusText: '🚨 ALARM',
+            alarmRequestedAt: now
+        }, {
+            id: 'device_annette',
+            name: 'Annette',
+            x: -0.1400,
+            y: 51.3300,
+            speedMph: 20.0,
+            transitMode: 'DRIVING'
+        }, home, [woodcoteSchool]);
+        assert.strictEqual(drivingRing.statusText, '🚨 ALARM');
+        assert.strictEqual(drivingRing.alarmRequestedAt, now);
+    });
 });

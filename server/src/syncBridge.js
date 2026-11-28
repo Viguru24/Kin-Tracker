@@ -2,7 +2,9 @@ const https = require('https');
 const db = require('./db');
 
 const SYNC_URL = 'https://api.cosmowhisper.com/sync/81e5632c_pin_group';
+const DEFAULT_RING_DURATION_MS = 60000;
 const activeRingTimers = new Map();
+let cachedRemoteConfig = null;
 
 function isLiveSyncDisabled() {
     return process.env.KINTRACKER_DISABLE_LIVE_SYNC === '1' || process.env.NODE_ENV === 'test';
@@ -34,6 +36,12 @@ async function syncLiveProductionFamily() {
                 try {
                     const json = JSON.parse(raw);
                     if (json && json.members) {
+                        const remoteConfig = { ...json };
+                        delete remoteConfig.members;
+                        delete remoteConfig.completedTrips;
+                        delete remoteConfig.recentAlerts;
+                        cachedRemoteConfig = remoteConfig;
+
                         const circle = db.getCircleById('circle_default_sovereign') || db.getCircleByInviteCode('4666');
                         if (circle) {
                             if (json.homeLat) circle.homeLat = json.homeLat;
@@ -61,7 +69,13 @@ async function syncLiveProductionFamily() {
                                     const lat = Number(normalized.y || 0);
                                     const lng = Number(normalized.x || 0);
                                     const speed = Number(normalized.speedMph || 0);
-                                    const isAlarmOrPaused = normalized.statusText === '🚨 ALARM' ||
+                                    const alarmReqAt = Number(normalized.alarmRequestedAt || 0);
+                                    const hasActiveAlarm = normalized.statusText === '🚨 ALARM' ||
+                                        (alarmReqAt > 0 && Math.abs(Date.now() - alarmReqAt) < DEFAULT_RING_DURATION_MS);
+                                    if (hasActiveAlarm) {
+                                        normalized.statusText = '🚨 ALARM';
+                                    }
+                                    const isAlarmOrPaused = hasActiveAlarm ||
                                         normalized.isLocationPaused ||
                                         String(normalized.statusText || '').toLowerCase().includes('paused');
 
@@ -125,6 +139,7 @@ async function pushLiveProductionFamily(customMembersMap = null) {
             }
 
             const payload = {
+                ...(cachedRemoteConfig || {}),
                 homeLat: circle.homeLat,
                 homeLng: circle.homeLng,
                 isHomeCalibrated: Boolean(circle.isHomeCalibrated),
@@ -144,18 +159,33 @@ async function pushLiveProductionFamily(customMembersMap = null) {
                 hostname: url.hostname,
                 path: url.pathname,
                 method: 'PUT',
+                timeout: 10000,
                 headers: {
                     'Content-Type': 'application/json',
                     'Content-Length': Buffer.byteLength(data)
                 }
             }, (res) => {
-                resolve(res.statusCode >= 200 && res.statusCode < 300);
+                const ok = res.statusCode >= 200 && res.statusCode < 300;
+                if (!ok) {
+                    console.error(`[SyncBridge] Failed pushing to VPS (HTTP ${res.statusCode})`);
+                }
+                res.resume();
+                resolve(ok);
             });
 
-            req.on('error', () => resolve(false));
+            req.on('timeout', () => {
+                console.error('[SyncBridge] Timed out pushing to VPS');
+                req.destroy();
+                resolve(false);
+            });
+            req.on('error', (err) => {
+                console.error('[SyncBridge] Error pushing to VPS:', err.message);
+                resolve(false);
+            });
             req.write(data);
             req.end();
-        } catch (_) {
+        } catch (err) {
+            console.error('[SyncBridge] Unexpected error pushing to VPS:', err.message);
             resolve(false);
         }
     });
@@ -164,7 +194,7 @@ async function pushLiveProductionFamily(customMembersMap = null) {
 /**
  * Trigger remote phone ringing for a family member
  */
-async function ringMemberPhone(memberId, durationMs = 20000) {
+async function ringMemberPhone(memberId, durationMs = DEFAULT_RING_DURATION_MS) {
     let member = db.getMember(memberId);
     if (!member) {
         const allCircles = db.getAllCircles();
@@ -181,26 +211,29 @@ async function ringMemberPhone(memberId, durationMs = 20000) {
 
     const targetName = member.name;
     const personKey = db.getCanonicalPersonKey ? db.getCanonicalPersonKey(member.name, member.id) : member.id;
+    const now = Date.now();
 
-    // Set statusText to '🚨 ALARM' for this member and any matching devices
-    const affectedMembers = [];
+    // Set both statusText ('🚨 ALARM') and alarmRequestedAt (epoch ms) so the VPS & Android
+    // reliably recognize and broadcast the remote ring command.
+    const affectedMembersMap = {};
     const allCircles = db.getAllCircles();
     allCircles.forEach(circle => {
         (circle.members || []).forEach(m => {
             const mKey = db.getCanonicalPersonKey ? db.getCanonicalPersonKey(m.name, m.id) : m.id;
             if (m.id === member.id || mKey === personKey || m.name.toLowerCase() === targetName.toLowerCase()) {
                 m.statusText = '🚨 ALARM';
-                m.lastActive = Date.now();
+                m.alarmRequestedAt = now;
+                m.lastActive = now;
                 db.saveMember(m);
-                affectedMembers.push(m);
+                affectedMembersMap[m.id] = m;
             }
         });
     });
 
-    db.logEvent('ALARM', `🚨 Ringing ${targetName}'s phone at maximum volume...`, { memberId: member.id, name: targetName });
+    db.logEvent('ALARM', `🚨 Ringing ${targetName}'s phone at maximum volume...`, { memberId: member.id, name: targetName, alarmRequestedAt: now });
 
-    // Push immediately to production cloud
-    await pushLiveProductionFamily();
+    // Push affected member(s) immediately to production cloud
+    const pushed = await pushLiveProductionFamily(Object.keys(affectedMembersMap).length > 0 ? affectedMembersMap : null);
 
     // Clear existing timer if any
     if (activeRingTimers.has(personKey)) {
@@ -214,7 +247,7 @@ async function ringMemberPhone(memberId, durationMs = 20000) {
 
     activeRingTimers.set(personKey, timer);
 
-    return { success: true, isRinging: true, member, durationMs };
+    return { success: true, isRinging: true, pushed, alarmRequestedAt: now, member, durationMs };
 }
 
 /**
@@ -237,22 +270,26 @@ async function stopRingMemberPhone(memberId) {
 
     const targetName = member.name;
     const personKey = db.getCanonicalPersonKey ? db.getCanonicalPersonKey(member.name, member.id) : member.id;
+    const now = Date.now();
 
     if (activeRingTimers.has(personKey)) {
         clearTimeout(activeRingTimers.get(personKey));
         activeRingTimers.delete(personKey);
     }
 
-    // Reset statusText to Active / Stationary
+    // Reset statusText to Active and clear alarmRequestedAt
+    const affectedMembersMap = {};
     const allCircles = db.getAllCircles();
     allCircles.forEach(circle => {
         (circle.members || []).forEach(m => {
             const mKey = db.getCanonicalPersonKey ? db.getCanonicalPersonKey(m.name, m.id) : m.id;
             if (m.id === member.id || mKey === personKey || m.name.toLowerCase() === targetName.toLowerCase()) {
-                if (m.statusText === '🚨 ALARM') {
+                if (m.statusText === '🚨 ALARM' || Number(m.alarmRequestedAt || 0) > 0) {
                     m.statusText = 'Active';
-                    m.lastActive = Date.now();
+                    m.alarmRequestedAt = 0;
+                    m.lastActive = now;
                     db.saveMember(m);
+                    affectedMembersMap[m.id] = m;
                 }
             }
         });
@@ -260,10 +297,10 @@ async function stopRingMemberPhone(memberId) {
 
     db.logEvent('ALARM', `🔕 Stopped ringing ${targetName}'s phone.`, { memberId: member.id, name: targetName });
 
-    // Push immediately to production cloud
-    await pushLiveProductionFamily();
+    // Push affected member(s) immediately to production cloud
+    const pushed = await pushLiveProductionFamily(Object.keys(affectedMembersMap).length > 0 ? affectedMembersMap : null);
 
-    return { success: true, isRinging: false, member };
+    return { success: true, isRinging: false, pushed, member };
 }
 
 module.exports = {

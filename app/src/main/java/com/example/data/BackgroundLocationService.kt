@@ -123,6 +123,33 @@ class BackgroundLocationService : Service() {
         startForegroundServiceWithNotification()
         startLocationUpdates()
         scheduleRepeatingSyncAlarm()
+        ensureTelemetryWebSocketConnected()
+    }
+
+    private fun ensureTelemetryWebSocketConnected() {
+        serviceScope.launch {
+            try {
+                val prefs = getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+                if (!prefs.getBoolean("isCloudSyncEnabled", true)) return@launch
+                var token = prefs.getString("groupSyncToken", "") ?: ""
+                if (token.isBlank()) {
+                    val activeGroup = repository.getActiveGroupPinMappingOnce()
+                    if (activeGroup != null && activeGroup.groupToken.isNotBlank()) {
+                        token = activeGroup.groupToken
+                    }
+                }
+                if (!com.example.data.sync.SyncResolutionHelper.isValidSyncToken(token)) return@launch
+                val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
+                val myUuid = prefs.getString("myDeviceUUID", "") ?: ""
+                TelemetryWebSocketManager.connect(
+                    context = applicationContext,
+                    repository = repository,
+                    token = token,
+                    myDeviceName = myName,
+                    myDeviceUUID = myUuid
+                )
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -144,6 +171,7 @@ class BackgroundLocationService : Service() {
                 }
                 "ACTION_BACKGROUND" -> {
                     Companion.isInForeground = false
+                    ensureTelemetryWebSocketConnected()
                     if (isAppInForeground) {
                         isAppInForeground = false
                         restartLocationUpdates()

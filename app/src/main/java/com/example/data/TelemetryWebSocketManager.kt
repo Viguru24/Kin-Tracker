@@ -97,10 +97,19 @@ object TelemetryWebSocketManager {
                                     // Mark initial snapshot alerts as seen so we don't replay old history on launch
                                     alerts.forEach { if (it.id.isNotBlank()) processedAlertIds.add(it.id) }
                                 }
+                                handlePotentialRealtimeAlarm(context, json, myDeviceName, myDeviceUUID, fetchIfMissing = false)
                                 onRealtimeMemberUpdated?.invoke()
                             }
-                            "MEMBER_UPDATE" -> {
-                                onRealtimeMemberUpdated?.invoke()
+                            "MEMBER_UPDATE", "ALARM", "RING" -> {
+                                val handledDirectly = handlePotentialRealtimeAlarm(context, json, myDeviceName, myDeviceUUID, fetchIfMissing = false)
+                                val foregroundListener = onRealtimeMemberUpdated
+                                if (foregroundListener != null && BackgroundLocationService.isInForeground) {
+                                    foregroundListener.invoke()
+                                } else if (!handledDirectly) {
+                                    // App is backgrounded/locked or ViewModel is not attached:
+                                    // run an unthrottled alarm check immediately so Find My Phone rings in <1s.
+                                    BackgroundSyncProcessor.checkRemoteAlarmNow(context)
+                                }
                             }
                             "ALERT" -> {
                                 val alertObj = json.optJSONObject("alert")
@@ -302,5 +311,76 @@ object TelemetryWebSocketManager {
             speedMph = obj.optDouble("speedMph", 0.0),
             timestamp = obj.optLong("timestamp", 0L)
         )
+    }
+
+    /**
+     * Inspects an incoming WebSocket payload (`member` or `members`) for an immediate Find My Phone
+     * alarm targeting this device, bypassing HTTP polling & sync throttles.
+     * Returns true if the payload contained member state for this device (and was acted upon).
+     */
+    private fun handlePotentialRealtimeAlarm(
+        context: Context,
+        json: JSONObject,
+        myDeviceName: String,
+        myDeviceUUID: String,
+        fetchIfMissing: Boolean
+    ): Boolean {
+        val myCloudId = com.example.data.sync.SyncResolutionHelper.buildMyCloudId(myDeviceName, myDeviceUUID)
+        val candidates = mutableListOf<CloudMember>()
+
+        fun addMemberObj(obj: JSONObject?) {
+            if (obj == null) return
+            val id = obj.optString("id", obj.optString("memberId", ""))
+            val name = obj.optString("name", "")
+            val statusText = obj.optString("statusText", "")
+            val alarmRequestedAt = obj.optLong("alarmRequestedAt", 0L)
+            if (id.isNotBlank() || name.isNotBlank()) {
+                candidates.add(
+                    CloudMember(
+                        id = id,
+                        name = name,
+                        statusText = statusText,
+                        alarmRequestedAt = alarmRequestedAt
+                    )
+                )
+            }
+        }
+
+        addMemberObj(json.optJSONObject("member"))
+        val membersObj = json.optJSONObject("members")
+        if (membersObj != null) {
+            val keys = membersObj.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                addMemberObj(membersObj.optJSONObject(key))
+            }
+        }
+        val membersArr = json.optJSONArray("members")
+        if (membersArr != null) {
+            for (i in 0 until membersArr.length()) {
+                addMemberObj(membersArr.optJSONObject(i))
+            }
+        }
+
+        if (candidates.isEmpty()) return false
+
+        val matchedSelfEntry = candidates.any {
+            com.example.data.sync.SyncResolutionHelper.isMyCloudEntry(it, myCloudId, myDeviceUUID, myDeviceName)
+        }
+        if (!matchedSelfEntry) return false
+
+        val shouldRing = com.example.data.sync.SyncResolutionHelper.shouldTriggerLocalAlarm(
+            members = candidates,
+            myCloudId = myCloudId,
+            myDeviceUuid = myDeviceUUID,
+            myDeviceName = myDeviceName,
+            nowMs = System.currentTimeMillis()
+        )
+        if (shouldRing) {
+            AlarmHelper.triggerAlarm(context.applicationContext)
+        } else if (AlarmHelper.isRinging) {
+            AlarmHelper.stopAlarm()
+        }
+        return true
     }
 }

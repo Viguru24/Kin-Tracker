@@ -363,10 +363,10 @@ router.post('/members/:memberId/toggle-alarm', requireAdmin, async (req, res) =>
         const isCurrentlyAlarm = member.statusText === '🚨 ALARM';
         if (isCurrentlyAlarm) {
             const result = await stopRingMemberPhone(memberId);
-            return res.json({ success: true, isAlarm: false, isRinging: false, member: result.member || member });
+            return res.json({ success: true, isAlarm: false, isRinging: false, pushed: result.pushed, member: result.member || member });
         } else {
-            const result = await ringMemberPhone(memberId, 20000);
-            return res.json({ success: true, isAlarm: true, isRinging: true, member: result.member || member });
+            const result = await ringMemberPhone(memberId, 60000);
+            return res.json({ success: true, isAlarm: true, isRinging: true, pushed: result.pushed, member: result.member || member });
         }
     } catch (err) {
         console.error('[Admin Toggle Alarm Error]', err);
@@ -378,7 +378,7 @@ router.post('/members/:memberId/toggle-alarm', requireAdmin, async (req, res) =>
 router.post('/members/:memberId/ring', requireAdmin, async (req, res) => {
     try {
         const { memberId } = req.params;
-        const durationMs = parseInt(req.body?.durationMs, 10) || 20000;
+        const durationMs = parseInt(req.body?.durationMs, 10) || 60000;
         const result = await ringMemberPhone(memberId, durationMs);
         if (!result.success) {
             return res.status(404).json(result);

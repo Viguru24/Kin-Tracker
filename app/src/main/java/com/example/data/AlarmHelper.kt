@@ -21,6 +21,9 @@ object AlarmHelper {
     private var screenStateReceiver: android.content.BroadcastReceiver? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var vibrator: Vibrator? = null
+    private var audioFocusRequest: android.media.AudioFocusRequest? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var autoStopRunnable: Runnable? = null
 
     private val _isRingingFlow = MutableStateFlow(false)
     val isRingingFlow: StateFlow<Boolean> = _isRingingFlow
@@ -33,26 +36,18 @@ object AlarmHelper {
             appContext = context.applicationContext
             if (isRinging) return
 
-            // Acquire CPU and screen wakeup lock so the alarm triggers immediately when device is locked/asleep
+            // Acquire CPU wake lock so the alarm plays reliably when device is locked/asleep
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
             try {
                 if (wakeLock?.isHeld == true) wakeLock?.release()
                 wakeLock = powerManager.newWakeLock(
-                    android.os.PowerManager.PARTIAL_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK,
                     "KinTracker:AlarmWakeLock"
                 ).apply {
+                    setReferenceCounted(false)
                     acquire(14000)
                 }
-            } catch (_: Exception) {
-                try {
-                    wakeLock = powerManager.newWakeLock(
-                        android.os.PowerManager.PARTIAL_WAKE_LOCK,
-                        "KinTracker:AlarmWakeLock"
-                    ).apply {
-                        acquire(14000)
-                    }
-                } catch (_: Exception) {}
-            }
+            } catch (_: Exception) {}
 
             // Register screen state receiver to stop alarm when power button is pressed (screen toggled)
             if (screenStateReceiver == null) {
@@ -105,6 +100,11 @@ object AlarmHelper {
             }
             if (alarmUri == null) return
 
+            val alarmAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
             val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             try {
                 val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
@@ -113,16 +113,24 @@ object AlarmHelper {
                 volEx.printStackTrace()
             }
 
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val req = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(alarmAttributes)
+                        .build()
+                    audioFocusRequest = req
+                    audioManager.requestAudioFocus(req)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                }
+            } catch (_: Exception) {}
+
             mediaPlayer?.release()
             mediaPlayer = MediaPlayer().apply {
                 setWakeMode(context, android.os.PowerManager.PARTIAL_WAKE_LOCK)
                 setDataSource(context, alarmUri)
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
+                setAudioAttributes(alarmAttributes)
                 isLooping = true
                 prepare()
                 start()
@@ -130,9 +138,10 @@ object AlarmHelper {
             _isRingingFlow.value = true
 
             // Automatically stop after 12 seconds (rings a few times loudly then shuts off)
-            Handler(Looper.getMainLooper()).postDelayed({
-                stopAlarm()
-            }, 12000)
+            autoStopRunnable?.let { mainHandler.removeCallbacks(it) }
+            autoStopRunnable = Runnable { stopAlarm() }.also {
+                mainHandler.postDelayed(it, 12000)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             // Fallback to RingtoneManager if MediaPlayer fails
@@ -140,12 +149,19 @@ object AlarmHelper {
                 val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                     ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
                 val ringtone = RingtoneManager.getRingtone(context, alarmUri)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    ringtone?.audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                }
                 fallbackRingtone = ringtone
                 ringtone?.play()
                 _isRingingFlow.value = true
-                Handler(Looper.getMainLooper()).postDelayed({
-                    stopAlarm()
-                }, 12000)
+                autoStopRunnable?.let { mainHandler.removeCallbacks(it) }
+                autoStopRunnable = Runnable { stopAlarm() }.also {
+                    mainHandler.postDelayed(it, 12000)
+                }
             } catch (ex: Exception) {
                 ex.printStackTrace()
             }
@@ -154,6 +170,21 @@ object AlarmHelper {
 
     fun stopAlarm() {
         _isRingingFlow.value = false
+        autoStopRunnable?.let { mainHandler.removeCallbacks(it) }
+        autoStopRunnable = null
+        try {
+            val ctx = appContext
+            if (ctx != null) {
+                val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+                    audioFocusRequest = null
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager?.abandonAudioFocus(null)
+                }
+            }
+        } catch (_: Exception) {}
         try {
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.stop()

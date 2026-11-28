@@ -101,6 +101,23 @@ class SyncResolutionAndDiagnosticsTest {
                 nowMs = now
             )
         )
+
+        val slightFutureClockSkewMember = CloudMember(
+            id = "device_dad_336a12",
+            name = "Dad",
+            statusText = "At Home",
+            alarmRequestedAt = now + 5_000L
+        )
+        assertTrue(
+            "Slight server clock skew (+5s) on alarmRequestedAt must still trigger alarm",
+            SyncResolutionHelper.shouldTriggerLocalAlarm(
+                members = listOf(slightFutureClockSkewMember),
+                myCloudId = "device_dad_336a12",
+                myDeviceUuid = "336a12",
+                myDeviceName = "Dad",
+                nowMs = now
+            )
+        )
     }
 
     @Test

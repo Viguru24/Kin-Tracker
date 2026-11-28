@@ -448,6 +448,8 @@ object BackgroundSyncProcessor {
             val existingLocalBeforePut = repository.getFamilyMembersOnce()
             for ((k, cloudM) in updatedMembers) {
                 if (k != myCloudId) {
+                    // Never overwrite an active Find My Phone alarm on another family member
+                    if (cloudM.statusText == "🚨 ALARM" || cloudM.alarmRequestedAt > 0L) continue
                     val localM = existingLocalBeforePut.firstOrNull { it.id == k }
                     if (localM != null && localM.lastActive > cloudM.lastActive && localM.x != 0.0 && localM.y != 0.0) {
                         updatedMembers[k] = cloudM.copy(
@@ -699,5 +701,53 @@ object BackgroundSyncProcessor {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    /**
+     * Lightweight, unthrottled alarm check used when a real-time WebSocket update arrives
+     * while the app is backgrounded/locked/stationary so Find My Phone rings within <1s.
+     */
+    suspend fun checkRemoteAlarmNow(context: Context) {
+        val appCtx = context.applicationContext
+        val prefs = appCtx.getSharedPreferences("kintracker_prefs", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("isCloudSyncEnabled", true)) return
+
+        var token = prefs.getString("groupSyncToken", "") ?: ""
+        if (token.isBlank()) {
+            try {
+                val database = AppDatabase.getDatabase(appCtx)
+                val repository = FamilyRepository(database.familyDao())
+                val activeGroup = repository.getActiveGroupPinMappingOnce()
+                if (activeGroup != null && activeGroup.groupToken.isNotBlank()) {
+                    token = activeGroup.groupToken
+                }
+            } catch (_: Exception) {}
+        }
+        if (!SyncResolutionHelper.isValidSyncToken(token)) return
+
+        val myName = prefs.getString("myDeviceName", "Dad") ?: "Dad"
+        val dUuid = prefs.getString("myDeviceUUID", "") ?: ""
+        val myCloudId = SyncResolutionHelper.buildMyCloudId(myName, dUuid)
+
+        try {
+            val response = cloudService.getGroupData(token)
+            if (!response.isSuccessful) return
+            val jsonString = response.body()?.string() ?: return
+            if (jsonString.isBlank() || jsonString == "null" || jsonString == "{}") return
+            val payload = payloadAdapter.fromJson(jsonString) ?: return
+
+            val matchesMe = SyncResolutionHelper.shouldTriggerLocalAlarm(
+                members = payload.members.values,
+                myCloudId = myCloudId,
+                myDeviceUuid = dUuid,
+                myDeviceName = myName,
+                nowMs = System.currentTimeMillis()
+            )
+            if (matchesMe) {
+                AlarmHelper.triggerAlarm(appCtx)
+            } else if (AlarmHelper.isRinging) {
+                AlarmHelper.stopAlarm()
+            }
+        } catch (_: Exception) {}
     }
 }

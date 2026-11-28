@@ -245,7 +245,13 @@ const dbOperations = {
         }
         member.avatarEmoji = cleanAvatarEmoji(member.avatarEmoji, member.name, member.id);
         const existing = db.members[member.id];
-        const isAlarmOrControlUpdate = member.statusText === '🚨 ALARM' || (existing && existing.statusText === '🚨 ALARM') || (existing && member.isLocationPaused !== existing.isLocationPaused);
+        const incomingAlarm = member.statusText === '🚨 ALARM' || Number(member.alarmRequestedAt || 0) > Number(existing?.alarmRequestedAt || 0);
+        const isClearingAlarm = existing &&
+            (existing.statusText === '🚨 ALARM' || Number(existing.alarmRequestedAt || 0) > 0) &&
+            member.statusText !== '🚨 ALARM' &&
+            Number(member.alarmRequestedAt || 0) === 0 &&
+            Number(member.lastActive || 0) >= Number(existing.lastActive || 0);
+        const isAlarmOrControlUpdate = incomingAlarm || isClearingAlarm || (existing && member.isLocationPaused !== existing.isLocationPaused);
         // If an existing record exists with a newer lastActive timestamp, ignore stale snapshot (unless alarm/control status change)
         if (!isAlarmOrControlUpdate && existing && existing.lastActive && member.lastActive && Number(member.lastActive) < Number(existing.lastActive)) {
             return existing;

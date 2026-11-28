@@ -185,8 +185,14 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
     const speed = Number(incoming.speedMph) || 0.0;
     const lat = Number(incoming.y) || 0.0;
     const lng = Number(incoming.x) || 0.0;
+    const alarmReqAt = Number(incoming.alarmRequestedAt || 0);
+    const isAlarmActive = incoming.statusText === '🚨 ALARM' ||
+        (alarmReqAt > 0 && Math.abs(Date.now() - alarmReqAt) < 60000);
 
-    if (!lat || !lng) return out;
+    if (!lat || !lng) {
+        if (isAlarmActive) out.statusText = '🚨 ALARM';
+        return out;
+    }
 
     // 1. Check Home
     if (home && home.lat && home.lng) {
@@ -197,7 +203,7 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
             out.y = home.lat;
             out.speedMph = 0.0;
             out.isLocationPaused = false;
-            out.statusText = 'At Home (Live GPS)';
+            out.statusText = isAlarmActive ? '🚨 ALARM' : 'At Home (Live GPS)';
             out.lastStationaryPlace = 'the house';
             out.lastStationaryLat = home.lat;
             out.lastStationaryLng = home.lng;
@@ -224,7 +230,7 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
             out.x = z.longitude;
             out.y = z.latitude;
             out.speedMph = 0.0;
-            out.statusText = `At ${z.name}`;
+            out.statusText = isAlarmActive ? '🚨 ALARM' : `At ${z.name}`;
             out.lastStationaryPlace = z.name;
             out.lastStationaryLat = z.latitude;
             out.lastStationaryLng = z.longitude;
@@ -285,7 +291,9 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
     out.transitMode = transitMode;
 
     if (transitMode === 'STATIONARY' || (speed < 1.0 && movedM < 25)) {
-        if (!out.statusText || /Live GPS|tracking|away/i.test(out.statusText)) {
+        if (isAlarmActive) {
+            out.statusText = '🚨 ALARM';
+        } else if (!out.statusText || /Live GPS|tracking|away/i.test(out.statusText)) {
             const place = resolveOriginName(effectiveLat, effectiveLng, home, safeZones);
             out.statusText = (place !== 'their location') ? `At ${place}` : 'Stationary';
         }
@@ -316,24 +324,28 @@ function enrichMemberState(token, memberId, incoming, stored, home, safeZones) {
     const isTrain = (transitMode === 'TRAIN');
     const destination = determineDestination(lat, lng, prevLat, prevLng, home, safeZones, isTrain);
 
-    // Build rich status text
-    const speedRound = Math.round(speed);
-    if (isTrain) {
-        out.statusText = destination
-            ? `On a train heading towards ${destination} (${speedRound} mph)`
-            : `On a train (${speedRound} mph)`;
-    } else if (transitMode === 'DRIVING') {
-        out.statusText = destination
-            ? `In a car heading towards ${destination} (${speedRound} mph)`
-            : `Driving (${speedRound} mph)`;
-    } else if (transitMode === 'WALKING') {
-        out.statusText = destination
-            ? `Walking towards ${destination}`
-            : `Walking (${speed.toFixed(1)} mph)`;
-    } else if (transitMode === 'CYCLING') {
-        out.statusText = destination
-            ? `Cycling towards ${destination} (${speedRound} mph)`
-            : `Cycling (${speedRound} mph)`;
+    // Build rich status text (preserve active SOS/ring alarm)
+    if (isAlarmActive) {
+        out.statusText = '🚨 ALARM';
+    } else {
+        const speedRound = Math.round(speed);
+        if (isTrain) {
+            out.statusText = destination
+                ? `On a train heading towards ${destination} (${speedRound} mph)`
+                : `On a train (${speedRound} mph)`;
+        } else if (transitMode === 'DRIVING') {
+            out.statusText = destination
+                ? `In a car heading towards ${destination} (${speedRound} mph)`
+                : `Driving (${speedRound} mph)`;
+        } else if (transitMode === 'WALKING') {
+            out.statusText = destination
+                ? `Walking towards ${destination}`
+                : `Walking (${speed.toFixed(1)} mph)`;
+        } else if (transitMode === 'CYCLING') {
+            out.statusText = destination
+                ? `Cycling towards ${destination} (${speedRound} mph)`
+                : `Cycling (${speedRound} mph)`;
+        }
     }
 
     return out;

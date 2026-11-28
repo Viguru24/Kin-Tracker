@@ -966,12 +966,16 @@
                 const confirmed = window.confirm(`Sound loud alarm on ${targetName}'s phone?\n\nThis will sound a sovereign siren at maximum volume even if their device is set to silent.`);
                 if (!confirmed) return;
                 playDashboardRingChime();
-                await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/ring`, {
+                const res = await apiRequest(`/api/admin/members/${encodeURIComponent(memberId)}/ring`, {
                     method: 'POST',
-                    body: JSON.stringify({ durationMs: 20000 })
+                    body: JSON.stringify({ durationMs: 60000 })
                 });
-                showToast(`🚨 Ringing ${targetName}'s phone at MAX volume!`, 'error');
-                startRingCountdown(memberId, 20);
+                if (res && res.pushed === false) {
+                    showToast(`⚠️ Local alarm set for ${targetName}, but cloud VPS push failed — phone may not ring`, 'error');
+                } else {
+                    showToast(`🚨 Ringing ${targetName}'s phone at MAX volume!`, 'error');
+                }
+                startRingCountdown(memberId, 60);
             }
             await loadCircles(false);
             if (member && el.memberControlModal.open && el.ctrlMemberId.value === member.id) {
